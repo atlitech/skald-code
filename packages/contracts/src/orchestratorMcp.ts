@@ -369,6 +369,8 @@ export const OrchestratorMcpThreadListItem = Schema.Struct({
   pullRequests: Schema.optional(Schema.Array(OrchestratorMcpThreadPullRequest)),
   settled: Schema.Boolean,
   settledAt: Schema.NullOr(IsoDateTime),
+  /** Optional: linked environments on older builds omit it. */
+  settledBy: Schema.optional(Schema.NullOr(Schema.Literals(["self", "parent"]))),
   snoozed: Schema.Boolean,
   snoozedUntil: Schema.NullOr(IsoDateTime),
   parentThreadId: Schema.NullOr(ThreadId),
@@ -449,6 +451,7 @@ export const OrchestratorMcpThreadDetail = Schema.Struct({
   archived: Schema.Boolean,
   settled: Schema.Boolean,
   settledAt: Schema.NullOr(IsoDateTime),
+  settledBy: Schema.optional(Schema.NullOr(Schema.Literals(["self", "parent"]))),
   snoozed: Schema.Boolean,
   snoozedUntil: Schema.NullOr(IsoDateTime),
   createdAt: IsoDateTime,

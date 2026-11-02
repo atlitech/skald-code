@@ -2723,6 +2723,20 @@ describe("OrchestratorMcpService thread list", () => {
     shell("thread:a-snoozed", "project:a", true),
     shell("thread:a-awake", "project:a", false),
     shell("thread:b-snoozed", "project:b", true),
+    {
+      ...shell("thread:c-settled", "project:c", false),
+      settledOverride: "settled" as const,
+      settledAt: DateTime.makeUnsafe("2026-01-01T00:00:00Z"),
+    },
+    {
+      ...shell("thread:c-subagent", "project:c", false),
+      lineage: {
+        rootThreadId: ThreadId.make("thread:c-settled"),
+        parentThreadId: ThreadId.make("thread:c-settled"),
+        relationshipToParent: "subagent" as const,
+      },
+    },
+    shell("thread:c-active", "project:c", false),
   ];
   const service = layerOrchestratorService.pipe(
     Layer.provide(
@@ -2763,6 +2777,26 @@ describe("OrchestratorMcpService thread list", () => {
         [
           ["thread:a-snoozed", "project:a"],
           ["thread:b-snoozed", "project:b"],
+        ],
+      );
+    }).pipe(Effect.provide(service)),
+  );
+
+  it.effect("reads a subagent of a settled thread as settled by its parent", () =>
+    Effect.gen(function* () {
+      const mcp = yield* OrchestratorMcpService.OrchestratorMcpService;
+      const project = { projectId: ProjectId.make("project:c") };
+      const active = yield* mcp.listThreads(client, { ...project, settled: false });
+      assert.deepStrictEqual(
+        active.threads.map((thread) => thread.threadId),
+        ["thread:c-active"],
+      );
+      const settled = yield* mcp.listThreads(client, { ...project, settled: true });
+      assert.deepStrictEqual(
+        settled.threads.map((thread) => [thread.threadId, thread.settledBy, thread.settledAt]),
+        [
+          ["thread:c-settled", "self", "2026-01-01T00:00:00.000Z"],
+          ["thread:c-subagent", "parent", "2026-01-01T00:00:00.000Z"],
         ],
       );
     }).pipe(Effect.provide(service)),

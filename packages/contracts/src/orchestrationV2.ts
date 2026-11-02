@@ -2174,6 +2174,37 @@ export function isOlderSettledThreadShell(
   );
 }
 
+type SettlementThread = Pick<
+  OrchestrationV2ThreadShell,
+  "id" | "lineage" | "settledOverride" | "settledAt"
+>;
+
+/**
+ * A subagent has no row of its own, so it reads as settled when it or any thread up its subagent
+ * chain to the nearest non-subagent ancestor is settled. A missing parent ends the chain.
+ */
+export function threadSettlement<Thread extends SettlementThread>(
+  thread: Thread,
+  findThread: (threadId: ThreadId) => Thread | undefined,
+): { readonly settledBy: "self" | "parent" | null; readonly settledAt: DateTime.Utc | null } {
+  if (thread.settledOverride === "settled")
+    return { settledBy: "self", settledAt: thread.settledAt };
+  const visited = new Set<ThreadId>([thread.id]);
+  let current = thread;
+  while (current.lineage.relationshipToParent === "subagent") {
+    const parentThreadId = current.lineage.parentThreadId;
+    if (parentThreadId === null || visited.has(parentThreadId)) break;
+    visited.add(parentThreadId);
+    const parent = findThread(parentThreadId);
+    if (parent === undefined) break;
+    if (parent.settledOverride === "settled") {
+      return { settledBy: "parent", settledAt: parent.settledAt };
+    }
+    current = parent;
+  }
+  return { settledBy: null, settledAt: null };
+}
+
 export const OrchestrationV2OlderSettledCount = Schema.Struct({
   projectId: ProjectId,
   count: NonNegativeInt,

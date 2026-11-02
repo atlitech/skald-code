@@ -2,7 +2,7 @@ import { describe, expect, it } from "@effect/vitest";
 import * as DateTime from "effect/DateTime";
 import * as Schema from "effect/Schema";
 
-import { NodeId, RunAttemptId, TrimmedNonEmptyString } from "./index.ts";
+import { NodeId, RunAttemptId, ThreadId, TrimmedNonEmptyString } from "./index.ts";
 import {
   latestProviderTurnForAttempt,
   OrchestrationV2ProviderCapabilities,
@@ -15,6 +15,7 @@ import {
   OrchestrationV2ThreadHistoryPage,
   OrchestrationV2TurnItem,
   OrchestrationV2TurnItemJson,
+  threadSettlement,
 } from "./orchestrationV2.ts";
 
 const now = DateTime.makeUnsafe("2026-04-20T00:00:00.000Z");
@@ -637,5 +638,79 @@ describe("latestProviderTurnForAttempt", () => {
     ];
     expect(latestProviderTurnForAttempt(turns, RunAttemptId.make("goal-attempt"))?.id).toBe("last");
     expect(latestProviderTurnForAttempt(turns, null)).toBeUndefined();
+  });
+});
+
+describe("threadSettlement", () => {
+  const thread = (
+    id: string,
+    parent: string | null,
+    relationshipToParent: "fork" | "subagent" | null,
+    settled = false,
+  ) => ({
+    id: ThreadId.make(id),
+    lineage: {
+      rootThreadId: ThreadId.make("root"),
+      parentThreadId: parent === null ? null : ThreadId.make(parent),
+      relationshipToParent,
+    },
+    settledOverride: settled ? ("settled" as const) : null,
+    settledAt: settled ? now : null,
+  });
+
+  it.each([
+    ["its own settle", [thread("child", "root", "subagent", true)], "self"],
+    [
+      "a settled parent",
+      [thread("root", null, null, true), thread("child", "root", "subagent")],
+      "parent",
+    ],
+    [
+      "a settled subagent higher up its chain",
+      [
+        thread("root", null, null),
+        thread("middle", "root", "subagent", true),
+        thread("child", "middle", "subagent"),
+      ],
+      "parent",
+    ],
+    [
+      "a settled row ancestor above a subagent chain",
+      [
+        thread("root", null, null, true),
+        thread("middle", "root", "subagent"),
+        thread("child", "middle", "subagent"),
+      ],
+      "parent",
+    ],
+    [
+      "nothing when its parent is active",
+      [thread("root", null, null), thread("child", "root", "subagent")],
+      null,
+    ],
+    ["nothing when its parent is missing", [thread("child", "root", "subagent")], null],
+    [
+      "nothing from the source of a fork",
+      [thread("root", null, null, true), thread("child", "root", "fork")],
+      null,
+    ],
+    [
+      "nothing from above a fork its subagent chain reaches",
+      [
+        thread("root", null, null, true),
+        thread("fork", "root", "fork"),
+        thread("child", "fork", "subagent"),
+      ],
+      null,
+    ],
+    [
+      "nothing from a cycle",
+      [thread("a", "child", "subagent"), thread("child", "a", "subagent")],
+      null,
+    ],
+  ] as const)("a thread reads as settled by %s", (_label, threads, settledBy) => {
+    const byId = new Map(threads.map((entry) => [entry.id, entry]));
+    const child = byId.get(ThreadId.make("child"))!;
+    expect(threadSettlement(child, (id) => byId.get(id)).settledBy).toBe(settledBy);
   });
 });
