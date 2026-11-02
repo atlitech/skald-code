@@ -117,9 +117,7 @@ function isMcpElicitationPersistenceField(
 }
 
 /** Fields other than approval choices and persistence switches are real input for a form. */
-export function mcpElicitationNeedsForm(
-  payload: EffectCodexSchema.McpServerElicitationRequestParams,
-): boolean {
+export function mcpElicitationNeedsForm(payload: McpElicitationResponseInput): boolean {
   if (payload.mode !== "form") return false;
   return Object.entries(mcpElicitationFormFields(payload)?.properties ?? {}).some(
     ([key, field]) =>
