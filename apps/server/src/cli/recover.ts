@@ -366,7 +366,7 @@ export const runRecover = Effect.fn("cli.recover.run")(function* (input: {
           : undefined;
         return yield* repointLauncher({
           launchedAs,
-          versionsDir: pinnedRuntimeVersionsDir(path, input.baseDir),
+          baseDir: input.baseDir,
           targetEntryPath: runtime.entryPath,
         });
       }).pipe(

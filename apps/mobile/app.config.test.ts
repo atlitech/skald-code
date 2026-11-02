@@ -65,3 +65,20 @@ describe("personal iOS configuration", () => {
     },
   );
 });
+
+it.each(["prod", ""])("rejects APP_VARIANT=%j before selecting production IDs", async (value) => {
+  await expect(config({ APP_VARIANT: value })).rejects.toThrow(
+    "APP_VARIANT must be development, preview, or production.",
+  );
+});
+
+it.each([
+  [undefined, "com.t3tools.t3code"],
+  ["development", "com.t3tools.t3code.dev"],
+  ["preview", "com.t3tools.t3code.preview"],
+  ["production", "com.t3tools.t3code"],
+])("keeps the iOS and Android identifiers for APP_VARIANT=%j", async (value, identifier) => {
+  const result = await config(value === undefined ? {} : { APP_VARIANT: value });
+  expect(result.ios?.bundleIdentifier).toBe(identifier);
+  expect(result.android?.package).toBe(identifier);
+});

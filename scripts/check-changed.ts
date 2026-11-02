@@ -7,7 +7,7 @@
 // A dependency change also gets the unused-patch install check below. CI still
 // runs the full test suites and the jobs listed in the summary.
 //
-//   vp run check:changed                  compare against the merge base with origin/main
+//   vp run check:changed                  compare against the closest merge base with any remote main
 //   vp run check:changed <ref>            compare against the merge base with <ref>
 //   vp run check:changed --concurrency 1  run the steps one at a time
 //
@@ -39,6 +39,7 @@ import { Argument, Command, Flag } from "effect/cli";
 import { ChildProcess, ChildProcessSpawner } from "effect/process";
 
 import { decide, readWorkspace } from "../.github/scripts/ci-changes.cjs";
+import { vitePlusCommand } from "./check-changed-command.ts";
 
 const GiB = 1024 ** 3;
 
@@ -138,13 +139,53 @@ export const git = Effect.fn("checkChanged.git")(function* (
     }),
   );
 });
+const gitLines = (cwd: string, args: ReadonlyArray<string>) =>
+  git(cwd, args).pipe(Effect.map((stdout) => stdout.toString().split("\n").filter(Boolean)));
 export const gitPaths = (cwd: string, [command, ...args]: readonly [string, ...string[]]) =>
   git(cwd, [command, "-z", ...args]).pipe(
     Effect.map((stdout) => stdout.toString().split("\0").filter(Boolean)),
   );
 
+export const comparisonBase = Effect.fn("checkChanged.comparisonBase")(function* (
+  root: string,
+  explicitRef: Option.Option<string>,
+) {
+  const candidates = Option.isSome(explicitRef)
+    ? [{ ref: explicitRef.value, rev: explicitRef.value }]
+    : (yield* gitLines(root, ["remote"])).map((name) => ({
+        ref: name + "/main",
+        rev: "refs/remotes/" + name + "/main",
+      }));
+  let closest: { ref: string; base: string; ahead: number } | undefined;
+  for (const { ref, rev } of candidates) {
+    const base = yield* git(root, ["merge-base", "HEAD", rev]).pipe(
+      Effect.map((stdout) => stdout.toString().trim()),
+      Effect.orElseSucceed(() => undefined),
+    );
+    if (!base) continue;
+    const ahead = Number((yield* git(root, ["rev-list", "--count", base + "..HEAD"])).toString());
+    if (!closest || ahead < closest.ahead) closest = { ref, base, ahead };
+  }
+  if (!closest) {
+    const tried = candidates.map(({ ref }) => ref).join(", ") || "a remote main";
+    return yield* Effect.fail(
+      "check:changed: no merge base with " + tried + ". Run git fetch or pass a ref.",
+    );
+  }
+  return closest;
+});
+
 const CODE = /\.[cm]?[jt]sx?$/;
 const TEST = /\.test\.[cm]?[jt]sx?$/;
+// CI runs the .github/scripts tests with `node --test`; vitest passes a failing node:test file.
+const NODE_TEST = /^\.github[/\\]scripts[/\\]/;
+export const splitTests = (tests: Iterable<string>) => {
+  const all = [...tests];
+  return {
+    vitestTests: all.filter((file) => !NODE_TEST.test(file)),
+    nodeTests: all.filter((file) => NODE_TEST.test(file)),
+  };
+};
 const escapeRegExp = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
 // A flag wins over its environment variable; either must be a positive integer.
@@ -162,8 +203,14 @@ const override = Effect.fn("checkChanged.override")(function* (
   return value;
 });
 
+// Tests that read a doc; a changed doc has no test beside it to select them.
+export const docReaderTests = (files: ReadonlyArray<string>) =>
+  files.includes("docs/user/t3-connect-troubleshooting.md")
+    ? ["apps/server/src/cloud/ConnectReachability.test.ts"]
+    : [];
+
 const checkChanged = Effect.fn("checkChanged")(function* (input: {
-  readonly ref: string;
+  readonly ref: Option.Option<string>;
   readonly concurrency: Option.Option<number>;
   readonly timeout: Option.Option<number>;
 }) {
@@ -191,23 +238,17 @@ const checkChanged = Effect.fn("checkChanged")(function* (input: {
 
   const paths = (...args: [string, ...string[]]) => gitPaths(root, args);
 
-  const base = yield* git(root, ["merge-base", "HEAD", input.ref]).pipe(
-    Effect.map((stdout) => stdout.toString().trim()),
-    Effect.mapError(
-      () =>
-        `check:changed: no merge base with ${input.ref}. Run \`git fetch origin\` or pass a ref.`,
-    ),
-  );
+  const { ref, base } = yield* comparisonBase(root, input.ref);
   // --no-renames lists a rename as its old and new path, as CI does.
   const changedFiles = paths("diff", "--name-only", "--no-renames", base, "--");
   const untrackedFiles = paths("ls-files", "--others", "--exclude-standard");
   const files = [...new Set([...(yield* changedFiles), ...(yield* untrackedFiles)])].sort();
 
   if (files.length === 0) {
-    yield* Console.log(`check:changed: no changes since ${base.slice(0, 12)}.`);
+    yield* Console.log(`check:changed: no changes since ${base.slice(0, 12)} (${ref}).`);
     return true;
   }
-  yield* Console.log(`check:changed: ${files.length} files since ${base.slice(0, 12)}`);
+  yield* Console.log(`check:changed: ${files.length} files since ${base.slice(0, 12)} (${ref})`);
 
   // Ignored generated sources, declarations, env files, and install state affect check results.
   // Include them in the key, but skip large ignored folders that no check reads.
@@ -287,8 +328,10 @@ const checkChanged = Effect.fn("checkChanged")(function* (input: {
       if (entry.startsWith(prefix) && TEST.test(entry)) tests.add(path.join(dir, entry));
     }
   }
+  for (const test of docReaderTests(files)) tests.add(test);
   // It reads files other than the ones beside it, so no changed file selects it.
   if (affected.includes("t3")) tests.add("apps/server/src/provider/AgentContextBudget.test.ts");
+  const { vitestTests, nodeTests } = splitTests(tests);
 
   // React Compiler coverage compiles every client source file, so run only the
   // changed files' cases, in one extra step: a -t filter in the main test step
@@ -322,9 +365,6 @@ const checkChanged = Effect.fn("checkChanged")(function* (input: {
     const pattern = [...names, ...always];
     return pattern.length > 0 ? [{ test, names, pattern }] : [];
   });
-
-  const nodeTests = [...tests].filter((file) => file.endsWith(".test.cjs"));
-  const vitestTests = [...tests].filter((file) => !file.endsWith(".test.cjs"));
 
   // knip:check cannot be scoped to a package. Any code change can leave a file,
   // export, or dependency unused (removing the last import of a helper does), so
@@ -364,8 +404,14 @@ const checkChanged = Effect.fn("checkChanged")(function* (input: {
   const vp = (args: ReadonlyArray<string>, cwd = root) =>
     Effect.scoped(
       Effect.gen(function* () {
+        const [command, commandArgs] = vitePlusCommand(args, platform);
         const handle = yield* spawner.spawn(
-          ChildProcess.make("vp", args, { cwd, env, extendEnv: true, forceKillAfter: "5 seconds" }),
+          ChildProcess.make(command, commandArgs, {
+            cwd,
+            env,
+            extendEnv: true,
+            forceKillAfter: "5 seconds",
+          }),
         );
         const [output, exitCode] = yield* Effect.all(
           [Stream.mkString(Stream.decodeText(handle.all)), handle.exitCode],
@@ -466,7 +512,14 @@ const checkChanged = Effect.fn("checkChanged")(function* (input: {
         ]
       : []),
     ...(nodeTests.length > 0
-      ? [command(`node test (${nodeTests.length} files)`, ["exec", "node", "--test", ...nodeTests])]
+      ? [
+          command(`node --test (${nodeTests.length} files)`, [
+            "exec",
+            "node",
+            "--test",
+            ...nodeTests,
+          ]),
+        ]
       : []),
     ...(compilerApps.length > 0
       ? [
@@ -528,7 +581,7 @@ export const checkChangedCommand = Command.make(
   {
     ref: Argument.String("ref").pipe(
       Argument.withDescription("Compare against the merge base with this ref."),
-      Argument.withDefault("origin/main"),
+      Argument.optional,
     ),
     concurrency: Flag.Int("concurrency").pipe(
       Flag.withDescription(
