@@ -46,6 +46,8 @@ describe("Claude MCP approval-only forms", () => {
       "allow_once",
       "acceptOnce",
       "Approve once",
+      "allow_this_time",
+      "allow_once_only",
     ]) {
       for (const choices of [
         { enum: ["always", value, "decline"] },

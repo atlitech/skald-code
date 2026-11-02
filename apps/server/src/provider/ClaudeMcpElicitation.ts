@@ -48,7 +48,8 @@ const decodePersistenceField = Schema.decodeUnknownOption(PersistenceField, {
 const isField = Schema.is(Schema.Record(Schema.String, Schema.Unknown));
 
 // Match complete wire values, never substrings such as "disallow" or "approve_always".
-const onceChoice = /^(?:once|(?:allow|accept|approve)(?:[ _-]?once)?)$/i;
+const onceChoice =
+  /^(?:once|accept|approve|allow)(?:[_\s-]*(?:once(?:[_\s-]*only)?|this[_\s-]*time))?$/i;
 const persistenceKey =
   /^(?:always|persist|persistent|remember|always[ _-]?allow|remember[ _-]?(?:choice|decision)|allow[ _-]?always)$/i;
 

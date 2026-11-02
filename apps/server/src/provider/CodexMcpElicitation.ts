@@ -56,7 +56,8 @@ const isMcpElicitationMetadata = Schema.is(McpElicitationMetadata);
 const isMcpElicitationForm = Schema.is(McpElicitationForm);
 
 // Match complete wire values, never substrings such as "disallow".
-const acceptChoice = /^(?:once|(?:allow|accept|approve)(?:[ _-]?once)?)$/i;
+const acceptChoice =
+  /^(?:once|accept|approve|allow)(?:[_\s-]*(?:once(?:[_\s-]*only)?|this[_\s-]*time))?$/i;
 
 type McpElicitationPersistenceDecision = Extract<
   ProviderApprovalDecision,
@@ -79,7 +80,14 @@ function mcpElicitationPersistenceDecision(
   return null;
 }
 
-function mcpElicitationFormFields(payload: EffectCodexSchema.McpServerElicitationRequestParams) {
+// Claude hands over the same MCP request with its own envelope; these are the
+// only fields the response is built from.
+type McpElicitationResponseInput = {
+  readonly mode: string;
+  readonly requestedSchema?: unknown;
+};
+
+function mcpElicitationFormFields(payload: McpElicitationResponseInput) {
   if (payload.mode === "url" || !isMcpElicitationForm(payload.requestedSchema)) {
     return undefined;
   }
@@ -116,7 +124,7 @@ export function mcpElicitationNeedsForm(
   return Object.entries(mcpElicitationFormFields(payload)?.properties ?? {}).some(
     ([key, field]) =>
       // Persistence values alone, such as ["always", "never"], are ordinary choices.
-      !mcpElicitationFieldOptions(field).some((option) => acceptChoice.test(option.value)) &&
+      !mcpElicitationFieldOptions(field).some((option) => acceptChoice.test(option.value.trim())) &&
       !(field.type === "boolean" && isMcpElicitationPersistenceField(key, field)),
   );
 }
@@ -187,7 +195,7 @@ export function describeMcpElicitation(
 }
 
 export function toMcpElicitationResponse(
-  payload: EffectCodexSchema.McpServerElicitationRequestParams,
+  payload: McpElicitationResponseInput,
   decision: ProviderApprovalDecision,
 ): EffectCodexSchema.McpServerElicitationRequestResponse {
   if (decision === "decline" || decision === "cancel") {
@@ -212,7 +220,7 @@ export function toMcpElicitationResponse(
     const chosenOption = options.find((option) =>
       persist
         ? mcpElicitationPersistenceDecision(option.value) === decision
-        : acceptChoice.test(option.value),
+        : acceptChoice.test(option.value.trim()),
     );
     if (chosenOption) {
       content[key] = chosenOption.value;
