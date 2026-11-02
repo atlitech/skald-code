@@ -549,33 +549,33 @@ describe("presentPendingBackgroundWork", () => {
       ])?.title,
     ).toBe("Waiting · Review src/math.ts");
     expect(presentPendingBackgroundWork([{ taskId: "a", kind: "monitor" }])?.title).toBe(
-      "Waiting on a monitor",
+      "Running a monitor",
     );
     expect(presentPendingBackgroundWork([])).toBeNull();
   });
 
-  it("waits for tracked commands after the root turn ends", () => {
+  it("waits only on commands and monitors the agent awaits", () => {
     expect(
       presentPendingBackgroundWork([
-        { taskId: "dev", kind: "command", description: "Run the build" },
+        { taskId: "dev", kind: "command", description: "Run the build", awaited: true },
       ]),
     ).toMatchObject({ title: "Waiting · Run the build", waiting: true });
     expect(presentPendingBackgroundWork([{ taskId: "a", kind: "command" }])).toMatchObject({
-      title: "Waiting on a command",
-      waiting: true,
+      title: "Running a command",
+      waiting: false,
     });
+    expect(
+      presentPendingBackgroundWork([
+        { taskId: "a", kind: "command", description: "vp run build" },
+        { taskId: "b", kind: "monitor", description: "Watch PR checks", awaited: true },
+      ]),
+    ).toMatchObject({ title: "Waiting on 1 command and 1 monitor", waiting: true });
     expect(
       presentPendingBackgroundWork([
         { taskId: "a", kind: "command", description: "vp run build" },
         { taskId: "b", kind: "command", description: "vp test run" },
       ]),
-    ).toMatchObject({ title: "Waiting on 2 commands", waiting: true });
-    expect(
-      presentPendingBackgroundWork([
-        { taskId: "a", kind: "command", description: "vp run build" },
-        { taskId: "b", kind: "monitor", description: "Watch PR checks" },
-      ]),
-    ).toMatchObject({ title: "Waiting on 1 command and 1 monitor", waiting: true });
+    ).toMatchObject({ title: "Running 2 commands", waiting: false });
   });
 
   it("groups work by kind, subagents first, and keeps each name", () => {

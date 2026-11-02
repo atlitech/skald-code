@@ -86,11 +86,25 @@ export function deriveBlockedOnThreadWait(input: {
   return hasWait;
 }
 
-/** Tracked commands can resume the agent, so this fork holds completion until the roster clears. */
 export function backgroundWorkHoldsCompletion(
   tasks: ReadonlyArray<Pick<PendingBackgroundWorkTask, "kind" | "awaited">>,
 ): boolean {
-  return tasks.length > 0;
+  return tasks.some(
+    (task) => task.awaited === true || backgroundWorkKindHoldsCompletion(task.kind),
+  );
+}
+
+// Commands and monitors are as often a dev server or its watchdog as a wait, so they hold
+// only when the agent marks them awaited.
+function backgroundWorkKindHoldsCompletion(kind: PendingBackgroundWorkTask["kind"]): boolean {
+  switch (kind) {
+    case "command":
+    case "monitor":
+      return false;
+    case "subagent":
+    case "background_task":
+      return true;
+  }
 }
 
 type PendingBackgroundWorkRun = Pick<OrchestrationV2Run, "id" | "ordinal" | "status">;
