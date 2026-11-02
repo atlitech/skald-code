@@ -62,11 +62,12 @@ describe("fork CI workflow", () => {
     );
   });
 
-  it("runs every fork CI job on a GitHub-hosted Ubuntu runner", () => {
+  it("runs every fork CI job on an Ubuntu runner", () => {
     for (const text of [workflow, fullSuite]) {
       const found = runners(text);
       expect(found.length).toBeGreaterThan(0);
-      for (const runner of found) expect(runner).toMatch(/^ubuntu-\d{2}\.\d{2}$/);
+      for (const runner of found)
+        expect(runner).toMatch(/^(ubuntu-\d{2}\.\d{2}|blacksmith-\d+vcpu-ubuntu-\d{4})$/);
     }
   });
 });
