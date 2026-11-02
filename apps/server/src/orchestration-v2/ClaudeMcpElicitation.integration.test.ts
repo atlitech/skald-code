@@ -159,7 +159,7 @@ it.effect.each([
         assert.equal(item.prompt, "Allow this app to access your files?");
         assert.deepEqual(
           item.options?.map((option) => option.decision),
-          ["accept", "decline", "cancel"],
+          ["cancel", "decline", "accept"],
         );
 
         const settled = yield* watch(
