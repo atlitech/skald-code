@@ -60,9 +60,10 @@ and restart `<n>` at 1.
   Google sign-in.
 
 - Enable the [Blacksmith GitHub integration](https://docs.blacksmith.sh/introduction/quickstart)
-  for `atlitech/t3code` before dispatching a release. The Android job requests
-  `blacksmith-8vcpu-ubuntu-2404`; Blacksmith provisions the runner, so no custom
-  GitHub-hosted runner is needed. Without repository access, the job stays queued.
+  for `atlitech/t3code` before dispatching a release. The Android job and the
+  full test suite request `blacksmith-8vcpu-ubuntu-2404`, as upstream's tests do;
+  upstream's browser tests time out on a standard GitHub runner. Blacksmith
+  provisions the runner, so no custom GitHub-hosted runner is needed. Without repository access, the job stays queued.
   Gradle caches are saved from `atli`; the first build populates them for
   subsequent releases.
 
