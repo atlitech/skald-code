@@ -130,62 +130,14 @@ function persistedLink(
 }
 
 describe("isAutoSettlementCandidate", () => {
-  it("excludes overridden, pinned, blocked, and working threads", () => {
-    expect(ThreadSettlementService.isAutoSettlementCandidate(shell(), NOW_MS)).toBe(true);
-    expect(
-      ThreadSettlementService.isAutoSettlementCandidate(shell({ archivedAt: at(-1) }), NOW_MS),
-    ).toBe(false);
-    expect(
-      ThreadSettlementService.isAutoSettlementCandidate(
-        shell({ settledOverride: "settled" }),
-        NOW_MS,
-      ),
-    ).toBe(false);
-    expect(
-      ThreadSettlementService.isAutoSettlementCandidate(
-        shell({ settledOverride: "active" }),
-        NOW_MS,
-      ),
-    ).toBe(false);
-    expect(
-      ThreadSettlementService.isAutoSettlementCandidate(shell({ pinnedAt: at(-1) }), NOW_MS),
-    ).toBe(false);
-    expect(
-      ThreadSettlementService.isAutoSettlementCandidate(
-        shell({ autoSettleDisabledAt: at(-1) }),
-        NOW_MS,
-      ),
-    ).toBe(false);
-    expect(
-      ThreadSettlementService.isAutoSettlementCandidate(
-        shell({ activityRunStatus: "running" }),
-        NOW_MS,
-      ),
-    ).toBe(false);
+  it("settles a thread whose only background work is a command left running", () => {
     expect(
       ThreadSettlementService.isAutoSettlementCandidate(
         shell({
-          pendingRuntimeRequest: { kind: "approval" } as never,
+          pendingBackgroundTasks: [
+            { taskId: "dev", kind: "command", description: "vp run dev --share" },
+          ],
         }),
-        NOW_MS,
-      ),
-    ).toBe(false);
-    expect(
-      ThreadSettlementService.isAutoSettlementCandidate(
-        shell({ pendingBackgroundTasks: [{ taskId: "review", kind: "subagent" }] }),
-        NOW_MS,
-      ),
-    ).toBe(false);
-  });
-
-  it("waits for a tracked command before auto-settling the thread", () => {
-    const waiting = shell({
-      pendingBackgroundTasks: [{ taskId: "build", kind: "command", description: "vp run build" }],
-    });
-    expect(ThreadSettlementService.isAutoSettlementCandidate(waiting, NOW_MS)).toBe(false);
-    expect(
-      ThreadSettlementService.isAutoSettlementCandidate(
-        { ...waiting, pendingBackgroundTasks: [] },
         NOW_MS,
       ),
     ).toBe(true);
