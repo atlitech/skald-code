@@ -62,6 +62,7 @@ import {
   type ServerProviderModel,
   ThreadId,
   isOrchestrationV2WorkActive,
+  threadSettlement,
 } from "@t3tools/contracts";
 import { getProviderOptionCurrentValue } from "@t3tools/shared/model";
 import { runRanAfter } from "@t3tools/shared/orchestrationV2ThreadError";
@@ -716,13 +717,15 @@ function threadTitle(input: {
   return detail.length > 80 ? `${detail.slice(0, 77)}...` : detail;
 }
 
-function threadSettlement(
-  thread: Pick<OrchestrationV2ThreadShell, "settledOverride" | "settledAt">,
-): Pick<OrchestratorMcpThreadListItem, "settled" | "settledAt"> {
-  const settled = thread.settledOverride === "settled";
+function mcpThreadSettlement(
+  thread: OrchestrationV2ThreadShell,
+  findThread: (threadId: ThreadId) => OrchestrationV2ThreadShell | undefined,
+): Pick<OrchestratorMcpThreadListItem, "settled" | "settledAt" | "settledBy"> {
+  const { settledBy, settledAt } = threadSettlement(thread, findThread);
   return {
-    settled,
-    settledAt: settled && thread.settledAt !== null ? DateTime.formatIso(thread.settledAt) : null,
+    settled: settledBy !== null,
+    settledAt: settledAt === null ? null : DateTime.formatIso(settledAt),
+    settledBy,
   };
 }
 
@@ -754,6 +757,7 @@ function threadPullRequests(
 function listItemFromShell(
   scope: McpInvocationScope,
   shell: OrchestrationV2ThreadShell,
+  findThread: (threadId: ThreadId) => OrchestrationV2ThreadShell | undefined,
   nowMs: number,
 ): OrchestratorMcpThreadListItem {
   return {
@@ -771,7 +775,7 @@ function listItemFromShell(
     interactionMode: shell.interactionMode,
     linkedPullRequest: shell.linkedPullRequest ?? null,
     pullRequests: threadPullRequests(shell.pullRequests),
-    ...threadSettlement(shell),
+    ...mcpThreadSettlement(shell, findThread),
     ...threadSnooze(shell, nowMs),
     parentThreadId: shell.lineage.parentThreadId,
     relationshipToParent: shell.lineage.relationshipToParent,
@@ -786,6 +790,7 @@ function threadDetail(
   projection: Pick<OrchestrationV2ThreadProjection, "thread" | "runs" | "runtimeRequests">,
   itemCount: number,
   shell: OrchestrationV2ThreadShell,
+  findThread: (threadId: ThreadId) => OrchestrationV2ThreadShell | undefined,
   nowMs: number,
 ): OrchestratorMcpThreadDetail {
   const latest = ThreadManagementService.latestRun(projection);
@@ -824,7 +829,7 @@ function threadDetail(
       (request) => request.status === "pending",
     ).length,
     archived: projection.thread.archivedAt !== null,
-    ...threadSettlement(projection.thread),
+    ...mcpThreadSettlement(shell, findThread),
     ...threadSnooze(shell, nowMs),
     createdAt: DateTime.formatIso(projection.thread.createdAt),
     updatedAt: DateTime.formatIso(projection.thread.updatedAt),
@@ -1210,6 +1215,29 @@ const make = Effect.gen(function* () {
       .pipe(Effect.mapError(threadManagementFailure));
     return { parent, target, shell } as const;
   });
+
+  // Archived parents do not count, matching `listThreads`, which lists only active threads.
+  const loadSettlementAncestors = Effect.fn("OrchestratorMcpService.loadSettlementAncestors")(
+    function* (shell: OrchestrationV2ThreadShell) {
+      const ancestors = new Map<ThreadId, OrchestrationV2ThreadShell>();
+      let current = shell;
+      while (
+        current.lineage.relationshipToParent === "subagent" &&
+        current.settledOverride !== "settled"
+      ) {
+        const parentThreadId = current.lineage.parentThreadId;
+        if (parentThreadId === null || parentThreadId === shell.id || ancestors.has(parentThreadId))
+          break;
+        const parent = yield* threadManagement
+          .getThreadShell(parentThreadId)
+          .pipe(Effect.mapError(threadManagementFailure));
+        if (parent === null || parent.deletedAt !== null || parent.archivedAt !== null) break;
+        ancestors.set(parentThreadId, parent);
+        current = parent;
+      }
+      return (threadId: ThreadId) => ancestors.get(threadId);
+    },
+  );
 
   const loadProviders = providerRegistry.getProviders;
 
@@ -2782,6 +2810,8 @@ const make = Effect.gen(function* () {
           ),
         );
       const nowMs = yield* Clock.currentTimeMillis;
+      const threadsById = new Map(projectThreads.map((thread) => [thread.id, thread]));
+      const findThread = (threadId: ThreadId) => threadsById.get(threadId);
       const statuses = input.statuses === undefined ? null : new Set(input.statuses);
       const titleContains = input.titleContains?.toLocaleLowerCase();
       const filtered = projectThreads
@@ -2790,7 +2820,8 @@ const make = Effect.gen(function* () {
         )
         .filter(
           (thread) =>
-            input.settled === undefined || threadSettlement(thread).settled === input.settled,
+            input.settled === undefined ||
+            mcpThreadSettlement(thread, findThread).settled === input.settled,
         )
         .filter(
           (thread) => input.snoozed === undefined || isSnoozed(thread, nowMs) === input.snoozed,
@@ -2806,7 +2837,7 @@ const make = Effect.gen(function* () {
       return {
         projectId,
         currentThreadId: parent?.thread.id ?? null,
-        threads: page.map((shell) => listItemFromShell(scope, shell, nowMs)),
+        threads: page.map((shell) => listItemFromShell(scope, shell, findThread, nowMs)),
         nextCursor,
         total: filtered.length,
       } satisfies OrchestratorMcpThreadListResult;
@@ -2891,6 +2922,7 @@ const make = Effect.gen(function* () {
           target,
           timeline.totalItems,
           shell,
+          yield* loadSettlementAncestors(shell),
           yield* Clock.currentTimeMillis,
         ),
         recentRuns: target.runs
