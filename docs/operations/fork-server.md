@@ -324,6 +324,11 @@ The APK's versionCode is derived from the release version, so each release
 installs over the one before it, and Android refuses to install an older
 release over a newer one.
 
+Earlier releases shipped the app as `com.elvis.t3code` (T3 Code Personal).
+Android treats a new application ID as a different app, so the first
+`tech.atli.skaldcode` APK installs beside it with empty data, even with the
+same key and `install -r`. Sign in and pair it, then uninstall the old app.
+
 ### Building it locally
 
 When a release cannot be used, use the `develop-t3-personal-android` skill. Its
