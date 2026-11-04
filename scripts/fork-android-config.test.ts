@@ -24,7 +24,7 @@ const resolved = (): Record<string, any> =>
 it("reads nested values and stops where the path breaks", () => {
   const config = resolved();
   assert.strictEqual(readPath(config, ["extra", "relay", "url"]), "https://relay.example.test");
-  assert.strictEqual(readPath(config, ["android", "package"]), "com.elvis.t3code");
+  assert.strictEqual(readPath(config, ["android", "package"]), "tech.atli.skaldcode");
   assert.isUndefined(readPath(config, ["extra", "relay", "url", "host"]));
   assert.isUndefined(readPath(config, ["missing", "path"]));
 });
@@ -35,7 +35,7 @@ it.effect("accepts the resolved personal config without the optional Google valu
     assert.isUndefined(config.extra.EXPO_PUBLIC_CLERK_GOOGLE_ANDROID_CLIENT_ID);
     assert.isUndefined(config.android.googleServicesFile);
     assert.deepStrictEqual(yield* checkAndroidConfig(config), {
-      androidPackage: "com.elvis.t3code",
+      androidPackage: "tech.atli.skaldcode",
       googleSignIn: false,
       googleServices: false,
     });
@@ -48,7 +48,7 @@ it.effect("accepts it with native Google sign-in and google-services.json", () =
     config.extra.EXPO_PUBLIC_CLERK_GOOGLE_ANDROID_CLIENT_ID = "example.apps.googleusercontent.com";
     config.android.googleServicesFile = "/runner/temp/google-services.json";
     assert.deepStrictEqual(yield* checkAndroidConfig(config), {
-      androidPackage: "com.elvis.t3code",
+      androidPackage: "tech.atli.skaldcode",
       googleSignIn: true,
       googleServices: true,
     });

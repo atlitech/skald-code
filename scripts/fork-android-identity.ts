@@ -12,7 +12,7 @@ import { Command, Flag } from "effect/cli";
 
 import { androidVersionCode } from "./lib/android-version-code.ts";
 
-export const PERSONAL_ANDROID_PACKAGE = "com.elvis.t3code";
+export const PERSONAL_ANDROID_PACKAGE = "tech.atli.skaldcode";
 
 // The skill sits at a fixed place relative to this script in the repository.
 const DEFAULT_SKILL = `${import.meta.dirname}/../.agents/skills/develop-t3-personal-android/SKILL.md`;

@@ -44,6 +44,54 @@ describe("personal iOS configuration", () => {
     expect(plugins).toContain("./plugins/withoutIosPersonalTeamCapabilities.cjs");
   });
 
+  it("signs the personal variant with the fork's paid team and keeps team capabilities", async () => {
+    const result = await config({ APP_VARIANT: "personal" });
+    expect(result.ios?.appleTeamId).toBe("H6L3F33KRM");
+    expect(result.updates?.enabled).toBe(false);
+    expect(result.extra?.eas).toBeUndefined();
+    const plugins = result.plugins?.map((plugin) =>
+      typeof plugin === "string" ? plugin : plugin[0],
+    );
+    expect(plugins).toContain("expo-widgets");
+    expect(plugins?.[0]).toBe("./plugins/withPersonalIosSigningTeam.cjs");
+    expect(plugins).not.toContain("./plugins/withoutIosPersonalTeamCapabilities.cjs");
+    const clerk = result.plugins?.find((plugin) => plugin[0] === "@clerk/expo");
+    expect(clerk?.[1]).toMatchObject({ appleSignIn: false });
+  });
+
+  it.each([
+    [undefined, 1],
+    ["0.1.7-atli.1", 1007003],
+  ])("gives personal release %j one build code on iOS and Android", async (version, code) => {
+    const result = await config({
+      APP_VARIANT: "personal",
+      ...(version ? { T3CODE_RELEASE_VERSION: version } : {}),
+    });
+    expect(result.ios?.buildNumber).toBe(String(code));
+    expect(result.android?.versionCode).toBe(code);
+  });
+
+  it("hands the TestFlight job's App Store profiles to the signing plugin", async () => {
+    const profiles = { "tech.atli.skaldcode": "Skald Code App Store" };
+    const result = await config({
+      APP_VARIANT: "personal",
+      T3CODE_IOS_PROVISIONING_PROFILES: JSON.stringify(profiles),
+    });
+    expect(result.plugins?.[0]).toEqual([
+      "./plugins/withPersonalIosSigningTeam.cjs",
+      { provisioningProfiles: profiles },
+    ]);
+  });
+
+  it.each(['["Skald Code App Store"]', '{"tech.atli.skaldcode": 1}'])(
+    "rejects provisioning profiles %s",
+    async (value) => {
+      await expect(
+        config({ APP_VARIANT: "personal", T3CODE_IOS_PROVISIONING_PROFILES: value }),
+      ).rejects.toThrow("T3CODE_IOS_PROVISIONING_PROFILES");
+    },
+  );
+
   it("preserves the official production identity and update service", async () => {
     const result = await config({ APP_VARIANT: "production" });
     expect(result.ios?.bundleIdentifier).toBe("com.t3tools.t3code");
@@ -75,6 +123,7 @@ it.each(["prod", ""])("rejects APP_VARIANT=%j before selecting production IDs", 
 it.each([
   [undefined, "com.t3tools.t3code"],
   ["development", "com.t3tools.t3code.dev"],
+  ["personal", "tech.atli.skaldcode"],
   ["preview", "com.t3tools.t3code.preview"],
   ["production", "com.t3tools.t3code"],
 ])("keeps the iOS and Android identifiers for APP_VARIANT=%j", async (value, identifier) => {

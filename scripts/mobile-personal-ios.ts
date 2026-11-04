@@ -7,13 +7,19 @@ import * as NodeURL from "node:url";
 import * as NodeUtil from "node:util";
 import { loadRepoEnv } from "./lib/public-config.ts";
 
-const help = `Build and install T3 Code Personal on your iPhone (macOS only).
+const help = `Build and install Skald Code (or T3 Code Personal) on your iPhone (macOS only).
 
+  vp run ios:personal
   vp run ios:personal --bundle-id com.yourname.t3code
-  vp run ios:personal --bundle-id com.yourname.t3code --prepare-only
+  vp run ios:personal --prepare-only
+
+Without --bundle-id, this builds Skald Code (tech.atli.skaldcode), signed by
+the fork's paid Apple team from apps/mobile/app.config.ts, with widgets, the
+share extension and push enabled. Development signing lasts a year.
 
 Options:
-  --bundle-id <id>    Unique app identifier. Keep it unchanged when reinstalling.
+  --bundle-id <id>    Sign with a free Personal Team instead, under this unique
+                     app identifier. Keep it unchanged when reinstalling.
                      Also reads T3CODE_IOS_PERSONAL_TEAM_BUNDLE_ID from root .env.local.
   --device <id/name>  Select an iPhone; otherwise Expo prompts for a device.
   --prepare-only     Generate the Xcode workspace and install Pods without a phone.
@@ -48,12 +54,13 @@ function main() {
 
   const repoEnv = loadRepoEnv();
   const bundleId = (values["bundle-id"] ?? repoEnv.T3CODE_IOS_PERSONAL_TEAM_BUNDLE_ID)?.trim();
-  if (!bundleId || !/^[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+$/.test(bundleId)) {
+  const freeTeam = Boolean(bundleId);
+  if (bundleId && !/^[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+$/.test(bundleId)) {
     throw new Error(
       "Pass --bundle-id with a unique reverse-DNS identifier, e.g. com.yourname.t3code.",
     );
   }
-  if (bundleId.startsWith("com.t3tools.")) {
+  if (bundleId?.startsWith("com.t3tools.")) {
     throw new Error(
       "Choose your own bundle identifier instead of the official com.t3tools namespace.",
     );
@@ -65,16 +72,16 @@ function main() {
   if (!NodeFS.existsSync(expo)) {
     throw new Error("Dependencies are missing. Run `vp i` from the repository root first.");
   }
-  const env = {
-    ...repoEnv,
-    APP_VARIANT: "development",
+  // Written to ios/.xcode.env too, so Xcode launched from Finder bundles the same manifest.
+  const buildEnv = {
+    APP_VARIANT: freeTeam ? "development" : "personal",
     MOBILE_VERSION_POLICY: "appVersion",
-    T3CODE_IOS_PERSONAL_TEAM: "1",
-    T3CODE_IOS_PERSONAL_TEAM_BUNDLE_ID: bundleId,
+    T3CODE_IOS_PERSONAL_TEAM: freeTeam ? "1" : "0",
+    T3CODE_IOS_PERSONAL_TEAM_BUNDLE_ID: bundleId ?? "",
     T3CODE_MOBILE_UPDATES_ENABLED: "0",
     EXPO_NO_DOTENV: "1",
-    EXPO_NO_GIT_STATUS: "1",
   };
+  const env = { ...repoEnv, ...buildEnv, EXPO_NO_GIT_STATUS: "1" };
 
   function run(command: string, args: string[], hint: string, capture = false) {
     const result = NodeChildProcess.spawnSync(command, args, {
@@ -112,13 +119,13 @@ function main() {
     );
     if (!/"(?:Apple Development|iPhone Developer):/.test(identities)) {
       throw new Error(
-        "No Apple Development certificate found. In Xcode > Settings > Accounts, add your Apple account, select your Personal Team, then Manage Certificates > + > Apple Development. Rerun this command afterward, or use --prepare-only now.",
+        "No Apple Development certificate found. In Xcode > Settings > Accounts, add your Apple account, select your team, then Manage Certificates > + > Apple Development. Rerun this command afterward, or use --prepare-only now.",
       );
     }
   }
 
   console.log(
-    `Preparing T3 Code Personal (${bundleId}).\nRegenerating apps/mobile/ios; keep native changes in Expo config/plugins.`,
+    `Preparing ${freeTeam ? `T3 Code Personal (${bundleId})` : "Skald Code (tech.atli.skaldcode)"}.\nRegenerating apps/mobile/ios; keep native changes in Expo config/plugins.`,
   );
   run(
     process.execPath,
@@ -131,20 +138,21 @@ function main() {
     ["install", "--project-directory=ios"],
     "CocoaPods installation failed. Fix the error above and rerun the same command.",
   );
-  // Xcode launched from Finder must bundle the same personal manifest as the CLI.
   NodeFS.appendFileSync(
     `${mobile}/ios/.xcode.env`,
-    `\nexport APP_VARIANT=development\nexport MOBILE_VERSION_POLICY=appVersion\nexport T3CODE_IOS_PERSONAL_TEAM=1\nexport T3CODE_IOS_PERSONAL_TEAM_BUNDLE_ID=${bundleId}\nexport T3CODE_MOBILE_UPDATES_ENABLED=0\nexport EXPO_NO_DOTENV=1\n`,
+    `\n${Object.entries(buildEnv)
+      .map(([name, value]) => `export ${name}=${value}`)
+      .join("\n")}\n`,
   );
 
   if (values["prepare-only"]) {
     console.log(
-      "\nReady. Connect your iPhone and rerun without --prepare-only.\nFor manual signing, open the .xcworkspace in apps/mobile/ios and select your Personal Team.",
+      `\nReady. Connect your iPhone and rerun without --prepare-only.\nFor manual signing, open the .xcworkspace in apps/mobile/ios and select your ${freeTeam ? "Personal Team" : "team"}.`,
     );
     return;
   }
   console.log(
-    "\nChoose your physical iPhone and your Personal Team when prompted.\nThe first Release build can take several minutes.",
+    `\nChoose your physical iPhone${freeTeam ? " and your Personal Team" : ""} when prompted.\nThe first Release build can take several minutes.`,
   );
   run(
     process.execPath,
@@ -157,10 +165,14 @@ function main() {
       "--device",
       ...(values.device ? [values.device] : []),
     ],
-    "Installation failed. Check the error above, unlock/trust the iPhone, and enable Developer Mode. For signing issues, open apps/mobile/ios/*.xcworkspace in Xcode, select your Personal Team and iPhone, then run the Release configuration. Keep the same bundle identifier when retrying.",
+    "Installation failed. Check the error above, unlock/trust the iPhone, and enable Developer Mode. For signing issues, open apps/mobile/ios/*.xcworkspace in Xcode, select your team and iPhone, then run the Release configuration. Keep the same bundle identifier when retrying.",
   );
   console.log(
-    "\nInstalled T3 Code Personal. Metro is not needed. Pair with your running T3 server over LAN or Tailscale.\nReinstall with the same bundle identifier to renew free signing after seven days; do not delete the app first.",
+    `\nInstalled ${freeTeam ? "T3 Code Personal" : "Skald Code"}. Metro is not needed. Pair with your running T3 server over LAN or Tailscale.\n${
+      freeTeam
+        ? "Reinstall with the same bundle identifier to renew free signing after seven days; do not delete the app first."
+        : "Reinstall the same way to update; do not delete the app first."
+    }`,
   );
 }
 

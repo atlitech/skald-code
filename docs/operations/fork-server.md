@@ -55,6 +55,29 @@ and restart `<n>` at 1.
   refuses the CI APK. Without `GOOGLE_SERVICES_JSON_BASE64` the APK builds
   without push notifications.
 
+- **Settings → Environments**: create `personal-ios-signing`, allowed only on
+  `atli` like the Android one. Only the TestFlight job uses it. Every value is
+  for the Atli LLC team (`H6L3F33KRM`):
+
+  | Kind     | Name                                           | Value                                                       |
+  | -------- | ---------------------------------------------- | ----------------------------------------------------------- |
+  | Secret   | `T3CODE_IOS_DISTRIBUTION_CERTIFICATE_BASE64`   | the Apple Distribution certificate, `base64 -i cert.p12`    |
+  | Secret   | `T3CODE_IOS_DISTRIBUTION_CERTIFICATE_PASSWORD` | the password the `.p12` was exported with                   |
+  | Secret   | `T3CODE_IOS_APP_PROFILE_BASE64`                | App Store profile for `tech.atli.skaldcode`, base64         |
+  | Secret   | `T3CODE_IOS_WIDGETS_PROFILE_BASE64`            | App Store profile for `tech.atli.skaldcode.widgets`, base64 |
+  | Secret   | `T3CODE_IOS_SHARING_PROFILE_BASE64`            | App Store profile for `tech.atli.skaldcode.sharing`, base64 |
+  | Secret   | `T3CODE_IOS_APP_STORE_CONNECT_KEY_BASE64`      | the App Store Connect API key, `base64 -i AuthKey_<id>.p8`  |
+  | Variable | `T3CODE_IOS_APP_STORE_CONNECT_KEY_ID`          | that key's ID                                               |
+  | Variable | `T3CODE_IOS_APP_STORE_CONNECT_ISSUER_ID`       | the issuer ID shown above the key list                      |
+
+  Create the certificate in Xcode (**Settings → Accounts → Manage
+  Certificates → + → Apple Distribution**) and export it from the same list
+  with a password; Xcode's cloud-managed certificate cannot be exported. Make
+  each profile under **Profiles → + → App Store Connect** with that
+  certificate, and remake all three when the certificate is renewed or an
+  App ID gains a capability. The API key is a team key with the App Manager
+  role, from App Store Connect's **Users and Access → Integrations**.
+
 - Optional, under **Variables**: `T3CODE_CLERK_GOOGLE_ANDROID_CLIENT_ID`, the
   Google Android OAuth client ID. Only when it is set does the APK offer native
   Google sign-in.
@@ -96,7 +119,9 @@ release together, with every asset at once. A release publishes only when the
 Linux server, the Mac desktop app, and the Android APK all build, and every
 package's tests pass on that commit (`fork-full-suite.yml`). The Android
 job checks the app's public config before it builds, and the APK's package,
-signing certificate, and versionCode before it uploads.
+signing certificate, and versionCode before it uploads. After the release
+publishes, the iOS app goes to TestFlight
+([Installing the personal iOS app](#installing-the-personal-ios-app)).
 
 The result is the prerelease `v0.0.46-atli.1` with
 `t3-0.0.46-atli.1-linux-x64.tar.gz`, `T3-Code-0.0.46-atli.1-arm64.dmg`,
@@ -283,7 +308,7 @@ Copy the app out, sign it ad hoc, and install it as above.
 
 ## Installing the personal Android app
 
-Every release carries the personal app (`com.elvis.t3code`) as an arm64-v8a
+Every release carries the personal app (`tech.atli.skaldcode`) as an arm64-v8a
 APK signed with the personal key. Download it, check it, and install it over
 the existing app:
 
@@ -298,6 +323,11 @@ adb -s <device-serial> install -r T3-Code-0.0.46-atli.2-android-arm64-v8a.apk
 The APK's versionCode is derived from the release version, so each release
 installs over the one before it, and Android refuses to install an older
 release over a newer one.
+
+Earlier releases shipped the app as `com.elvis.t3code` (T3 Code Personal).
+Android treats a new application ID as a different app, so the first
+`tech.atli.skaldcode` APK installs beside it with empty data, even with the
+same key and `install -r`. Sign in and pair it, then uninstall the old app.
 
 ### Building it locally
 
@@ -316,6 +346,23 @@ native config changed. `install -r` keeps the app's data only when the APK is si
 with the same key as the installed app; the skill describes how to check. A local
 build without `--release-version` carries versionCode 1, so it cannot update
 over an APK from a release; uninstall the app first, which deletes its data.
+
+## Installing the personal iOS app
+
+Once a release publishes, the `testflight` job uploads Skald Code
+(`tech.atli.skaldcode`) to TestFlight, built from the same commit. Its build
+number is derived from the release version, like the Android versionCode. When
+Apple has processed it, internal testers install it from the TestFlight app.
+Testers must be users of the Atli LLC App Store Connect team, in an internal
+testing group of the app. Each build expires after 90 days.
+
+The app signs in to T3 Connect through the maintainers' deployment, which
+trusts only their own apps for Google sign-in, Sign in with Apple, passkeys, and
+push notifications. Sign in with the email code instead. Keep it to internal
+testers while it depends on that deployment.
+
+A failed upload does not affect the release: re-run the `testflight` job. A
+build number App Store Connect already accepted cannot be uploaded again.
 
 ## Pull request watcher
 

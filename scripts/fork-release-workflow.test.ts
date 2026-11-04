@@ -531,3 +531,63 @@ describe("fork server release workflow", () => {
     }
   });
 });
+
+describe("fork release TestFlight upload", () => {
+  const body = job("testflight");
+  const text = body.join("\n");
+  const steps = stepsOf(body);
+
+  it("uploads only from atli, after the release published, from the guarded commit", () => {
+    expect(needsOf(body)).toEqual(["guard", "publish"]);
+    expect(ifOf(body)).toBe(
+      "github.repository == 'atlitech/t3code' && github.ref == 'refs/heads/atli'",
+    );
+    expect(text).toMatch(/ref: \$\{\{ needs\.guard\.outputs\.sha \}\}/);
+    expect(text).toMatch(/^ {4}environment: personal-ios-signing$/m);
+    expect(runsOn(body)).toBe("xcode-27");
+    expect([...jobMap(body, "permissions")]).toEqual([["contents", "read"]]);
+  });
+
+  it("is never a release asset, so it cannot hold back or change a release", () => {
+    expect(buildJobs()).not.toContain("testflight");
+    expect(needsOf(job("publish"))).not.toContain("testflight");
+    expect(text).not.toMatch(/uses: actions\/(?:upload-artifact|attest-build-provenance)@/);
+  });
+
+  it("builds the personal variant with the release's build number and public config", () => {
+    const env = jobMap(body, "env");
+    expect(env.get("APP_VARIANT")).toBe("personal");
+    expect(env.get("T3CODE_RELEASE_VERSION")).toBe("${{ needs.guard.outputs.version }}");
+    for (const name of PUBLIC_CONFIG) expect(env.get(name), name).toBe(`\${{ vars.${name} }}`);
+    for (const [name, value] of env) expect(value, name).not.toMatch(/secrets\./);
+  });
+
+  it("signs, checks the signed archive, and only then uploads", () => {
+    const certificate = stepIndex(steps, /security import "\$RUNNER_TEMP\/distribution\.p12"/);
+    const profiles = stepIndex(
+      steps,
+      /T3CODE_IOS_PROVISIONING_PROFILES=\$profiles" >> "\$GITHUB_ENV"/,
+    );
+    const config = stepIndex(steps, CONFIG_CHECK);
+    const prebuild = stepIndex(steps, /vp exec expo prebuild --clean --platform ios --no-install/);
+    const archive = stepIndex(steps, /-archivePath "\$RUNNER_TEMP\/SkaldCode\.xcarchive" archive/);
+    const identity = stepIndex(steps, /node scripts\/fork-ios-identity\.ts/);
+    const upload = stepIndex(steps, /xcodebuild -exportArchive/);
+    expect(profiles).toBeGreaterThan(certificate);
+    expect(config).toBeGreaterThan(profiles);
+    expect(prebuild).toBeGreaterThan(config);
+    expect(archive).toBeGreaterThan(prebuild);
+    expect(identity).toBeGreaterThan(archive);
+    expect(upload).toBeGreaterThan(identity);
+    expect(steps[identity]).toMatch(/--release-version "\$VERSION"/);
+  });
+
+  it("uploads with manual App Store signing and keeps the release's build number", () => {
+    const upload = steps[stepIndex(steps, /xcodebuild -exportArchive/)]!;
+    expect(upload).toMatch(/plutil -insert method -string app-store-connect /);
+    expect(upload).toMatch(/plutil -insert destination -string upload /);
+    expect(upload).toMatch(/plutil -insert signingStyle -string manual /);
+    expect(upload).toMatch(/plutil -insert manageAppVersionAndBuildNumber -bool NO /);
+    expect(upload).toMatch(/-authenticationKeyPath "\$RUNNER_TEMP\/AuthKey\.p8"/);
+  });
+});
