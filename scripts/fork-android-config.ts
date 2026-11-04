@@ -10,7 +10,7 @@ import * as FileSystem from "effect/FileSystem";
 import * as Schema from "effect/Schema";
 import { Command, Flag } from "effect/cli";
 
-const PERSONAL_ANDROID_PACKAGE = "com.elvis.t3code";
+const PERSONAL_ANDROID_PACKAGE = "tech.atli.skaldcode";
 
 export class AndroidConfigError extends Schema.TaggedError<AndroidConfigError>()(
   "AndroidConfigError",

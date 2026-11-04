@@ -33,8 +33,30 @@ function resolveRuntimeVersionPolicy(value: string | undefined) {
 
 // The fork release (fork-server-release.yml build-android, or the personal
 // Android skill's build script) sets this so each release APK installs over the
-// last; an unversioned personal build carries the floor.
+// last and each TestFlight upload gets a new build number; an unversioned
+// personal build carries the floor.
 const releaseVersion = repoEnv.T3CODE_RELEASE_VERSION?.trim();
+const personalBuildCode =
+  isPersonalBuild && releaseVersion
+    ? androidVersionCode(releaseVersion)
+    : ANDROID_VERSION_CODE_FLOOR;
+// The fork release's TestFlight job sets this to sign the personal app for the
+// App Store: {"<bundle id>": "<profile name>"} for the app and each extension.
+const iosProvisioningProfiles = parseProvisioningProfiles(repoEnv.T3CODE_IOS_PROVISIONING_PROFILES);
+
+function parseProvisioningProfiles(value: string | undefined) {
+  if (!value?.trim()) return undefined;
+  const parsed: unknown = JSON.parse(value);
+  if (
+    typeof parsed !== "object" ||
+    parsed === null ||
+    Array.isArray(parsed) ||
+    !Object.values(parsed).every((name) => typeof name === "string")
+  ) {
+    throw new Error("T3CODE_IOS_PROVISIONING_PROFILES must map bundle IDs to profile names.");
+  }
+  return parsed as Readonly<Record<string, string>>;
+}
 
 const personalTeamBundleIdentifier = repoEnv.T3CODE_IOS_PERSONAL_TEAM_BUNDLE_ID?.trim();
 const IOS_BUNDLE_IDENTIFIER_PATTERN = /^[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+$/;
@@ -107,10 +129,10 @@ const VARIANT_CONFIG = {
     assets: DEVELOPMENT_ASSETS,
   },
   personal: {
-    appName: "T3 Code Personal",
+    appName: "Skald Code",
     scheme: "t3code-personal",
-    iosBundleIdentifier: "com.elvis.t3code",
-    androidPackage: "com.elvis.t3code",
+    iosBundleIdentifier: "tech.atli.skaldcode",
+    androidPackage: "tech.atli.skaldcode",
     relyingParty: "clerk.t3.codes",
     assets: DEVELOPMENT_ASSETS,
   },
@@ -228,6 +250,11 @@ const widgetsPlugin: NonNullable<ExpoConfig["plugins"]>[number] = [
   },
 ];
 
+const personalIosSigningPlugin: NonNullable<ExpoConfig["plugins"]>[number] = [
+  "./plugins/withPersonalIosSigningTeam.cjs",
+  { provisioningProfiles: iosProvisioningProfiles },
+];
+
 const sharingPlugin: NonNullable<ExpoConfig["plugins"]>[number] = [
   "expo-sharing",
   {
@@ -285,10 +312,11 @@ const config: ExpoConfig = {
     supportsTablet: true,
     requireFullScreen: process.env.T3_SHOWCASE_CAPTURE_BUILD === "1",
     bundleIdentifier: iosBundleIdentifier,
-    // Pin code signing to the T3 Tools team so non-interactive `expo run:ios`
-    // does not fall back to a personal team (which cannot sign app groups,
-    // Sign in with Apple, or push notification entitlements).
-    appleTeamId: isIosPersonalTeamBuild ? undefined : "ARK85ZXQ4Z",
+    ...(isPersonalBuild ? { buildNumber: String(personalBuildCode) } : {}),
+    // Pin a paid team (the fork's for `personal`, T3 Tools' otherwise) so non-interactive
+    // `expo run:ios` never falls back to a free Personal Team, which cannot sign app groups,
+    // Sign in with Apple, or push notification entitlements.
+    appleTeamId: isIosPersonalTeamBuild ? undefined : isPersonalBuild ? "H6L3F33KRM" : "ARK85ZXQ4Z",
     associatedDomains: isIosPersonalTeamBuild
       ? []
       : [`applinks:${variant.relyingParty}`, `webcredentials:${variant.relyingParty}`],
@@ -326,13 +354,7 @@ const config: ExpoConfig = {
   android: {
     icon: variant.assets.appIcon,
     package: variant.androidPackage,
-    ...(isPersonalBuild
-      ? {
-          versionCode: releaseVersion
-            ? androidVersionCode(releaseVersion)
-            : ANDROID_VERSION_CODE_FLOOR,
-        }
-      : {}),
+    ...(isPersonalBuild ? { versionCode: personalBuildCode } : {}),
     ...(repoEnv.T3CODE_ANDROID_GOOGLE_SERVICES_FILE
       ? { googleServicesFile: repoEnv.T3CODE_ANDROID_GOOGLE_SERVICES_FILE }
       : {}),
@@ -356,6 +378,8 @@ const config: ExpoConfig = {
     // Entitlement mods run in reverse registration order; strip restricted
     // capabilities after the plugins that add them.
     ...(isIosPersonalTeamBuild ? ["./plugins/withoutIosPersonalTeamCapabilities.cjs"] : []),
+    // Registered first so it runs after the extension targets exist.
+    ...(isPersonalBuild ? [personalIosSigningPlugin] : []),
     "expo-asset",
     "react-native-pdf-jsi",
     [
@@ -395,7 +419,11 @@ const config: ExpoConfig = {
         mode: APP_VARIANT === "development" ? "development" : "production",
       },
     ],
-    ["@clerk/expo", { theme: "./clerk-theme.json", appleSignIn: !isIosPersonalTeamBuild }],
+    // Upstream's Clerk only accepts Apple sign-in from T3 Tools' bundle IDs.
+    [
+      "@clerk/expo",
+      { theme: "./clerk-theme.json", appleSignIn: !isIosPersonalTeamBuild && !isPersonalBuild },
+    ],
     "expo-web-browser",
     [
       "expo-quick-actions",

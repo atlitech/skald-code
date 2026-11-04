@@ -42,7 +42,7 @@ const skill = NodeFS.readFileSync(
 
 it("reads the package line, the signer digests, and the recorded fingerprint", () => {
   assert.deepStrictEqual(parseBadging(capturedBadging), {
-    packageName: "com.elvis.t3code",
+    packageName: "tech.atli.skaldcode",
     versionCode: "1",
     versionName: "2.0.0",
   });
@@ -55,7 +55,7 @@ it("reads the package line, the signer digests, and the recorded fingerprint", (
 it.effect("accepts the recorded personal identity", () =>
   Effect.gen(function* () {
     assert.deepStrictEqual(yield* checkAndroidIdentity({ badging, certs, version, skill }), {
-      packageName: "com.elvis.t3code",
+      packageName: "tech.atli.skaldcode",
       versionCode: "46006",
       version,
     });
@@ -65,7 +65,10 @@ it.effect("accepts the recorded personal identity", () =>
 it.effect("refuses a wrong package, certificate, signer count, or versionCode", () =>
   Effect.gen(function* () {
     const refused = [
-      { badging: badging.replace("name='com.elvis.t3code'", "name='com.t3tools.t3code'"), certs },
+      {
+        badging: badging.replace("name='tech.atli.skaldcode'", "name='com.t3tools.t3code'"),
+        certs,
+      },
       { badging, certs: certs.replace(recordedSha256, "0".repeat(64)) },
       {
         badging,

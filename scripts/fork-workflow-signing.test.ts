@@ -3,16 +3,18 @@ import * as NodeFS from "node:fs";
 import * as NodePath from "node:path";
 import { describe, expect, it } from "vite-plus/test";
 
-// The personal Android signing key and google-services.json live in the
-// personal-android-signing environment, which only fork-server-release.yml
-// reads, from atli. No workflow a pull request triggers may name them, and
-// the one that does writes them under RUNNER_TEMP without printing them.
+// The personal Android and iOS signing values live in the personal-*-signing
+// environments, which only fork-server-release.yml reads, from atli. No workflow
+// a pull request triggers may name them, and the one that does writes them under
+// RUNNER_TEMP without printing them.
 const WORKFLOWS_DIR = NodePath.join(import.meta.dirname, "..", ".github", "workflows");
 const RELEASE_WORKFLOW = "fork-server-release.yml";
 const SIGNING_MARKERS = [
   "personal-android-signing",
   "T3CODE_PERSONAL_ANDROID",
   "GOOGLE_SERVICES_JSON_BASE64",
+  "personal-ios-signing",
+  "T3CODE_IOS_",
 ] as const;
 const PULL_REQUEST_TRIGGERS = new Set(["pull_request", "pull_request_target"]);
 
@@ -113,6 +115,12 @@ describe("fork workflow signing isolation", () => {
           "GOOGLE_SERVICES_JSON_BASE64",
           "T3CODE_PERSONAL_ANDROID_KEYSTORE_PASSWORD",
           "T3CODE_PERSONAL_ANDROID_KEY_PASSWORD",
+          "CERTIFICATE_BASE64",
+          "CERTIFICATE_PASSWORD",
+          "APP_PROFILE_BASE64",
+          "WIDGETS_PROFILE_BASE64",
+          "SHARING_PROFILE_BASE64",
+          "API_KEY_BASE64",
         ]),
       );
       for (const line of lines.filter((line) => /secrets\./.test(line))) {

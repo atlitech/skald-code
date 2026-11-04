@@ -1,5 +1,5 @@
 {
-  "name": "T3 Code Personal",
+  "name": "Skald Code",
   "slug": "t3-code",
   "platforms": ["ios", "android"],
   "scheme": "t3code-personal",
@@ -17,12 +17,12 @@
     "icon": "../../assets/dev/app-icon.icon",
     "supportsTablet": true,
     "requireFullScreen": false,
-    "bundleIdentifier": "com.elvis.t3code",
+    "bundleIdentifier": "tech.atli.skaldcode",
     "appleTeamId": "ARK85ZXQ4Z",
     "associatedDomains": ["applinks:clerk.t3.codes", "webcredentials:clerk.t3.codes"],
     "entitlements": {
-      "keychain-access-groups": ["$(AppIdentifierPrefix)com.elvis.t3code"],
-      "com.apple.security.application-groups": ["group.com.elvis.t3code"]
+      "keychain-access-groups": ["$(AppIdentifierPrefix)tech.atli.skaldcode"],
+      "com.apple.security.application-groups": ["group.tech.atli.skaldcode"]
     },
     "infoPlist": {
       "NSAppTransportSecurity": {
@@ -36,7 +36,7 @@
   },
   "android": {
     "icon": "../../assets/dev/blueprint-ios-1024.png",
-    "package": "com.elvis.t3code",
+    "package": "tech.atli.skaldcode",
     "versionCode": 1,
     "adaptiveIcon": {
       "backgroundColor": "#347FF8",
@@ -104,8 +104,8 @@
       {
         "ios": {
           "enabled": true,
-          "extensionBundleIdentifier": "com.elvis.t3code.sharing",
-          "appGroupId": "group.com.elvis.t3code",
+          "extensionBundleIdentifier": "tech.atli.skaldcode.sharing",
+          "appGroupId": "group.tech.atli.skaldcode",
           "activationRule": {
             "supportsText": true,
             "supportsWebUrlWithMaxCount": 1,
@@ -227,8 +227,8 @@
     [
       "expo-widgets",
       {
-        "bundleIdentifier": "com.elvis.t3code.widgets",
-        "groupIdentifier": "group.com.elvis.t3code",
+        "bundleIdentifier": "tech.atli.skaldcode.widgets",
+        "groupIdentifier": "group.tech.atli.skaldcode",
         "enablePushNotifications": true,
         "frequentUpdates": true,
         "enableAndroid": true,
@@ -343,16 +343,16 @@
             "appExtensions": [
               {
                 "targetName": "expo-sharing-extension",
-                "bundleIdentifier": "com.elvis.t3code.sharing",
+                "bundleIdentifier": "tech.atli.skaldcode.sharing",
                 "entitlements": {
-                  "com.apple.security.application-groups": ["group.com.elvis.t3code"]
+                  "com.apple.security.application-groups": ["group.tech.atli.skaldcode"]
                 }
               },
               {
                 "targetName": "ExpoWidgetsTarget",
-                "bundleIdentifier": "com.elvis.t3code.widgets",
+                "bundleIdentifier": "tech.atli.skaldcode.widgets",
                 "entitlements": {
-                  "com.apple.security.application-groups": ["group.com.elvis.t3code"]
+                  "com.apple.security.application-groups": ["group.tech.atli.skaldcode"]
                 }
               }
             ]

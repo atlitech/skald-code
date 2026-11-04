@@ -97,7 +97,7 @@ if ((prebuild)); then
     APP_VARIANT=personal EXPO_NO_GIT_STATUS=1 vp exec expo prebuild \
       --clean --platform android --no-install
   )
-elif ! grep -qE "namespace ['\"]com\\.elvis\\.t3code['\"]" "$android_dir/app/build.gradle"; then
+elif ! grep -qE "namespace ['\"]tech\\.atli\\.skaldcode['\"]" "$android_dir/app/build.gradle"; then
   printf 'Generated Android project is not the personal variant; rerun without --no-prebuild.\n' >&2
   exit 1
 fi

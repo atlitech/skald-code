@@ -10,7 +10,7 @@ Maintain two deliberately different apps:
 | App                                      | Purpose                        | Metro          |
 | ---------------------------------------- | ------------------------------ | -------------- |
 | `T3 Code Dev` / `com.t3tools.t3code.dev` | Fast iteration and live reload | Required       |
-| `T3 Code Personal` / `com.elvis.t3code`  | Stable daily-use fork          | Never required |
+| `Skald Code` / `tech.atli.skaldcode`     | Stable daily-use fork          | Never required |
 
 Treat the personal app as a locally distributed release product. Keep its identity and signing key stable so reinstalling an update preserves app data and environment credentials.
 
@@ -52,9 +52,9 @@ Classify the requested change:
 If `APP_VARIANT=personal` is missing, add it with these stable defaults:
 
 ```text
-appName: T3 Code Personal
+appName: Skald Code
 scheme: t3code-personal
-androidPackage: com.elvis.t3code
+androidPackage: tech.atli.skaldcode
 ```
 
 Extend `AppVariant`, `resolveAppVariant`, and `VARIANT_CONFIG` in `apps/mobile/app.config.ts`. Add only the minimal personal scripts or build profile needed by the local workflow. Preserve the values above after the first installed build; changing the package creates a different app.
@@ -79,7 +79,7 @@ Confirm the app name, scheme, Android package, and disabled update behavior. Tre
 
 ## Keep signing durable and private
 
-Use one dedicated personal Android keystore and retain it for the lifetime of `com.elvis.t3code`.
+Use one dedicated personal Android keystore and retain it for the lifetime of `tech.atli.skaldcode`.
 
 - Store the keystore outside Git and outside generated `apps/mobile/android` files.
 - Store passwords in the macOS Keychain or another secret store, not source files, shell history, skill files, or chat.
@@ -113,18 +113,18 @@ When Google sign-in fails, capture a narrowly filtered device log and distinguis
 - Clerk's `redirect url ... does not match an authorized redirect URI` means the native callback is absent from that Clerk instance's allowlist.
 - Missing `EXPO_PUBLIC_CLERK_GOOGLE_*_CLIENT_ID` values are a separate source-build configuration problem.
 
-For `com.elvis.t3code`, the permanent SHA-1 above and Clerk callback `clerk://com.elvis.t3code.callback` would need to be registered by the owners of those dashboards. Do not fabricate client IDs or copy signing keys. If dashboard access is unavailable, use Clerk's email verification flow with the same Gmail address or pair an environment manually; both avoid native Google OAuth.
+For `tech.atli.skaldcode`, the permanent SHA-1 above and Clerk callback `clerk://tech.atli.skaldcode.callback` would need to be registered by the owners of those dashboards. Do not fabricate client IDs or copy signing keys. If dashboard access is unavailable, use Clerk's email verification flow with the same Gmail address or pair an environment manually; both avoid native Google OAuth.
 
 ### Reuse the production T3 account through email
 
 This workflow is confirmed on the personal Galaxy Fold build:
 
-1. Open **T3 Account** in `T3 Code Personal`.
+1. Open **T3 Account** in `Skald Code`.
 2. Enter the same Gmail address used by the production T3 account.
 3. Choose the email verification/code flow rather than **Continue with Google**.
 4. Complete the code sent to Gmail.
 
-This authenticates against the same production Clerk account; it does not create a separate fork-only identity. The official and personal Android packages still have separate application sandboxes, so an existing session in `com.t3tools.t3code` cannot be read or transferred into `com.elvis.t3code`. Sign in once inside the personal app and let its secure storage retain its own session.
+This authenticates against the same production Clerk account; it does not create a separate fork-only identity. The official and personal Android packages still have separate application sandboxes, so an existing session in `com.t3tools.t3code` cannot be read or transferred into `tech.atli.skaldcode`. Sign in once inside the personal app and let its secure storage retain its own session.
 
 Do not interpret successful Gmail email verification as fixing native Google OAuth. **Continue with Google** remains unavailable to the personal package until the Google Android client and Clerk callback registrations described above are added by their owners.
 
@@ -156,7 +156,7 @@ cd apps/mobile
 APP_VARIANT=personal vp exec expo config --type public
 ```
 
-Use the existing generated Android project only when its `applicationId` is `com.elvis.t3code` and no native/config inputs changed. Otherwise regenerate it:
+Use the existing generated Android project only when its `applicationId` is `tech.atli.skaldcode` and no native/config inputs changed. Otherwise regenerate it:
 
 ```bash
 cd apps/mobile
@@ -191,8 +191,8 @@ Locate the actual output under `apps/mobile/android/app/build/outputs/apk/releas
 
 Require all of the following:
 
-- Application ID is exactly `com.elvis.t3code`.
-- The versionCode is not lower than the installed personal app's (`adb shell dumpsys package com.elvis.t3code | grep versionCode`).
+- Application ID is exactly `tech.atli.skaldcode`.
+- The versionCode is not lower than the installed personal app's (`adb shell dumpsys package tech.atli.skaldcode | grep versionCode`).
 - The manifest is not debuggable.
 - The APK contains an embedded JavaScript/update bundle and required assets.
 - The signing certificate matches the previous personal build when one is installed.
@@ -207,12 +207,12 @@ List devices and select the Fold's exact serial; do not rely on `-d` when more t
 ```bash
 adb devices -l
 adb -s <fold-serial> install -r <personal-apk>
-adb -s <fold-serial> shell pm path com.elvis.t3code
+adb -s <fold-serial> shell pm path tech.atli.skaldcode
 ```
 
 Wireless ADB is valid. Pairing usually persists, while the phone's IP and connect port may rotate. Let ADB rediscover the paired device through mDNS and use `adb connect` only when automatic reconnection fails.
 
-Launch `T3 Code Personal` without a Metro URL. Verify it reaches the real T3 interface rather than the Expo launcher, then connect it to a reachable T3 environment with a fresh single-use pairing credential. Never include pairing tokens in logs, screenshots, commits, or final responses.
+Launch `Skald Code` without a Metro URL. Verify it reaches the real T3 interface rather than the Expo launcher, then connect it to a reachable T3 environment with a fresh single-use pairing credential. Never include pairing tokens in logs, screenshots, commits, or final responses.
 
 ## Iterate and promote changes
 
