@@ -56,8 +56,30 @@ jobs:
         run: vp run --filter @t3tools/desktop ensure:electron
 
       # Web tests the fork changed may run in apps/web's headless Chromium project.
+      - name: Resolve Playwright version
+        id: playwright_version
+        run: echo "version=$(node -p "require('./apps/web/node_modules/playwright/package.json').version")" >> "$GITHUB_OUTPUT"
+
+      - name: Cache Chromium
+        id: chromium_cache
+        uses: actions/cache@v6
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-chromium-shell-${{ runner.os }}-${{ runner.arch }}-${{ steps.playwright_version.outputs.version }}
+
       - name: Install Chromium for web browser tests
-        run: node apps/web/node_modules/playwright/cli.js install --with-deps --only-shell chromium
+        if: steps.chromium_cache.outputs.cache-hit != 'true'
+        run: node apps/web/node_modules/playwright/cli.js install --only-shell chromium
+
+      # --with-deps also downloads fonts, even when the runner has Chromium's libraries.
+      - name: Install missing Chromium system dependencies
+        run: |
+          browser=$(find "$HOME/.cache/ms-playwright" -name chrome-headless-shell -type f -print -quit)
+          test -n "$browser"
+          dependencies=$(ldd "$browser")
+          if grep -q '=> not found' <<< "$dependencies"; then
+            node apps/web/node_modules/playwright/cli.js install-deps chromium
+          fi
 
       - name: Upstream passed its CI, and the fork's tests pass
         run: node scripts/fork-check.ts
