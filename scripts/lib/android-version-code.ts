@@ -1,4 +1,4 @@
-// Fork-only (atlitech/t3code). The personal Android app's versionCode, derived
+// Fork-only (atlitech/skald-code). The personal Android app's versionCode, derived
 // from the fork release version so each CI-built APK installs over the last.
 // apps/mobile/app.config.ts and scripts/fork-android-identity.ts both import
 // it, so it stays free of imports and side effects.

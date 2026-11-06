@@ -15,6 +15,7 @@ import {
 } from "./lib/brand-assets.ts";
 
 const WEB_ASSET_BRANDS = [
+  "skald",
   "development",
   "nightly",
   "production",
@@ -56,7 +57,7 @@ export const applyWebBrandAssetsCommand = Command.make(
     applyWebBrandAssets(
       Option.getOrElse(brand, () =>
         Option.match(channel, {
-          onNone: () => "production" as const,
+          onNone: () => "skald" as const,
           onSome: resolveWebAssetBrandForChannel,
         }),
       ),

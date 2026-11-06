@@ -74,7 +74,7 @@ describe("fork CI workflow", () => {
       const gate = job("check");
       const gateText = gate.join("\n");
       expect(gateText).toMatch(/^ {4}name: Check$/m);
-      expect(gateText).toMatch(/if:.*always\(\).*github\.repository == 'atlitech\/t3code'/);
+      expect(gateText).toMatch(/if:.*always\(\).*github\.repository_id == '1406026313'/);
       expect(gateText).toContain("NEEDS: ${{ toJSON(needs) }}");
       const prerequisites = /^ {4}needs: \[([^\]]+)\]$/m
         .exec(gateText)?.[1]

@@ -22,6 +22,8 @@
     "icons:check": "node scripts/export-brand-icons.ts --check",
     "licenses:sync": "node scripts/sync-third-party-license-notices.ts",
     "icons:export:android": "node scripts/export-android-icons.ts",
+    "icons:export:skald": "node scripts/export-skald-icons.ts",
+    "icons:check:skald": "node scripts/export-skald-icons.ts --check",
     "build": "vp run --filter './apps/*' build",
     "build:marketing": "vp run --filter @t3tools/marketing build",
     "build:desktop": "vp run --filter @t3tools/desktop --filter t3 build",

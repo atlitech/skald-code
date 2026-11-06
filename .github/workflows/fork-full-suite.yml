@@ -1,6 +1,6 @@
 name: Fork full suite
 
-# Fork-only (atlitech/t3code). Every package's tests, which fork-ci.yml does
+# Fork-only (atlitech/skald-code). Every package's tests, which fork-ci.yml does
 # not run per pull request: it runs only the tests the fork added or changed,
 # on top of an upstream commit upstream's CI already passed. This catches an
 # upstream test that breaks against fork code. fork-server-release.yml runs it
@@ -28,7 +28,7 @@ permissions:
 jobs:
   test:
     name: Test ${{ matrix.suite }}
-    if: github.repository == 'atlitech/t3code'
+    if: github.repository_id == '1406026313'
     runs-on: blacksmith-8vcpu-ubuntu-2404
     timeout-minutes: 30
     strategy:

@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-// Fork-only (atlitech/t3code). Decides whether fork-server-release.yml may
+// Fork-only (atlitech/skald-code). Decides whether fork-server-release.yml may
 // publish a version, before any build job runs: the dispatch must come from
 // atli, the version must be unused, and the commit must have passed CI.
 // Runbook: docs/operations/fork-server.md.

@@ -10,7 +10,7 @@ export function isForkReleaseVersion(version: string): boolean {
 }
 
 export function cliReleaseRepository(version = ""): string {
-  return isForkReleaseVersion(version) ? "atlitech/t3code" : CLI_RELEASE_REPOSITORY;
+  return isForkReleaseVersion(version) ? "atlitech/skald-code" : CLI_RELEASE_REPOSITORY;
 }
 export const CLI_RELEASE_CHECKSUMS_FILE = "SHA256SUMS";
 export const CLI_RELEASE_BASE_URL_ENV = "T3CODE_RELEASE_BASE_URL";

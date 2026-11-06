@@ -86,7 +86,7 @@ it.effect("discovers the next fork release without offering upstream stable or n
     const httpClient = HttpClient.make((request) => {
       assert.equal(
         request.url,
-        "https://api.github.com/repos/atlitech/t3code/releases?per_page=100&page=1",
+        "https://api.github.com/repos/atlitech/skald-code/releases?per_page=100&page=1",
       );
       return Effect.succeed(
         HttpClientResponse.fromWeb(

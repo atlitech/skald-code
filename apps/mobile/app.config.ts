@@ -82,19 +82,6 @@ if (
   );
 }
 
-const DEVELOPMENT_ASSETS = {
-  appIcon: fromRepoRoot(BRAND_ASSET_PATHS.developmentIosIconPng),
-  iosIcon: fromRepoRoot(BRAND_ASSET_PATHS.developmentIconComposerProject),
-  splashIcon: fromRepoRoot(BRAND_ASSET_PATHS.developmentIosIconPng),
-  androidAdaptiveForeground,
-  androidAdaptiveBackgroundColor: "#347FF8",
-  androidAdaptiveBackgroundImage: "./assets/android-icon-background-dev.png",
-  androidSplashIcon: "./assets/android-splash-icon-dev.png",
-  androidMonochromeIcon: "./assets/android-icon-mark.png",
-  androidNotificationIcon: "./assets/android-notification-icon.png",
-  androidNotificationColor: "#00639B",
-} as const;
-
 const PREVIEW_ASSETS = {
   appIcon: fromRepoRoot(BRAND_ASSET_PATHS.nightlyIosIconPng),
   iosIcon: fromRepoRoot(BRAND_ASSET_PATHS.nightlyIconComposerProject),
@@ -121,14 +108,29 @@ const RELEASE_ASSETS = {
   androidNotificationColor: "#FFFFFF",
 } as const;
 
+const SKALD_ASSETS = {
+  appIcon: fromRepoRoot(BRAND_ASSET_PATHS.skaldIconPng),
+  iosIcon: fromRepoRoot(BRAND_ASSET_PATHS.skaldIconPng),
+  splashIcon: fromRepoRoot("assets/skald/splash-light.png"),
+  splashIconDark: fromRepoRoot("assets/skald/splash-dark.png"),
+  androidAdaptiveForeground: fromRepoRoot("assets/skald/android-foreground.png"),
+  androidAdaptiveBackgroundColor: "#06222B",
+  androidAdaptiveBackgroundImage: undefined,
+  androidSplashIcon: fromRepoRoot("assets/skald/android-splash-light.png"),
+  androidSplashIconDark: fromRepoRoot("assets/skald/android-splash.png"),
+  androidMonochromeIcon: fromRepoRoot("assets/skald/android-monochrome.png"),
+  androidNotificationIcon: fromRepoRoot("assets/skald/android-notification.png"),
+  androidNotificationColor: "#B094E2",
+} as const;
+
 const VARIANT_CONFIG = {
   development: {
-    appName: "T3 Code Dev",
+    appName: "Skald Code Dev",
     scheme: "t3code-dev",
     iosBundleIdentifier: "com.t3tools.t3code.dev",
     androidPackage: "com.t3tools.t3code.dev",
     relyingParty: "clerk.t3.codes",
-    assets: DEVELOPMENT_ASSETS,
+    assets: SKALD_ASSETS,
   },
   personal: {
     appName: "Skald Code",
@@ -136,7 +138,7 @@ const VARIANT_CONFIG = {
     iosBundleIdentifier: "tech.atli.skaldcode",
     androidPackage: "tech.atli.skaldcode",
     relyingParty: "clerk.t3.codes",
-    assets: DEVELOPMENT_ASSETS,
+    assets: SKALD_ASSETS,
   },
   preview: {
     appName: "T3 Code Preview",
@@ -196,7 +198,7 @@ const widgetsPlugin: NonNullable<ExpoConfig["plugins"]>[number] = [
       {
         name: "SubscriptionUsage",
         displayName: "Subscription usage",
-        description: "Subscription quotas from your connected T3 Code environments.",
+        description: "Subscription quotas from your connected Skald Code environments.",
         ios: {
           configuration: {
             title: "Subscription usage",
@@ -246,7 +248,7 @@ const widgetsPlugin: NonNullable<ExpoConfig["plugins"]>[number] = [
       {
         name: "AgentActivity",
         displayName: "Agent Activity",
-        description: "Shows the current state of active T3 Code agents.",
+        description: "Shows the current state of active Skald Code agents.",
         android: null,
         ios: { supportedFamilies: ["systemSmall", "systemMedium", "accessoryRectangular"] },
       },
@@ -341,8 +343,8 @@ const config: ExpoConfig = {
         NSAllowsArbitraryLoads: true,
       },
       NSLocalNetworkUsageDescription:
-        "Allow T3 Code to connect to T3 Code servers on your local network or tailnet.",
-      NSPhotoLibraryAddUsageDescription: "Allow T3 Code to save images to your photo library.",
+        "Allow Skald Code to connect to T3 Code servers on your local network or tailnet.",
+      NSPhotoLibraryAddUsageDescription: "Allow Skald Code to save images to your photo library.",
       // System picture in picture needs background audio to start and survive outside the app.
       UIBackgroundModes: ["audio"],
       ITSAppUsesNonExemptEncryption: false,
@@ -458,7 +460,7 @@ const config: ExpoConfig = {
     [
       "expo-audio",
       {
-        microphonePermission: "Allow T3 Code to use your microphone for voice input.",
+        microphonePermission: "Allow Skald Code to use your microphone for voice input.",
         recordAudioAndroid: true,
         enableBackgroundPlayback: false,
         enableBackgroundRecording: false,
@@ -467,7 +469,8 @@ const config: ExpoConfig = {
     [
       "expo-camera",
       {
-        cameraPermission: "Allow T3 Code to access your camera so you can scan pairing QR codes.",
+        cameraPermission:
+          "Allow Skald Code to access your camera so you can scan pairing QR codes.",
         microphonePermission: false,
         barcodeScannerEnabled: true,
         recordAudioAndroid: false,
@@ -478,7 +481,7 @@ const config: ExpoConfig = {
       {
         photosPermission: false,
         // `false` makes this plugin add RECORD_AUDIO to blockedPermissions, breaking Android dictation.
-        microphonePermission: "Allow T3 Code to use your microphone for voice input.",
+        microphonePermission: "Allow Skald Code to use your microphone for voice input.",
       },
     ],
     [
@@ -486,17 +489,25 @@ const config: ExpoConfig = {
       {
         image: variant.assets.splashIcon,
         resizeMode: "contain",
-        backgroundColor: "#ffffff",
+        backgroundColor: "#f8f9f5",
         imageWidth: 220,
         dark: {
-          image: variant.assets.splashIcon,
-          backgroundColor: "#0a0a0a",
+          image:
+            "splashIconDark" in variant.assets
+              ? variant.assets.splashIconDark
+              : variant.assets.splashIcon,
+          backgroundColor: "#101c28",
         },
         android: {
           // Android 12+ masks the central two thirds of the 288dp canvas; adaptive layers avoid clipped corners.
           image: variant.assets.androidSplashIcon,
           imageWidth: 288,
-          dark: { image: variant.assets.androidSplashIcon },
+          dark: {
+            image:
+              "androidSplashIconDark" in variant.assets
+                ? variant.assets.androidSplashIconDark
+                : variant.assets.androidSplashIcon,
+          },
         },
       },
     ],

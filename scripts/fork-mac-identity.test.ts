@@ -124,7 +124,7 @@ it.effect("validates the fork feed and OTA payload bytes before publication", ()
     // JSON is YAML too; these exercise the decoded release metadata.
     const writeManifest = (value: unknown) =>
       fs.writeFileString(path.join(releaseDir, "atli-mac.yml"), JSON.stringify(value));
-    const appUpdateYml = "provider: github\nowner: atlitech\nrepo: t3code\nchannel: atli\n";
+    const appUpdateYml = "provider: github\nowner: atlitech\nrepo: skald-code\nchannel: atli\n";
     yield* writeManifest(manifest);
     yield* checkMacUpdateArtifacts({ appUpdateYml, releaseDir, version });
     const wrongFeed = yield* Effect.flip(

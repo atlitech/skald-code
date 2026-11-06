@@ -1,4 +1,4 @@
-# Fork server releases (atlitech/t3code)
+# Fork server releases (atlitech/skald-code)
 
 Fork-only runbook. `atli` is upstream `main` plus our commits.
 [`fork-server-release.yml`](../../.github/workflows/fork-server-release.yml)
@@ -103,7 +103,7 @@ and restart `<n>` at 1.
   Google sign-in.
 
 - Enable the [Blacksmith GitHub integration](https://docs.blacksmith.sh/introduction/quickstart)
-  for `atlitech/t3code` before dispatching a release. The Android job and the
+  for `atlitech/skald-code` before dispatching a release. The Android job and the
   full test suite request `blacksmith-8vcpu-ubuntu-2404`, as upstream's tests do;
   upstream's browser tests time out on a standard GitHub runner. Blacksmith
   provisions the runner, so no custom GitHub-hosted runner is needed. Without repository access, the job stays queued.
@@ -115,9 +115,9 @@ and restart `<n>` at 1.
   active ones to disable:
 
   ```sh
-  gh api repos/atlitech/t3code/actions/workflows \
+  gh api repos/atlitech/skald-code/actions/workflows \
     --jq '.workflows[] | select(.state == "active") | select(.path | test("/fork-") | not) | .path'
-  gh workflow disable <path> -R atlitech/t3code
+  gh workflow disable <path> -R atlitech/skald-code
   ```
 
   A workflow stays disabled when an update changes its file, but a workflow
@@ -128,7 +128,7 @@ and restart `<n>` at 1.
 Dispatch the workflow from `atli`; nothing else starts a release:
 
 ```sh
-gh workflow run fork-server-release.yml -R atlitech/t3code --ref atli -f version=0.0.46-atli.1
+gh workflow run fork-server-release.yml -R atlitech/skald-code --ref atli -f version=0.0.46-atli.1
 ```
 
 A guard job runs before any build. It refuses a dispatch from any other ref, a
@@ -152,13 +152,13 @@ platform, arch, size, and sha256, and each asset's
 provenance attestation:
 
 ```sh
-gh attestation verify t3-0.0.46-atli.1-linux-x64.tar.gz -R atlitech/t3code
+gh attestation verify t3-0.0.46-atli.1-linux-x64.tar.gz -R atlitech/skald-code
 ```
 
 A published release never changes. Do not re-run a failed release: dispatch
 again, and once a version has a tag or release, use the next atli number.
 
-Owner action, once: enable immutable releases on atlitech/t3code
+Owner action, once: enable immutable releases on atlitech/skald-code
 (**Settings → General → Releases**), so GitHub also refuses to change a
 published release's assets or move its tag.
 
@@ -186,7 +186,7 @@ To read a release's scope, download its `manifest.json` and `ADMISSION.json`
 and run the checker from an `atli` checkout:
 
 ```sh
-gh release download v0.0.46-atli.4 --repo atlitech/t3code -p manifest.json -p ADMISSION.json
+gh release download v0.0.46-atli.4 --repo atlitech/skald-code -p manifest.json -p ADMISSION.json
 node scripts/fork-release-scope.ts --manifest manifest.json --admission ADMISSION.json
 ```
 
@@ -218,7 +218,7 @@ T3 Connect link carries over. If the service's unit sets a different
 
    ```sh
    mkdir -p ~/.config/systemd/user/t3code.service.d
-   printf '[Service]\nEnvironment=T3CODE_RELEASE_BASE_URL=https://github.com/atlitech/t3code/releases/download\n' \
+   printf '[Service]\nEnvironment=T3CODE_RELEASE_BASE_URL=https://github.com/atlitech/skald-code/releases/download\n' \
      > ~/.config/systemd/user/t3code.service.d/fork.conf
    systemctl --user daemon-reload
    ```
@@ -228,8 +228,8 @@ T3 Connect link carries over. If the service's unit sets a different
    not touch the running service.
 
    ```sh
-   export T3CODE_RELEASE_BASE_URL=https://github.com/atlitech/t3code/releases/download
-   curl -fsSL https://raw.githubusercontent.com/atlitech/t3code/atli/scripts/install.sh \
+   export T3CODE_RELEASE_BASE_URL=https://github.com/atlitech/skald-code/releases/download
+   curl -fsSL https://raw.githubusercontent.com/atlitech/skald-code/atli/scripts/install.sh \
      | T3CODE_VERSION=<version> sh
    ```
 
@@ -257,7 +257,7 @@ the same. Run it with the base URL exported in your shell, because `t3 update`
 reads the shell's environment, not the unit's.
 
 ```sh
-T3CODE_RELEASE_BASE_URL=https://github.com/atlitech/t3code/releases/download t3 update <version> --yes
+T3CODE_RELEASE_BASE_URL=https://github.com/atlitech/skald-code/releases/download t3 update <version> --yes
 ```
 
 `0.0.46-atli.1`, `0.0.46-atli.2`, and `0.0.46-atli.3` were released before
@@ -275,9 +275,9 @@ signed with the Atli LLC Developer ID and notarized, so it opens without a
 Gatekeeper warning. Download it and check it before installing:
 
 ```sh
-gh release download v0.0.46-atli.2 -R atlitech/t3code -p 'T3-Code-*-arm64.dmg' -p SHA256SUMS
+gh release download v0.0.46-atli.2 -R atlitech/skald-code -p 'T3-Code-*-arm64.dmg' -p SHA256SUMS
 shasum -a 256 -c --ignore-missing SHA256SUMS
-gh attestation verify T3-Code-0.0.46-atli.2-arm64.dmg -R atlitech/t3code
+gh attestation verify T3-Code-0.0.46-atli.2-arm64.dmg -R atlitech/skald-code
 ```
 
 Quit the app, then drag Skald Code from the DMG into `/Applications`. Projects
@@ -344,9 +344,9 @@ APK signed with the personal key. Download it, check it, and install it over
 the existing app:
 
 ```sh
-gh release download v0.0.46-atli.2 -R atlitech/t3code -p 'T3-Code-*-android-arm64-v8a.apk' -p SHA256SUMS
+gh release download v0.0.46-atli.2 -R atlitech/skald-code -p 'T3-Code-*-android-arm64-v8a.apk' -p SHA256SUMS
 shasum -a 256 -c --ignore-missing SHA256SUMS
-gh attestation verify T3-Code-0.0.46-atli.2-android-arm64-v8a.apk -R atlitech/t3code
+gh attestation verify T3-Code-0.0.46-atli.2-android-arm64-v8a.apk -R atlitech/skald-code
 adb devices -l
 adb -s <device-serial> install -r T3-Code-0.0.46-atli.2-android-arm64-v8a.apk
 ```
@@ -415,7 +415,7 @@ watch.
 
 ## Updates offered by clients
 
-OTA-enabled Mac builds check `atlitech/t3code`'s `atli` channel. The update
+OTA-enabled Mac builds check `atlitech/skald-code`'s `atli` channel. The update
 button downloads the signed ZIP and restarts the app when requested. **Update
 everything** can bring the connected Linux server to the same release first.
 
@@ -526,7 +526,7 @@ The prior is the `priorVersion` in the target's `ADMISSION.json`, and it must al
 carry `t3 recover`. Dispatch the workflow from `atli`; nothing else starts it:
 
 ```sh
-gh workflow run fork-recovery-drill.yml --repo atlitech/t3code --ref atli -f target-version=0.0.46-atli.5
+gh workflow run fork-recovery-drill.yml --repo atlitech/skald-code --ref atli -f target-version=0.0.46-atli.5
 ```
 
 The drill job uploads `RECOVERY.json` with the drilled home. A separate verify
@@ -534,7 +534,7 @@ job, on a fresh runner, unpacks that home, re-observes its runtime and
 database, and uploads `VERIFICATION.json`. Download both records:
 
 ```sh
-gh run download <run-id> --repo atlitech/t3code -n recovery-drill -n recovery-verification
+gh run download <run-id> --repo atlitech/skald-code -n recovery-drill -n recovery-verification
 ```
 
 `RECOVERY.json` names the drill's commit and host, the prior and target
@@ -551,7 +551,7 @@ in the drilled home match the recorded recovery point.
 
 `atli` takes upstream changes only through a merge, so it keeps upstream's
 history as an ancestor. The ruleset on `atli` refuses force pushes, so never
-rewrite it. `origin` is `atlitech/t3code` and `upstream` is `pingdotgg/t3code`.
+rewrite it. `origin` is `atlitech/skald-code` and `upstream` is `pingdotgg/t3code`.
 
 Freeze the newest upstream commit whose CI passed, so the update does not move
 while you work on it, then build a candidate branch from `atli` plus a merge of
@@ -566,7 +566,7 @@ branch="update/upstream-${upstream_sha:0:12}"
 git switch -c "$branch" origin/atli
 git merge --no-ff "$upstream_sha" -m "Merge upstream ${upstream_sha:0:12} into atli"
 git push origin "$branch"
-gh pr create --repo atlitech/t3code --base atli --head "$branch" \
+gh pr create --repo atlitech/skald-code --base atli --head "$branch" \
   --title "Merge upstream ${upstream_sha:0:12} into atli" \
   --body "Merges upstream commit $upstream_sha. Merge with a merge commit."
 ```
@@ -576,7 +576,7 @@ squash or rebase. Either loses upstream's commits as ancestors of `atli`, and
 the next update conflicts again on everything this one resolved:
 
 ```sh
-gh pr merge <pr> --repo atlitech/t3code --merge
+gh pr merge <pr> --repo atlitech/skald-code --merge
 ```
 
 ### Conflicts
@@ -618,4 +618,4 @@ the banner on the Actions tab.
 - `fork-full-suite.yml` runs every package's tests. A release runs it on the
   commit it publishes, which catches an upstream test that breaks against fork
   code. Dispatch it by hand after a large update:
-  `gh workflow run fork-full-suite.yml -R atlitech/t3code --ref atli`.
+  `gh workflow run fork-full-suite.yml -R atlitech/skald-code --ref atli`.

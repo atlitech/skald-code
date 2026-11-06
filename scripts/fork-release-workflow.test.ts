@@ -203,12 +203,12 @@ describe("fork server release workflow", () => {
   it("signs and notarizes the Mac app with the owner's Developer ID, only from atli", () => {
     const body = job("build-mac");
     expect(ifOf(body)).toBe(
-      "github.repository == 'atlitech/t3code' && github.ref == 'refs/heads/atli'",
+      "github.repository_id == '1406026313' && github.ref == 'refs/heads/atli'",
     );
     expect(body.join("\n")).toMatch(/^ {4}environment: personal-macos-signing$/m);
     const env = jobMap(body, "env");
     expect(env.get("T3CODE_DESKTOP_SIGNED")).toBe('"true"');
-    expect(env.get("T3CODE_DESKTOP_UPDATE_REPOSITORY")).toBe("atlitech/t3code");
+    expect(env.get("T3CODE_DESKTOP_UPDATE_REPOSITORY")).toBe("atlitech/skald-code");
     for (const [name, value] of env) expect(value, name).not.toMatch(/secrets\./);
 
     const steps = stepsOf(body);
@@ -436,7 +436,7 @@ describe("fork server release workflow", () => {
     const body = job("build-android");
     expect(needsOf(body)).toContain("guard");
     expect(ifOf(body)).toContain("github.ref == 'refs/heads/atli'");
-    expect(ifOf(body)).toContain("github.repository == 'atlitech/t3code'");
+    expect(ifOf(body)).toContain("github.repository_id == '1406026313'");
     expect(body).toContain("    environment: personal-android-signing");
     expect(runsOn(body)).toBe("blacksmith-8vcpu-ubuntu-2404");
     expect(body.join("\n")).toMatch(/ref: \$\{\{ needs\.guard\.outputs\.sha \}\}/);
@@ -565,7 +565,7 @@ describe("fork release TestFlight upload", () => {
   it("uploads only from atli, after the release published, from the guarded commit", () => {
     expect(needsOf(body)).toEqual(["guard", "publish"]);
     expect(ifOf(body)).toBe(
-      "github.repository == 'atlitech/t3code' && github.ref == 'refs/heads/atli'",
+      "github.repository_id == '1406026313' && github.ref == 'refs/heads/atli'",
     );
     expect(text).toMatch(/ref: \$\{\{ needs\.guard\.outputs\.sha \}\}/);
     expect(text).toMatch(/^ {4}environment: personal-ios-signing$/m);

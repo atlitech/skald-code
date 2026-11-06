@@ -1,4 +1,4 @@
-// Fork-only (atlitech/t3code). Decodes fixtures.json, the one list that drives
+// Fork-only (atlitech/skald-code). Decodes fixtures.json, the one list that drives
 // the Linux admission: each thread is the `thread.create` command the prior
 // release's own server runs (create-threads.ts), each message is seeded after
 // it (seed.ts), and readback.ts expects both back through the candidate.

@@ -92,7 +92,7 @@ const stepIndex = (steps: ReadonlyArray<string>, pattern: RegExp): number => {
   return index;
 };
 
-const ATLI_ONLY = "github.repository == 'atlitech/t3code' && github.ref == 'refs/heads/atli'";
+const ATLI_ONLY = "github.repository_id == '1406026313' && github.ref == 'refs/heads/atli'";
 const RUN_DRILL = /run: bash scripts\/linux-recovery\/run-drill\.sh$/m;
 const RUN_VERIFY = /run: bash scripts\/linux-recovery\/run-verify\.sh$/m;
 const UPLOAD = /uses: actions\/upload-artifact@/;

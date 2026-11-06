@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Fork-only (atlitech/t3code). The admission job of fork-server-release.yml:
+# Fork-only (atlitech/skald-code). The admission job of fork-server-release.yml:
 # installs the candidate Linux archive over data the prior release wrote,
 # runs it, and writes ADMISSION.json only when every check passed.
 #

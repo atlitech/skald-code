@@ -92,7 +92,7 @@ describe("environment release checks", () => {
     vi.stubGlobal(
       "fetch",
       vi.fn(async (url: string) => {
-        expect(url).toBe("https://github.com/atlitech/t3code/releases.atom");
+        expect(url).toBe("https://github.com/atlitech/skald-code/releases.atom");
         return feed("v1.2.4", "v1.2.4-nightly.20261106.1", "v1.2.4-atli.10");
       }),
     );

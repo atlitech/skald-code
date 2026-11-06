@@ -1,6 +1,6 @@
 name: Fork recovery drill
 
-# Fork-only (atlitech/t3code). Upgrades a scratch T3 home on Linux from an
+# Fork-only (atlitech/skald-code). Upgrades a scratch T3 home on Linux from an
 # admitted fork release's prior version to that release, writes new work with
 # the upgrade, declares the upgrade failed, and recovers with `t3 recover`. The
 # drill job records what it did in RECOVERY.json and uploads it with the drilled
@@ -28,7 +28,7 @@ jobs:
   # recovers. Verifiers: scripts/linux-recovery/.
   drill:
     name: Drill a failed upgrade and its recovery
-    if: github.repository == 'atlitech/t3code' && github.ref == 'refs/heads/atli'
+    if: github.repository_id == '1406026313' && github.ref == 'refs/heads/atli'
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     permissions:
@@ -96,7 +96,7 @@ jobs:
   verify:
     name: Verify the recovery record
     needs: drill
-    if: github.repository == 'atlitech/t3code' && github.ref == 'refs/heads/atli'
+    if: github.repository_id == '1406026313' && github.ref == 'refs/heads/atli'
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     permissions:

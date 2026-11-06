@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Fork-only (atlitech/t3code). The verify job of fork-recovery-drill.yml, on a
+# Fork-only (atlitech/skald-code). The verify job of fork-recovery-drill.yml, on a
 # fresh runner: re-observes the drilled home the drill job uploaded and
 # judges RECOVERY.json by those observations alone (verify-recovery.ts).
 #

@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# Fork-only (atlitech/t3code). Regenerates the committed pre-upgrade.sqlite
+# Fork-only (atlitech/skald-code). Regenerates the committed pre-upgrade.sqlite
 # and snapshot-response.json that fixture.test.ts reads, from a released
 # Linux x64 archive. Run it on Linux x64 with node, sqlite3, curl, and tar,
 # from the repository root, after changing fixtures.json:
 #
-#   gh release download v0.0.46-atli.3 --repo atlitech/t3code --dir /tmp/rel
+#   gh release download v0.0.46-atli.3 --repo atlitech/skald-code --dir /tmp/rel
 #   scripts/linux-admission/record-fixture.sh /tmp/rel/t3-0.0.46-atli.3-linux-x64.tar.gz
 #
 # The archive writes the fixture history as the prior does in an admission

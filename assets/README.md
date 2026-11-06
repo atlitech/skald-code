@@ -1,5 +1,16 @@
 # Brand icons
 
+Skald Code uses the violet Node and outlined `skald code` lockups from Atli's
+`brand/` generator. The SVG sources are copied into `skald/`; regenerate the
+lockups in Atli before copying a changed design. Run `vp run icons:export:skald`
+to render the fork's desktop, web, and personal mobile icons from those SVGs,
+or `vp run icons:check:skald` to check their reproducibility. Android uses a
+transparent foreground within its mask's safe area; macOS uses an 824px tile
+inset 100px inside its 1024px canvas.
+
+The upstream artwork below remains available for upstream mobile variants and
+the T3 Code GitHub integration's identity.
+
 The three Icon Composer projects are the source of truth for full application icons:
 
 - `dev/app-icon.icon`
