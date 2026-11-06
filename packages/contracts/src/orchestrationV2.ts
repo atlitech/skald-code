@@ -3656,6 +3656,7 @@ export const ORCHESTRATION_V2_WS_METHODS = {
   getArchivedShellSnapshot: "orchestration.getArchivedShellSnapshot",
   getThreadFamily: "orchestration.getThreadFamily",
   getThreadTitles: "orchestration.getThreadTitles",
+  listThreadGroupingParents: "orchestration.listThreadGroupingParents",
   getWorktreeThreadIds: "orchestration.getWorktreeThreadIds",
   getOlderSettledThreads: "orchestration.getOlderSettledThreads",
   getThreadProjection: "orchestration.getThreadProjection",
@@ -3853,6 +3854,20 @@ export const OrchestrationV2WorktreeThreadIds = Schema.Struct({
   threadIds: Schema.Array(ThreadId),
 });
 export type OrchestrationV2WorktreeThreadIds = typeof OrchestrationV2WorktreeThreadIds.Type;
+
+export const OrchestrationV2ListThreadGroupingParentsInput = Schema.Struct({
+  threadId: ThreadId,
+  query: Schema.optional(Schema.String.check(Schema.isMaxLength(200))),
+});
+export type OrchestrationV2ListThreadGroupingParentsInput =
+  typeof OrchestrationV2ListThreadGroupingParentsInput.Type;
+
+export const OrchestrationV2ListThreadGroupingParentsResult = Schema.Struct({
+  threads: Schema.Array(Schema.Struct({ id: ThreadId, title: Schema.String })),
+  hasMore: Schema.Boolean,
+});
+export type OrchestrationV2ListThreadGroupingParentsResult =
+  typeof OrchestrationV2ListThreadGroupingParentsResult.Type;
 
 export const OrchestrationV2SubscribeThreadInput = Schema.Struct({
   threadId: ThreadId,
@@ -4309,6 +4324,10 @@ export const OrchestrationV2RpcSchemas = {
   getThreadFamily: {
     input: OrchestrationV2GetThreadFamilyInput,
     output: OrchestrationV2ThreadFamily,
+  },
+  listThreadGroupingParents: {
+    input: OrchestrationV2ListThreadGroupingParentsInput,
+    output: OrchestrationV2ListThreadGroupingParentsResult,
   },
   getThreadTitles: {
     input: OrchestrationV2GetThreadTitlesInput,

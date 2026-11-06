@@ -1,11 +1,17 @@
 import { useAtomValue } from "@effect/atom-react";
 import { CommandId, type ScopedThreadRef, type ThreadId } from "@t3tools/contracts";
-import { getThreadGroupingParents } from "@t3tools/client-runtime/state/thread-grouping";
+import {
+  isAtomCommandInterrupted,
+  squashAtomCommandFailure,
+} from "@t3tools/client-runtime/state/runtime";
 import { scopedThreadKey } from "@t3tools/client-runtime/environment";
+import { useDebouncedValue } from "@tanstack/react-pacer";
 import { useState } from "react";
 import { create } from "zustand";
 
-import { useVisibleThreadShells, useThreadShell } from "../state/entities";
+import { useThreadShell } from "../state/entities";
+import { orchestrationEnvironment } from "../state/orchestration";
+import { useEnvironmentQuery } from "../state/query";
 import { threadEnvironment } from "../state/threads";
 import { useOrchestrationCommand } from "../state/use-orchestration-command";
 import { randomUUID } from "../lib/utils";
@@ -50,16 +56,24 @@ export function ThreadParentDialogHost() {
 
 function ThreadParentDialog({ threadRef }: { threadRef: ScopedThreadRef }) {
   const thread = useThreadShell(threadRef);
-  const threads = useVisibleThreadShells();
   const canMove = useAtomValue(threadEnvironment.setParent.permissionAtom(threadRef.environmentId));
-  const move = useOrchestrationCommand(threadEnvironment.setParent, "Failed to move thread");
+  const move = useOrchestrationCommand(threadEnvironment.setParent, { reportFailure: false });
   const [query, setQuery] = useState("");
+  const [debouncedQuery] = useDebouncedValue(query.trim(), { wait: 180 });
   const [moving, setMoving] = useState(false);
-  const candidates = (thread ? getThreadGroupingParents(threads, thread) : []).filter((candidate) =>
-    candidate.title.toLocaleLowerCase().includes(query.toLocaleLowerCase()),
+  const [moveError, setMoveError] = useState<string | null>(null);
+  const parents = useEnvironmentQuery(
+    orchestrationEnvironment.listThreadGroupingParents({
+      environmentId: threadRef.environmentId,
+      input: { threadId: threadRef.threadId, ...(debouncedQuery ? { query: debouncedQuery } : {}) },
+    }),
   );
+  const searching = query.trim() !== debouncedQuery || parents.isPending;
+  const candidates = parents.data?.threads ?? [];
   const close = () => useRequest.setState({ threadRef: null });
   const select = async (groupingParentThreadId: ThreadId) => {
+    if (moving || searching || !canMove) return;
+    setMoveError(null);
     setMoving(true);
     const result = await move({
       environmentId: threadRef.environmentId,
@@ -71,7 +85,12 @@ function ThreadParentDialog({ threadRef }: { threadRef: ScopedThreadRef }) {
       },
     });
     setMoving(false);
-    if (result._tag === "Success") close();
+    if (result._tag === "Success") {
+      close();
+    } else if (!isAtomCommandInterrupted(result)) {
+      const error = squashAtomCommandFailure(result);
+      setMoveError(error instanceof Error ? error.message : "Failed to move thread. Try again.");
+    }
   };
   return (
     <Dialog
@@ -93,11 +112,31 @@ function ThreadParentDialog({ threadRef }: { threadRef: ScopedThreadRef }) {
               autoFocus
               placeholder="Find a thread…"
               aria-label="Find a parent thread"
+              disabled={moving}
+              maxLength={200}
               value={query}
               onChange={(event) => setQuery(event.target.value)}
             />
+            {moveError ? (
+              <p role="alert" className="text-sm text-destructive">
+                {moveError}
+              </p>
+            ) : null}
             <div className="max-h-72 overflow-y-auto">
-              {candidates.length === 0 ? (
+              {searching ? (
+                <p role="status" className="py-4 text-sm text-muted-foreground">
+                  Finding threads…
+                </p>
+              ) : parents.error ? (
+                <div className="flex flex-col items-start gap-3 py-4">
+                  <p role="alert" className="text-sm text-destructive">
+                    {parents.error}
+                  </p>
+                  <Button variant="outline" size="sm" onClick={parents.refresh}>
+                    Retry
+                  </Button>
+                </div>
+              ) : candidates.length === 0 ? (
                 <p className="py-4 text-sm text-muted-foreground">No matching threads.</p>
               ) : (
                 <ul className="flex flex-col gap-1">
@@ -116,6 +155,11 @@ function ThreadParentDialog({ threadRef }: { threadRef: ScopedThreadRef }) {
                 </ul>
               )}
             </div>
+            {!searching && parents.error === null && parents.data?.hasMore ? (
+              <p className="text-xs text-muted-foreground">
+                More threads are available. Refine your search.
+              </p>
+            ) : null}
           </div>
         </DialogPanel>
         <DialogFooter>

@@ -75,31 +75,3 @@ export function buildThreadGrouping<T extends GroupableThread>(
   }
   return { roots, childrenByParent, parentByChild };
 }
-
-export function getThreadGroupingParents<T extends GroupableThread>(
-  threads: readonly T[],
-  thread: GroupableThread,
-) {
-  const scoped = threads.filter((candidate) => candidate.environmentId === thread.environmentId);
-  const byId = new Map(scoped.map((candidate) => [candidate.id, candidate]));
-  return scoped.filter((candidate) => {
-    if (!isThreadGroupingParent(candidate)) return false;
-    const visited = new Set([thread.id]);
-    let ancestor: T | undefined = candidate;
-    while (ancestor !== undefined) {
-      if (visited.has(ancestor.id)) return false;
-      visited.add(ancestor.id);
-      if (ancestor.deletedAt != null) return true;
-      if (
-        ancestor.projectId !== thread.projectId ||
-        ancestor.delegatedFrom != null ||
-        !isListedThreadLineage(ancestor.lineage)
-      )
-        return false;
-      if (ancestor.groupingParentThreadId == null) return true;
-      ancestor = byId.get(ancestor.groupingParentThreadId);
-    }
-    // Missing shells cannot prove that the persisted ancestry is safe.
-    return false;
-  });
-}

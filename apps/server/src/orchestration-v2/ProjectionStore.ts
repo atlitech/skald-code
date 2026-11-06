@@ -6,6 +6,8 @@ import * as Stream from "effect/Stream";
 import * as NodeSqliteClient from "@t3tools/shared/nodeSqliteClient";
 import { makeThreadFind } from "./ThreadFind.ts";
 import type {
+  OrchestrationV2ListThreadGroupingParentsInput,
+  OrchestrationV2ListThreadGroupingParentsResult,
   OrchestrationV2SearchThreadInput,
   OrchestrationV2SearchThreadResult,
   OrchestrationV2ThreadHistoryPage,
@@ -568,6 +570,9 @@ export interface ProjectionStoreV2Shape {
   readonly getThreadsWithPullRequests: (
     threadId?: ThreadId,
   ) => Effect.Effect<ReadonlyArray<ProjectionThreadPullRequests>, ProjectionStoreV2Error>;
+  readonly listThreadGroupingParents: (
+    input: OrchestrationV2ListThreadGroupingParentsInput,
+  ) => Effect.Effect<OrchestrationV2ListThreadGroupingParentsResult, ProjectionStoreV2Error>;
   /** Titles of the given threads that exist, archived ones included. */
   readonly getThreadTitles: (
     threadIds: ReadonlyArray<ThreadId>,
@@ -7335,6 +7340,86 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
       }));
     }, Effect.mapError(shellSnapshotReadError));
 
+    const listThreadGroupingParents = Effect.fn("ProjectionStore.listThreadGroupingParents")(
+      function* (input: OrchestrationV2ListThreadGroupingParentsInput) {
+        const rows = yield* sql<{
+          readonly thread_id: string;
+          readonly project_id: string;
+          readonly title: string;
+          readonly grouping_parent_thread_id: string | null;
+          readonly archived_at: string | null;
+          readonly deleted_at: string | null;
+          readonly listed: number;
+        }>`
+          WITH project_threads AS (
+            SELECT thread_id, project_id, payload_json
+            FROM orchestration_v2_projection_threads
+            WHERE project_id = (
+              SELECT project_id FROM orchestration_v2_projection_threads
+              WHERE thread_id = ${input.threadId}
+            )
+          )
+          SELECT t.thread_id, t.project_id, t.title, t.archived_at, t.deleted_at,
+            json_extract(t.payload_json, '$.groupingParentThreadId') AS grouping_parent_thread_id,
+            (json_extract(t.payload_json, '$.lineage.relationshipToParent') IS NOT 'subagent'
+              AND json_extract(t.payload_json, '$.lineage.sideChat') IS NOT 1
+              AND json_extract(t.payload_json, '$.delegatedFrom') IS NULL) AS listed
+          FROM orchestration_v2_projection_threads t
+          WHERE t.thread_id IN (SELECT thread_id FROM project_threads)
+            OR t.thread_id IN (
+              SELECT json_extract(payload_json, '$.groupingParentThreadId') FROM project_threads
+            )
+          ORDER BY t.updated_at DESC, t.thread_id ASC
+        `;
+        const byId = new Map(rows.map((row) => [row.thread_id, row]));
+        const source = byId.get(input.threadId);
+        if (source === undefined || source.deleted_at !== null || source.listed === 0)
+          return { threads: [], hasMore: false };
+        const safeAncestors = new Map<string, boolean>([[source.thread_id, false]]);
+        const query = (input.query ?? "").trim().toLowerCase();
+        const threads: Array<{ id: ThreadId; title: string }> = [];
+        for (const candidate of rows) {
+          if (
+            candidate.project_id !== source.project_id ||
+            candidate.archived_at !== null ||
+            candidate.deleted_at !== null ||
+            candidate.listed === 0 ||
+            !candidate.title.toLowerCase().includes(query)
+          )
+            continue;
+          const path = new Set<string>();
+          let ancestorId: string | null = candidate.thread_id;
+          let safe = true;
+          while (ancestorId !== null) {
+            const known = safeAncestors.get(ancestorId);
+            if (known !== undefined) {
+              safe = known;
+              break;
+            }
+            if (path.has(ancestorId)) {
+              safe = false;
+              break;
+            }
+            const ancestor = byId.get(ancestorId);
+            // Missing/deleted links end the persisted chain; archived ancestors can be restored.
+            if (ancestor === undefined || ancestor.deleted_at !== null) break;
+            path.add(ancestorId);
+            if (ancestor.project_id !== source.project_id || ancestor.listed === 0) {
+              safe = false;
+              break;
+            }
+            ancestorId = ancestor.grouping_parent_thread_id;
+          }
+          for (const id of path) safeAncestors.set(id, safe);
+          if (!safe) continue;
+          if (threads.length === 100) return { threads, hasMore: true };
+          threads.push({ id: ThreadId.make(candidate.thread_id), title: candidate.title });
+        }
+        return { threads, hasMore: false };
+      },
+      Effect.mapError(shellSnapshotReadError),
+    );
+
     const getThreadTitles = Effect.fn("ProjectionStore.getThreadTitles")(function* (
       threadIds: ReadonlyArray<ThreadId>,
     ) {
@@ -7515,6 +7600,7 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
       getSettlementCandidates: readOnReader(getSettlementCandidates),
       getThreadsWithPullRequests: readOnReader(getThreadsWithPullRequests),
       getThreadTitles: readOnReader(getThreadTitles),
+      listThreadGroupingParents: readOnReader(listThreadGroupingParents),
       getThreadWorktreePaths: readOnReader(getThreadWorktreePaths),
       getOpenRemoteDelegatedTasks: getOpenRemoteDelegatedTasks.pipe(NodeSqliteClient.readOnly),
       getThreadProjection: readOnReader(getThreadProjection),

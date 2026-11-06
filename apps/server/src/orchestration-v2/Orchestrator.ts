@@ -1,5 +1,7 @@
 import type {
   GuestShareId,
+  OrchestrationV2ListThreadGroupingParentsInput,
+  OrchestrationV2ListThreadGroupingParentsResult,
   OrchestrationV2SearchThreadInput,
   OrchestrationV2SearchThreadResult,
   OrchestrationV2ThreadHistoryPage,
@@ -481,6 +483,9 @@ export interface OrchestratorV2Shape {
   readonly findGuestShareThreadId: (
     shareId: GuestShareId,
   ) => Effect.Effect<ThreadId | null, OrchestratorV2Error>;
+  readonly listThreadGroupingParents: (
+    input: OrchestrationV2ListThreadGroupingParentsInput,
+  ) => Effect.Effect<OrchestrationV2ListThreadGroupingParentsResult, OrchestratorV2Error>;
   /** Titles of the given threads that exist, archived ones included. */
   readonly getThreadTitles: (
     threadIds: ReadonlyArray<ThreadId>,
@@ -14966,6 +14971,13 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         .findGuestShareThreadId(shareId)
         .pipe(Effect.mapError(shellProjectionError));
     }),
+    listThreadGroupingParents: Effect.fn("OrchestratorV2.listThreadGroupingParents")(
+      function (input) {
+        return projectionStore
+          .listThreadGroupingParents(input)
+          .pipe(Effect.mapError(shellProjectionError));
+      },
+    ),
     getThreadTitles: Effect.fn("OrchestratorV2.getThreadTitles")(function (threadIds) {
       return projectionStore.getThreadTitles(threadIds).pipe(Effect.mapError(shellProjectionError));
     }),
