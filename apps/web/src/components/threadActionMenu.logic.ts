@@ -2,6 +2,8 @@ import type { ContextMenuItem } from "@t3tools/contracts";
 import type { SnoozePreset } from "@t3tools/client-runtime/state/thread-settled";
 
 export type ThreadActionMenuId =
+  | "move-under-thread"
+  | "move-to-top-level"
   | "find"
   | "new-thread-on-branch"
   | "filter-by-project"
@@ -69,6 +71,11 @@ export function buildDraftActionMenuItems(options: {
 
 export interface ThreadActionMenuState {
   readonly canOperate: boolean;
+  readonly grouping?: {
+    readonly supported: boolean;
+    readonly hasParent: boolean;
+    readonly canMove: boolean;
+  };
   readonly canFind?: boolean;
   readonly branch: string | null;
   readonly projectFilter: {
@@ -127,6 +134,26 @@ export function buildThreadActionMenuItems(
             label: `New thread on ${state.branch}`,
             icon: "message-square-plus",
           },
+        ]
+      : []),
+    ...(state.grouping?.supported
+      ? [
+          {
+            id: "move-under-thread" as const,
+            label: "Move under thread…",
+            icon: "folder-tree",
+            disabled: !state.grouping.canMove,
+          },
+          ...(state.grouping.hasParent
+            ? [
+                {
+                  id: "move-to-top-level" as const,
+                  label: "Move to top level",
+                  icon: "arrow-up",
+                  disabled: !state.grouping.canMove,
+                },
+              ]
+            : []),
         ]
       : []),
     ...(state.supports.pinning

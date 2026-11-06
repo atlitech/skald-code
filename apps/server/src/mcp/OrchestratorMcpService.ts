@@ -821,6 +821,7 @@ function listItemFromShell(
     pullRequests: threadPullRequests(shell.pullRequests),
     ...mcpThreadSettlement(shell, findThread),
     ...threadSnooze(shell, nowMs),
+    groupingParentThreadId: shell.groupingParentThreadId ?? null,
     parentThreadId: shell.lineage.parentThreadId,
     relationshipToParent: shell.lineage.relationshipToParent,
     itemCount: shell.visibleItemCount,
@@ -865,6 +866,7 @@ function threadDetail(
           },
     branch: projection.thread.branch,
     worktreePath: projection.thread.worktreePath,
+    groupingParentThreadId: projection.thread.groupingParentThreadId ?? null,
     parentThreadId: projection.thread.lineage.parentThreadId,
     relationshipToParent: projection.thread.lineage.relationshipToParent,
     runCount: projection.runs.length,
@@ -2911,6 +2913,9 @@ const make = Effect.gen(function* () {
                   threadId,
                   projectId: parent.thread.projectId,
                   title,
+                  ...(request.groupingParentThreadId === undefined
+                    ? {}
+                    : { groupingParentThreadId: request.groupingParentThreadId }),
                   modelSelection: target.modelSelection,
                   runtimeMode,
                   interactionMode,

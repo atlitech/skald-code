@@ -241,4 +241,47 @@ it("reuses a large thread list across tab renders and updates when its inputs ch
   expect(loaded.layout.items).toHaveLength(160);
   expect(loaded.olderSettledShelf.isListed(threads[150]!)).toBe(true);
   expect(loaded.items).not.toBe(loading.items);
+
+  const parent = {
+    ...threads[0]!,
+    runtime: { ...threads[0]!.runtime!, status: "running" as const },
+  };
+  const child = { ...threads[2]!, groupingParentThreadId: parent.id };
+  const approval = {
+    ...threads[4]!,
+    groupingParentThreadId: child.id,
+    hasPendingApprovals: true,
+  };
+  const groupedInput = {
+    ...input,
+    threads: [parent, child, approval],
+    selectedThreadKey: `${environmentId}:${approval.id}`,
+  };
+  await act(async () => root.render(<Probe input={groupedInput} tab="chats" />));
+  const grouped = seen.at(-1)!;
+  expect(grouped.layout.workingCount).toBe(0);
+  expect(
+    grouped.items.filter((item) => item.type === "v2-thread").map((item) => item.depth),
+  ).toEqual([0, 1, 2]);
+  expect(grouped.items[0]).toMatchObject({ childAttentionCount: 1, childrenExpanded: true });
+  await act(async () => grouped.toggleGroup(`${environmentId}:${parent.id}`));
+  expect(seen.at(-1)!.items.filter((item) => item.type === "v2-thread")).toHaveLength(1);
+  await act(async () =>
+    root.render(
+      <Probe
+        input={{ ...groupedInput, selectedThreadKey: `${environmentId}:${child.id}` }}
+        tab="chats"
+      />,
+    ),
+  );
+  expect(seen.at(-1)!.items[0]).toMatchObject({ childrenExpanded: true });
+  await act(async () =>
+    root.render(<Probe input={{ ...groupedInput, searchQuery: approval.title }} tab="chats" />),
+  );
+  expect(
+    seen
+      .at(-1)!
+      .items.filter((item) => item.type === "v2-thread")
+      .map((item) => item.item.thread.id),
+  ).toEqual([approval.id]);
 });

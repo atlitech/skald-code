@@ -74,7 +74,7 @@ function buildActiveShellSnapshot(input: {
 
 type ShellTrimRow = Pick<
   OrchestrationV2ThreadShell,
-  "id" | "projectId" | "lineage" | "settledOverride" | "settledAt"
+  "id" | "projectId" | "lineage" | "groupingParentThreadId" | "settledOverride" | "settledAt"
 >;
 
 /**
@@ -101,6 +101,7 @@ function shellTrimFacts(rows: ReadonlyArray<ShellTrimRow>): ShellTrimFacts {
       if (row.lineage.parentThreadId) subagentParentIds.add(row.lineage.parentThreadId);
     } else if (
       isListedThreadLineage(row.lineage) &&
+      row.groupingParentThreadId == null &&
       row.settledOverride === "settled" &&
       row.settledAt !== null
     ) {
@@ -126,11 +127,12 @@ function shellTrimFacts(rows: ReadonlyArray<ShellTrimRow>): ShellTrimFacts {
   };
 }
 
-function hiddenChildAncestorIds(
-  threads: ReadonlyArray<Pick<OrchestrationV2ThreadShell, "lineage">>,
+function nestedChildAncestorIds(
+  threads: ReadonlyArray<Pick<OrchestrationV2ThreadShell, "lineage" | "groupingParentThreadId">>,
 ) {
   const ancestorIds = new Set<string>();
   for (const thread of threads) {
+    if (thread.groupingParentThreadId != null) ancestorIds.add(thread.groupingParentThreadId);
     if (isListedThreadLineage(thread.lineage)) continue;
     if (thread.lineage.parentThreadId !== null) ancestorIds.add(thread.lineage.parentThreadId);
     ancestorIds.add(thread.lineage.rootThreadId);
@@ -163,7 +165,7 @@ function omitOlderSettledShellsWith(
 } {
   const nowMs = DateTime.toEpochMillis(input.now);
   const beforeMs = facts.olderSettledBeforeMs ?? nowMs;
-  const ancestorIds = hiddenChildAncestorIds(input.threads);
+  const ancestorIds = nestedChildAncestorIds(input.threads);
   const threads = input.threads.filter(
     (thread) =>
       !isOlderSettledThreadShell(thread, beforeMs) ||
@@ -263,9 +265,11 @@ function shellSubscriberThreadIds(
       entry.lineage.relationshipToParent === "subagent" &&
       (!options.omitIdleSubagents || entry.mayBeLive || facts.subagentParentIds.has(entry.id)),
   );
-  const ancestorIds = hiddenChildAncestorIds([
+  const ancestorIds = nestedChildAncestorIds([
     ...subagents,
-    ...index.filter((entry) => entry.lineage.sideChat === true),
+    ...index.filter(
+      (entry) => entry.lineage.sideChat === true || entry.groupingParentThreadId != null,
+    ),
   ]);
   const keptSubagentIds = new Set(subagents.map((entry) => entry.id));
   const beforeMs = facts.olderSettledBeforeMs;

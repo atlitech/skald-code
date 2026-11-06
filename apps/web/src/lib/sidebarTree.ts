@@ -123,14 +123,16 @@ export function installSidebarTree(root: HTMLElement) {
         target = rows.at(-1);
         break;
       case "ArrowRight":
-        if (row.getAttribute("aria-expanded") === "false") row.click();
+        if (row.getAttribute("aria-expanded") === "false")
+          (row.querySelector<HTMLElement>("[data-sidebar-toggle]") ?? row).click();
         else
           target = rows.find(
             (candidate) => candidate.dataset.sidebarParent === row.dataset.sidebarRow,
           );
         break;
       case "ArrowLeft":
-        if (row.getAttribute("aria-expanded") === "true") row.click();
+        if (row.getAttribute("aria-expanded") === "true")
+          (row.querySelector<HTMLElement>("[data-sidebar-toggle]") ?? row).click();
         else
           target = rows.find(
             (candidate) => candidate.dataset.sidebarRow === row.dataset.sidebarParent,

@@ -246,6 +246,8 @@ describe("omitOlderSettledShells", () => {
     const result = omit([
       ...newest,
       sideChat,
+      row("grouped-child", 50, { groupingParentThreadId: ThreadId.make("old-parent") }),
+      row("old-parent", 50),
       row("old", 30),
       row("b-old", 40),
       row("unsettled", null),
@@ -253,13 +255,15 @@ describe("omitOlderSettledShells", () => {
     expect(result.threads.map((thread) => thread.id)).toEqual([
       ...newest.map((thread) => thread.id),
       "side-chat",
+      "grouped-child",
+      "old-parent",
       "unsettled",
     ]);
     expect(result.olderSettled).toEqual({
       before: DateTime.formatIso(DateTime.makeUnsafe(100 * DAY - 2.4 * DAY)),
       asOfSequence: 7,
       counts: [
-        { projectId: "project-a", count: 1 },
+        { projectId: "project-a", count: 2 },
         { projectId: "project-b", count: 1 },
       ],
     });

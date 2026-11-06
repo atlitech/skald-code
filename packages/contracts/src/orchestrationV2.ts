@@ -459,6 +459,7 @@ export const OrchestrationV2AppThread = Schema.Struct({
   historyOrigin: Schema.optional(OrchestrationV2ThreadHistoryOrigin),
   linkOrigin: Schema.optional(OrchestrationV2LinkOrigin),
   delegatedFrom: Schema.optional(OrchestrationV2DelegatedFrom),
+  groupingParentThreadId: Schema.optional(Schema.NullOr(ThreadId)),
   lineage: OrchestrationV2AppThreadLineage,
   forkedFrom: Schema.NullOr(
     Schema.Union([
@@ -2113,6 +2114,7 @@ export const OrchestrationV2ThreadShell = Schema.Struct({
   linkedPullRequest: Schema.optional(Schema.NullOr(ThreadLinkedPullRequest)),
   pullRequests: Schema.optional(Schema.Array(ThreadPullRequestLink)),
   branchPullRequest: Schema.optional(Schema.NullOr(ThreadLinkedPullRequest)),
+  groupingParentThreadId: Schema.optional(Schema.NullOr(ThreadId)),
   lineage: OrchestrationV2AppThreadLineage,
   forkedFrom: Schema.NullOr(OrchestrationV2AppThread.fields.forkedFrom),
   activeProviderThreadId: Schema.NullOr(ProviderThreadId),
@@ -2213,11 +2215,16 @@ export function isLiveSubagentShell(
  * count every such thread, so the server and clients share this one rule.
  */
 export function isOlderSettledThreadShell(
-  thread: Pick<OrchestrationV2ThreadShell, "lineage" | "settledOverride" | "settledAt">,
+  thread: Pick<
+    OrchestrationV2ThreadShell,
+    "lineage" | "groupingParentThreadId" | "settledOverride" | "settledAt"
+  >,
   beforeMs: number,
 ): boolean {
   return (
     isListedThreadLineage(thread.lineage) &&
+    // Nested shelves have no separate paging cursor, so their lightweight shells stay loaded.
+    thread.groupingParentThreadId == null &&
     thread.settledOverride === "settled" &&
     thread.settledAt !== null &&
     DateTime.toEpochMillis(thread.settledAt) < beforeMs
@@ -2973,6 +2980,7 @@ export const OrchestrationV2Command = Schema.Union([
     threadId: ThreadId,
     projectId: ProjectId,
     title: TrimmedNonEmptyString,
+    groupingParentThreadId: Schema.optional(Schema.NullOr(ThreadId)),
     modelSelection: ModelSelection,
     runtimeMode: RuntimeMode,
     interactionMode: ProviderInteractionMode,
@@ -3110,6 +3118,7 @@ export const OrchestrationV2Command = Schema.Union([
     commandId: CommandId,
     threadId: ThreadId,
     title: Schema.optional(TrimmedNonEmptyString),
+    groupingParentThreadId: Schema.optional(Schema.NullOr(ThreadId)),
     regenerateTitle: Schema.optional(Schema.Boolean),
     branch: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
     worktreePath: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
@@ -3701,6 +3710,7 @@ export const OrchestrationV2ThreadLaunchInput = Schema.Struct({
   creationSource: Schema.optional(OrchestrationV2CreationSource),
   threadId: Schema.optional(ThreadId),
   reuseExistingThread: Schema.optional(Schema.Boolean),
+  groupingParentThreadId: Schema.optional(Schema.NullOr(ThreadId)),
   projectId: ProjectId,
   title: TrimmedNonEmptyString,
   generateTitle: Schema.optional(Schema.Boolean),

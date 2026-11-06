@@ -58,6 +58,23 @@ in a new thread's model picker to add or remove them. A regular click returns to
 single model. Choose a base branch and send. Each selection starts a separate thread
 and worktree while you stay in the new thread composer. This requires a Git project.
 
+## Group related threads
+
+Choose **Move under thread…** from a thread's menu to group it beneath another
+thread in the same project and environment. This is useful when one thread
+coordinates several independent tasks. Choose **Move to top level** to remove
+the grouping.
+
+Expand the parent to browse its children. Children use the same Working,
+Snoozed, and Settled sections as the main list; finished work stays in the
+unlabeled active list until it settles. Search still finds individual children.
+Grouping is saved on the server and follows you across devices.
+
+Grouping does not give the parent control over its children's runs. Stopping or
+deleting the parent does not stop or delete these independent threads.
+Active children remain visible at the top level if their parent is settled,
+snoozed, archived, or unavailable in the current view.
+
 ## Pin and reorder threads
 
 Pin a thread from its menu to keep it above your active work.

@@ -461,6 +461,8 @@ export function HomeScreen(props: HomeScreenProps) {
     items: threadListV2Items,
     contentOnlyThreadKeys,
     olderSettledShelf,
+    toggleGroup,
+    toggleGroupShelf,
   } = useThreadListV2({
     threads: props.threads,
     pendingTasks: props.pendingTasks,
@@ -547,7 +549,12 @@ export function HomeScreen(props: HomeScreenProps) {
           count={item.count}
           disabled={item.disabled}
           expanded={item.expanded}
-          onToggle={toggleWorkingShelf}
+          onToggle={
+            item.groupingParentKey === undefined
+              ? toggleWorkingShelf
+              : () => toggleGroupShelf(item.key, item.expanded)
+          }
+          depth={item.depth}
         />
       );
     }
@@ -557,7 +564,12 @@ export function HomeScreen(props: HomeScreenProps) {
           count={item.count}
           disabled={item.disabled}
           expanded={item.expanded}
-          onToggle={toggleSnoozedShelf}
+          onToggle={
+            item.groupingParentKey === undefined
+              ? toggleSnoozedShelf
+              : () => toggleGroupShelf(item.key, item.expanded)
+          }
+          depth={item.depth}
         />
       );
     }
@@ -567,13 +579,20 @@ export function HomeScreen(props: HomeScreenProps) {
           count={item.count}
           disabled={item.disabled}
           expanded={item.expanded}
-          onToggle={toggleSettledShelf}
+          onToggle={
+            item.groupingParentKey === undefined
+              ? toggleSettledShelf
+              : () => toggleGroupShelf(item.key, item.expanded)
+          }
+          depth={item.depth}
         />
       );
     }
     const thread = item.item.thread;
     return (
       <ThreadListV2Row
+        grouping={item}
+        onToggleChildren={() => toggleGroup(`${thread.environmentId}:${thread.id}`)}
         pane={sidebarSurface ? "sidebar" : "screen"}
         selected={scopedThreadKey(thread.environmentId, thread.id) === selectedThreadKey}
         fullSwipeWidth={fullSwipeWidth}

@@ -1696,3 +1696,109 @@ it.effect("dispatch records the command outcome and its duration", () =>
     assert.strictEqual((yield* durations).count - durationsBefore, 1);
   }).pipe(Effect.provide(layerTest)),
 );
+
+it.effect(
+  "organizes independent threads without changing their execution lineage or lifecycle",
+  () =>
+    Effect.gen(function* () {
+      const orchestrator = yield* Orchestrator.OrchestratorV2;
+      const projections = yield* ProjectionStore.ProjectionStoreV2;
+      const parentId = ThreadId.make("thread:group-parent");
+      const childId = ThreadId.make("thread:group-child");
+      const otherId = ThreadId.make("thread:group-other");
+      const siblingId = ThreadId.make("thread:group-sibling");
+      const projectId = ProjectId.make("project:group");
+      for (const [threadId, groupingParentThreadId] of [
+        [parentId, null],
+        [childId, parentId],
+        [otherId, null],
+        [siblingId, null],
+      ] as const) {
+        yield* orchestrator.dispatch({
+          type: "thread.create",
+          commandId: CommandId.make(`create:${threadId}`),
+          threadId,
+          projectId: threadId === otherId ? ProjectId.make("project:other") : projectId,
+          title: threadId,
+          groupingParentThreadId,
+          modelSelection,
+          runtimeMode: "full-access",
+          interactionMode: "default",
+          branch: null,
+          worktreePath: null,
+          createdBy: "user",
+          creationSource: "web",
+        });
+      }
+      assert.equal((yield* projections.getThread(childId)).groupingParentThreadId, parentId);
+      assert.equal((yield* projections.getThreadShell(childId))?.groupingParentThreadId, parentId);
+      assert.deepEqual((yield* projections.getThread(childId)).lineage, {
+        parentThreadId: null,
+        relationshipToParent: null,
+        rootThreadId: childId,
+      });
+      for (const [threadId, groupingParentThreadId] of [
+        [parentId, childId],
+        [childId, childId],
+        [childId, otherId],
+        [childId, ThreadId.make("thread:missing")],
+      ] as const) {
+        const refused = yield* orchestrator
+          .dispatch({
+            type: "thread.metadata.update",
+            commandId: CommandId.make(`invalid-parent:${threadId}:${groupingParentThreadId}`),
+            threadId,
+            groupingParentThreadId,
+          })
+          .pipe(Effect.result);
+        assert.ok(Result.isFailure(refused));
+        assert.equal((yield* projections.getThread(childId)).groupingParentThreadId, parentId);
+      }
+      yield* orchestrator.dispatch({
+        type: "thread.metadata.update",
+        commandId: CommandId.make("detach-group-child"),
+        threadId: childId,
+        groupingParentThreadId: null,
+      });
+      assert.isNull((yield* projections.getThreadShell(childId))?.groupingParentThreadId);
+      yield* orchestrator.dispatch({
+        type: "thread.metadata.update",
+        commandId: CommandId.make("reattach-group-child"),
+        threadId: childId,
+        groupingParentThreadId: parentId,
+      });
+      yield* orchestrator.dispatch({
+        type: "thread.settle",
+        commandId: CommandId.make("settle-group-parent"),
+        threadId: parentId,
+      });
+      assert.isNull((yield* projections.getThread(childId)).settledOverride);
+      yield* orchestrator.dispatch({
+        type: "thread.delete",
+        commandId: CommandId.make("delete-group-parent"),
+        threadId: parentId,
+      });
+      assert.isNull((yield* projections.getThread(childId)).deletedAt);
+      assert.equal((yield* projections.getThreadShell(childId))?.groupingParentThreadId, parentId);
+      const concurrentMoves = yield* Effect.all(
+        (
+          [
+            [childId, siblingId],
+            [siblingId, childId],
+          ] as const
+        ).map(([threadId, groupingParentThreadId]) =>
+          orchestrator
+            .dispatch({
+              type: "thread.metadata.update",
+              commandId: CommandId.make(`concurrent-parent:${threadId}`),
+              threadId,
+              groupingParentThreadId,
+            })
+            .pipe(Effect.result),
+        ),
+        { concurrency: "unbounded" },
+      );
+      assert.equal(concurrentMoves.filter(Result.isSuccess).length, 1);
+      assert.equal(concurrentMoves.filter(Result.isFailure).length, 1);
+    }).pipe(Effect.provide(layerTest)),
+);

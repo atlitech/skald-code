@@ -259,6 +259,10 @@ export const OrchestratorMcpTaskCancelResult = Schema.Struct({
 export type OrchestratorMcpTaskCancelResult = typeof OrchestratorMcpTaskCancelResult.Type;
 
 export const OrchestratorMcpCreateThreadRequest = Schema.Struct({
+  groupingParentThreadId: Schema.optional(Schema.NullOr(ThreadId)).annotate({
+    description:
+      "Set to this thread ID to nest the new independent thread beneath it. Omit for top level. Same project only; does not delegate work.",
+  }),
   prompt: Schema.optional(OrchestratorMcpPrompt),
   title: Schema.optional(OrchestratorMcpTitle),
   target: Schema.optional(OrchestratorMcpTarget),
@@ -373,6 +377,7 @@ export const OrchestratorMcpThreadListItem = Schema.Struct({
   settledBy: Schema.optional(Schema.NullOr(Schema.Literals(["self", "parent"]))),
   snoozed: Schema.Boolean,
   snoozedUntil: Schema.NullOr(IsoDateTime),
+  groupingParentThreadId: Schema.optional(Schema.NullOr(ThreadId)),
   parentThreadId: Schema.NullOr(ThreadId),
   relationshipToParent: Schema.NullOr(Schema.Literals(["fork", "subagent"])),
   itemCount: NonNegativeInt,
@@ -443,6 +448,7 @@ export const OrchestratorMcpThreadDetail = Schema.Struct({
   titleRegeneration: Schema.NullOr(ThreadTitleRegeneration),
   branch: Schema.NullOr(Schema.String),
   worktreePath: Schema.NullOr(Schema.String),
+  groupingParentThreadId: Schema.optional(Schema.NullOr(ThreadId)),
   parentThreadId: Schema.NullOr(ThreadId),
   relationshipToParent: Schema.NullOr(Schema.Literals(["fork", "subagent"])),
   runCount: NonNegativeInt,

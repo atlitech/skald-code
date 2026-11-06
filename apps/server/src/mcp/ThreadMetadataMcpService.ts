@@ -72,6 +72,13 @@ function metadataCommand(input: {
         threadId: input.threadId,
         title: input.update.title!,
       };
+    case "set_parent":
+      return {
+        type: "thread.metadata.update",
+        commandId: input.commandId,
+        threadId: input.threadId,
+        groupingParentThreadId: input.update.groupingParentThreadId!,
+      };
     case "regenerate_title":
       return {
         type: "thread.metadata.update",
@@ -88,7 +95,12 @@ function resultFromThread(input: {
   readonly sequence: number;
   readonly thread: Pick<
     OrchestrationV2AppThread,
-    "id" | "title" | "titleRegeneration" | "linkedPullRequest" | "updatedAt"
+    | "id"
+    | "title"
+    | "groupingParentThreadId"
+    | "titleRegeneration"
+    | "linkedPullRequest"
+    | "updatedAt"
   >;
 }): ThreadMetadataMcpUpdateResult {
   return {
@@ -97,6 +109,7 @@ function resultFromThread(input: {
     commandId: input.commandId,
     sequence: input.sequence,
     title: input.thread.title,
+    groupingParentThreadId: input.thread.groupingParentThreadId ?? null,
     titleRegeneration:
       input.thread.titleRegeneration === undefined || input.thread.titleRegeneration === null
         ? null

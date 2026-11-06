@@ -1,4 +1,6 @@
 import type { EnvironmentThreadShell } from "@t3tools/client-runtime/state/shell";
+import { useAtomValue } from "@effect/atom-react";
+import { CommandId, isListedThreadLineage } from "@t3tools/contracts";
 import { threadChipCopyTarget } from "@t3tools/client-runtime/thread-reference";
 import type { SnoozePresetSetting } from "@t3tools/contracts/settings";
 import { useCallback, useState } from "react";
@@ -9,8 +11,13 @@ import { copyTextWithHaptic } from "../../lib/copyTextWithHaptic";
 import { copyThreadReference } from "../../lib/copyThreadReference";
 import { appAtomRegistry } from "../../state/atom-registry";
 import { threadArrangementOpenAtom } from "../../state/thread-order";
+import { environmentServerConfigsAtom } from "../../state/server";
+import { threadEnvironment } from "../../state/threads";
+import { useAtomCommand } from "../../state/use-atom-command";
+import { uuidv4 } from "../../lib/uuid";
 import { threadCanArchive } from "../home/threadArchive";
 import { CustomSnoozeSheet } from "./CustomSnoozeSheet";
+import { ThreadParentSheet } from "./ThreadParentSheet";
 import { canTurnThreadIntoProject, turnThreadIntoProject } from "./turnThreadIntoProject";
 import {
   buildThreadActionMenu,
@@ -64,12 +71,37 @@ export function useThreadActionMenu(input: {
 }) {
   const { thread, actions, state } = input;
   const [customSnoozeOpen, setCustomSnoozeOpen] = useState(false);
+  const [parentPickerOpen, setParentPickerOpen] = useState(false);
+  const configs = useAtomValue(environmentServerConfigsAtom);
+  const canGroup = useAtomValue(
+    threadEnvironment.setParent.permissionAtom(thread?.environmentId ?? null),
+  );
+  const setParent = useAtomCommand(threadEnvironment.setParent);
+  const groupingSupported =
+    thread !== null &&
+    isListedThreadLineage(thread.lineage) &&
+    configs.get(thread.environmentId)?.environment.capabilities.threadGrouping === true;
+  const detachFromParent = useCallback(async () => {
+    if (thread === null || !groupingSupported || !canGroup) return;
+    const result = await setParent({
+      environmentId: thread.environmentId,
+      input: {
+        type: "thread.metadata.update",
+        commandId: CommandId.make(uuidv4()),
+        threadId: thread.id,
+        groupingParentThreadId: null,
+      },
+    });
+    if (result._tag !== "Success")
+      Dialog.alert("Could not move thread", "Try moving this thread again.");
+  }, [thread, groupingSupported, canGroup, setParent]);
   const identity = thread ? `${thread.environmentId}:${thread.id}` : null;
   const [boundIdentity, setBoundIdentity] = useState(identity);
   // List recycling and chat navigation can change the thread without remounting.
   if (boundIdentity !== identity) {
     setBoundIdentity(identity);
     setCustomSnoozeOpen(false);
+    setParentPickerOpen(false);
   }
   const presets = resolveThreadListV2SnoozePresets({
     secondary: state.snoozeSupported && state.snoozable ? "snooze" : null,
@@ -87,6 +119,9 @@ export function useThreadActionMenu(input: {
         canArchive: threadCanArchive(thread.runtime),
         canTurnIntoProject: canTurnThreadIntoProject(thread),
         snoozePresets: presets,
+        ...(groupingSupported
+          ? { grouping: { canMove: canGroup, hasParent: thread.groupingParentThreadId != null } }
+          : {}),
       })
     : [];
 
@@ -94,6 +129,12 @@ export function useThreadActionMenu(input: {
     (id: string) => {
       if (!thread || (!state.canOperate && threadMenuActionRequiresOperate(id))) return;
       switch (id) {
+        case "group-thread":
+          if (groupingSupported && canGroup) setParentPickerOpen(true);
+          return;
+        case "ungroup-thread":
+          void detachFromParent();
+          return;
         case "new-thread-on-branch":
           return actions.newThreadOnBranch(thread);
         case "settle":
@@ -159,7 +200,16 @@ export function useThreadActionMenu(input: {
           "That snooze time has passed. Choose another time.",
         );
     },
-    [thread, actions, state.canOperate, presets, input.snoozePresets],
+    [
+      thread,
+      actions,
+      state.canOperate,
+      presets,
+      input.snoozePresets,
+      groupingSupported,
+      canGroup,
+      detachFromParent,
+    ],
   );
   return {
     menuActions,
@@ -173,6 +223,10 @@ export function useThreadActionMenu(input: {
           onClose={() => setCustomSnoozeOpen(false)}
           onSnooze={(until) => actions.snoozeThread(thread, until)}
         />
+      ) : null,
+    parentPickerSheet:
+      parentPickerOpen && thread ? (
+        <ThreadParentSheet thread={thread} onClose={() => setParentPickerOpen(false)} />
       ) : null,
   };
 }

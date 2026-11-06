@@ -423,7 +423,14 @@ export interface ShellSnapshotOptions {
 /** What a shell subscriber's trims read from an active thread, without building its shell. */
 export interface ActiveShellIndexEntry extends Pick<
   OrchestrationV2ThreadShell,
-  "id" | "projectId" | "lineage" | "settledOverride" | "settledAt" | "pinnedAt" | "snoozedUntil"
+  | "id"
+  | "projectId"
+  | "lineage"
+  | "groupingParentThreadId"
+  | "settledOverride"
+  | "settledAt"
+  | "pinnedAt"
+  | "snoozedUntil"
 > {
   /** False only when no run, request, work item, or watch can make the shell live. */
   readonly mayBeLive: boolean;
@@ -1636,6 +1643,9 @@ export function threadShellFromProjection(
     ...(projection.thread.activeOrderKey === undefined
       ? {}
       : { activeOrderKey: projection.thread.activeOrderKey }),
+    ...(projection.thread.groupingParentThreadId === undefined
+      ? {}
+      : { groupingParentThreadId: projection.thread.groupingParentThreadId }),
     lineage: projection.thread.lineage,
     forkedFrom: projection.thread.forkedFrom,
     activeProviderThreadId: projection.thread.activeProviderThreadId,
@@ -1917,6 +1927,9 @@ function shellFromState(input: {
     ...(input.state.thread.activeOrderKey === undefined
       ? {}
       : { activeOrderKey: input.state.thread.activeOrderKey }),
+    ...(input.state.thread.groupingParentThreadId === undefined
+      ? {}
+      : { groupingParentThreadId: input.state.thread.groupingParentThreadId }),
     lineage: input.state.thread.lineage,
     forkedFrom: input.state.thread.forkedFrom,
     activeProviderThreadId: input.state.thread.activeProviderThreadId,
@@ -7236,6 +7249,7 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
         readonly parent_thread_id: string | null;
         readonly root_thread_id: string;
         readonly side_chat: number | null;
+        readonly grouping_parent_thread_id: string | null;
         readonly settled_override: string | null;
         readonly settled_at: string | null;
         readonly pinned_at: string | null;
@@ -7249,6 +7263,7 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
           json_extract(t.payload_json, '$.lineage.parentThreadId') AS parent_thread_id,
           json_extract(t.payload_json, '$.lineage.rootThreadId') AS root_thread_id,
           json_extract(t.payload_json, '$.lineage.sideChat') AS side_chat,
+          json_extract(t.payload_json, '$.groupingParentThreadId') AS grouping_parent_thread_id,
           json_extract(t.payload_json, '$.settledOverride') AS settled_override,
           json_extract(t.payload_json, '$.settledAt') AS settled_at,
           json_extract(t.payload_json, '$.pinnedAt') AS pinned_at,
@@ -7295,6 +7310,10 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
       return rows.map((row): ActiveShellIndexEntry => ({
         id: ThreadId.make(row.thread_id),
         projectId: ProjectId.make(row.project_id),
+        groupingParentThreadId:
+          row.grouping_parent_thread_id === null
+            ? null
+            : ThreadId.make(row.grouping_parent_thread_id),
         lineage: {
           parentThreadId:
             row.parent_thread_id === null ? null : ThreadId.make(row.parent_thread_id),
@@ -7352,6 +7371,7 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
           AND json_extract(t.payload_json, '$.archivedAt') IS NULL
           AND json_extract(t.payload_json, '$.lineage.relationshipToParent') IS NOT 'subagent'
           AND json_extract(t.payload_json, '$.lineage.sideChat') IS NOT 1
+          AND json_extract(t.payload_json, '$.groupingParentThreadId') IS NULL
           AND json_extract(t.payload_json, '$.settledOverride') = 'settled'
           AND json_extract(t.payload_json, '$.settledAt') IS NOT NULL${
             projectIds === undefined ? sql`` : sql` AND t.project_id IN ${sql.in(projectIds)}`

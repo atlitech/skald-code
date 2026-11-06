@@ -230,6 +230,9 @@ export const layer = McpToolAccess.toLayer(ProjectToolkit, {
           threadId,
           projectId,
           title: input.title,
+          ...(input.groupingParentThreadId === undefined
+            ? {}
+            : { groupingParentThreadId: input.groupingParentThreadId }),
           modelSelection,
           runtimeMode: startedRuntimeMode,
           interactionMode,
