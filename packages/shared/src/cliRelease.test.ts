@@ -34,9 +34,9 @@ describe("cliRelease", () => {
 
   it("keeps fork discovery and downloads on the fork, honoring explicit mirrors", () => {
     const version = "1.2.4-atli.10";
-    const base = `https://github.com/atlitech/t3code/releases/download/v${version}`;
+    const base = `https://github.com/atlitech/skald-code/releases/download/v${version}`;
     expect(cliReleaseIndexPageUrl(2, version)).toBe(
-      "https://api.github.com/repos/atlitech/t3code/releases?per_page=100&page=2",
+      "https://api.github.com/repos/atlitech/skald-code/releases?per_page=100&page=2",
     );
     expect(cliReleaseDownloadBaseUrl(version)).toBe(base);
     expect(cliReleaseAssetUrl(version, "SHA256SUMS")).toBe(`${base}/SHA256SUMS`);

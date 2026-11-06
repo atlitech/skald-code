@@ -190,7 +190,7 @@ const runGuard = (
           env: {
             GITHUB_REF: options.ref ?? "refs/heads/atli",
             GITHUB_SHA: sha,
-            GITHUB_REPOSITORY: "atlitech/t3code",
+            GITHUB_REPOSITORY: "atlitech/skald-code",
             GITHUB_SERVER_URL: "https://github.com",
             GITHUB_OUTPUT: outputPath,
           },
@@ -233,9 +233,9 @@ describe("fork release guard lookups", () => {
         },
       ]);
       assert.deepStrictEqual(spawned.toSorted(), [
-        `gh api --include repos/atlitech/t3code/releases/tags/v0.0.46-atli.1`,
-        `gh api --paginate repos/atlitech/t3code/commits/${sha}/check-runs?check_name=Check&filter=all&per_page=100 --jq .check_runs[] | {name, status, conclusion, app: .app.slug}`,
-        `git ls-remote --exit-code --tags https://github.com/atlitech/t3code.git refs/tags/v0.0.46-atli.1`,
+        `gh api --include repos/atlitech/skald-code/releases/tags/v0.0.46-atli.1`,
+        `gh api --paginate repos/atlitech/skald-code/commits/${sha}/check-runs?check_name=Check&filter=all&per_page=100 --jq .check_runs[] | {name, status, conclusion, app: .app.slug}`,
+        `git ls-remote --exit-code --tags https://github.com/atlitech/skald-code.git refs/tags/v0.0.46-atli.1`,
       ]);
     }),
   );

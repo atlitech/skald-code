@@ -513,7 +513,7 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
         {
           provider: "github",
           owner: "atlitech",
-          repo: "t3code",
+          repo: "skald-code",
           releaseType: "prerelease",
           channel: "atli",
         },
@@ -522,7 +522,7 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
     }).pipe(
       Effect.provide(
         ConfigProvider.layer(
-          ConfigProvider.fromEnv({ env: { GITHUB_REPOSITORY: "atlitech/t3code" } }),
+          ConfigProvider.fromEnv({ env: { GITHUB_REPOSITORY: "atlitech/skald-code" } }),
         ),
       ),
     ),

@@ -69,7 +69,7 @@ describe("DesktopUpdates", () => {
     const harness = makeHarness({
       appVersion: "1.2.4-atli.9",
       env: { T3CODE_DESKTOP_MOCK_UPDATES: "false" },
-      appUpdateYml: "provider: github\nowner: atlitech\nrepo: t3code\nchannel: atli\n",
+      appUpdateYml: "provider: github\nowner: atlitech\nrepo: skald-code\nchannel: atli\n",
     });
     return Effect.scoped(
       Effect.gen(function* () {

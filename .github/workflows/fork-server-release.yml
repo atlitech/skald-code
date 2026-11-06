@@ -1,6 +1,6 @@
 name: Fork server release
 
-# Fork-only (atlitech/t3code). Builds the self-contained Linux x64 server
+# Fork-only (atlitech/skald-code). Builds the self-contained Linux x64 server
 # archive the official release ships and, from the same commit, the signed and
 # notarized Mac arm64 desktop DMG and OTA payload and the personal Android arm64-v8a APK, and publishes
 # all three with SHA256SUMS and manifest.json as a prerelease, in the layout
@@ -40,7 +40,7 @@ jobs:
   # later job checks out the commit this job approved, not the moving branch.
   guard:
     name: Guard release
-    if: github.repository == 'atlitech/t3code'
+    if: github.repository_id == '1406026313'
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
@@ -98,7 +98,7 @@ jobs:
   build-linux:
     name: Build Linux x64 server
     needs: guard
-    if: github.repository == 'atlitech/t3code'
+    if: github.repository_id == '1406026313'
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     permissions:
@@ -208,7 +208,7 @@ jobs:
   build-mac:
     name: Build Mac arm64 desktop app
     needs: guard
-    if: github.repository == 'atlitech/t3code' && github.ref == 'refs/heads/atli'
+    if: github.repository_id == '1406026313' && github.ref == 'refs/heads/atli'
     runs-on: macos-15
     environment: personal-macos-signing
     # Apple's first notarization for a new team can take several hours.
@@ -225,7 +225,7 @@ jobs:
       T3CODE_RELAY_URL: ${{ vars.T3CODE_RELAY_URL }}
       T3CODE_DESKTOP_VERSION: ${{ needs.guard.outputs.version }}
       T3CODE_DESKTOP_SIGNED: "true"
-      T3CODE_DESKTOP_UPDATE_REPOSITORY: atlitech/t3code
+      T3CODE_DESKTOP_UPDATE_REPOSITORY: atlitech/skald-code
       # The Developer ID profile's team; the build also signs passkey entitlements with it.
       T3CODE_APPLE_TEAM_ID: H6L3F33KRM
       VERSION: ${{ needs.guard.outputs.version }}
@@ -351,7 +351,7 @@ jobs:
   build-android:
     name: Build personal Android arm64-v8a APK
     needs: guard
-    if: github.repository == 'atlitech/t3code' && github.ref == 'refs/heads/atli'
+    if: github.repository_id == '1406026313' && github.ref == 'refs/heads/atli'
     runs-on: blacksmith-8vcpu-ubuntu-2404
     environment: personal-android-signing
     timeout-minutes: 60
@@ -501,7 +501,7 @@ jobs:
   admission:
     name: Admit Linux server upgrade
     needs: [guard, build-linux]
-    if: github.repository == 'atlitech/t3code'
+    if: github.repository_id == '1406026313'
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     permissions:
@@ -588,7 +588,7 @@ jobs:
   publish:
     name: Publish release
     needs: [guard, build-linux, admission, build-mac, build-android, test-full]
-    if: github.repository == 'atlitech/t3code'
+    if: github.repository_id == '1406026313'
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     permissions:
@@ -666,7 +666,7 @@ jobs:
           gh release create "$TAG" release/* \
             --target "$SHA" \
             --draft --prerelease \
-            --title "T3 Code $VERSION (atli fork, Linux x64 server, Mac arm64 app, and Android APK)" \
+            --title "Skald Code $VERSION" \
             --notes-file "$RUNNER_TEMP/release-notes.md"
           gh release edit "$TAG" --draft=false
 
@@ -681,7 +681,7 @@ jobs:
   testflight:
     name: Upload personal iOS app to TestFlight
     needs: [guard, publish]
-    if: github.repository == 'atlitech/t3code' && github.ref == 'refs/heads/atli'
+    if: github.repository_id == '1406026313' && github.ref == 'refs/heads/atli'
     # Duo support needs the iOS 27.1 SDK; only the Xcode 27 image has it.
     runs-on: xcode-27
     environment: personal-ios-signing

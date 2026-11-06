@@ -78,7 +78,7 @@ describe("fork server runbook", () => {
   it("shows how to read a release's scope, and who gives the evidence verdict", () => {
     const scope = section("Verification scope");
     expect(scope).toMatch(
-      /gh release download v[^\s]+ --repo atlitech\/t3code -p manifest\.json -p ADMISSION\.json\n/,
+      /gh release download v[^\s]+ --repo atlitech\/skald-code -p manifest\.json -p ADMISSION\.json\n/,
     );
     expect(scope).toMatch(
       /node scripts\/fork-release-scope\.ts --manifest manifest\.json --admission ADMISSION\.json\n/,
@@ -108,7 +108,7 @@ describe("fork server runbook", () => {
     expect(drill).toMatch(/`priorVersion` in the target's\s+`ADMISSION\.json`/);
     expect(drill).toMatch(/must already\s+carry\s+`t3 recover`/);
     expect(drill).toMatch(
-      /gh run download <run-id> --repo atlitech\/t3code -n recovery-drill -n recovery-verification\n/,
+      /gh run download <run-id> --repo atlitech\/skald-code -n recovery-drill -n recovery-verification\n/,
     );
     expect(drill).toMatch(/`RECOVERY\.json`/);
     expect(drill).toMatch(

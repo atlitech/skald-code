@@ -1,5 +1,5 @@
 # shellcheck shell=bash
-# Fork-only (atlitech/t3code). Sourced by run-admission.sh and
+# Fork-only (atlitech/skald-code). Sourced by run-admission.sh and
 # record-fixture.sh: extracts a release archive and runs its `t3 serve` on a
 # scratch T3 home, the way smoke-cli-archive.ts does, with no PATH and no
 # ambient environment. Only the PID started here is ever signalled.

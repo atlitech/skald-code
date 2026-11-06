@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-// Fork-only (atlitech/t3code). Picks the release the Linux admission upgrades
+// Fork-only (atlitech/skald-code). Picks the release the Linux admission upgrades
 // from: the newest earlier fork release that was itself admitted (it carries
 // ADMISSION.json). Before any release was admitted, the owner names one with
 // the workflow's bootstrap input, and the admission record says so.

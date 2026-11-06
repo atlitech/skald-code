@@ -6,28 +6,28 @@
       name="viewport"
       content="width=device-width, initial-scale=1.0, viewport-fit=cover, interactive-widget=resizes-content"
     />
-    <meta name="theme-color" content="#000000" />
+    <meta name="theme-color" content="#101c28" />
     <link rel="icon" href="/favicon.ico" sizes="48x48" />
     <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
     <link rel="manifest" href="/manifest.webmanifest" />
     <script>
       (() => {
-        const LIGHT_BACKGROUND = "#ffffff";
-        const DARK_BACKGROUND = "#000000";
+        const LIGHT_BACKGROUND = "#f8f9f5";
+        const DARK_BACKGROUND = "#101c28";
         const CUSTOM_THEMES_STORAGE_KEY = "t3code:themes:v1";
         const THEME_FOLLOW_SYSTEM_STORAGE_KEY = "t3code:theme-follow-system";
         const THEME_APPEARANCE_MODE_STORAGE_KEY = "t3code:theme-appearance-mode";
         const THEME_HALVES_STORAGE_KEY = "t3code:theme-halves:v1";
         const SPLASH_COLORS = {
           light: {
-            background: "#ffffff",
-            foreground: "#262626",
-            accent: "#4f46e5",
+            background: "#f8f9f5",
+            foreground: "#101c28",
+            accent: "#7e5db1",
           },
           dark: {
-            background: "#000000",
-            foreground: "#f5f5f5",
-            accent: "#818cf8",
+            background: "#101c28",
+            foreground: "#f8f9f5",
+            accent: "#b094e2",
           },
         };
         // These are the runtime defaults used to complete a custom palette
@@ -396,15 +396,15 @@
       }
 
       body {
-        background: #ffffff;
-        color: #262626;
+        background: #f8f9f5;
+        color: #101c28;
         font-family:
           -apple-system, BlinkMacSystemFont, "Inter Variable", "Segoe UI", system-ui, sans-serif;
       }
 
       html.dark body {
-        background: #000000;
-        color: #f5f5f5;
+        background: #101c28;
+        color: #f8f9f5;
       }
 
       #boot-shell {
@@ -436,7 +436,11 @@
       #boot-shell-logo {
         width: 64px;
         height: 64px;
-        object-fit: contain;
+        color: #7e5db1;
+      }
+
+      html.dark #boot-shell-logo {
+        color: #b094e2;
       }
 
       /* App CSS locks body and #root scrolling once main loads, so the error screen scrolls itself. */
@@ -447,8 +451,8 @@
       }
 
       #boot-error {
-        --boot-error-fg: #262626;
-        --boot-error-bg: #ffffff;
+        --boot-error-fg: #101c28;
+        --boot-error-bg: #f8f9f5;
         --boot-error-line: color-mix(in srgb, currentColor 12%, transparent);
         display: flex;
         flex-direction: column;
@@ -461,8 +465,8 @@
       }
 
       html.dark #boot-error {
-        --boot-error-fg: #f5f5f5;
-        --boot-error-bg: #000000;
+        --boot-error-fg: #f8f9f5;
+        --boot-error-bg: #101c28;
       }
 
       html[data-theme-selected="true"] #boot-error {
@@ -668,13 +672,28 @@
         white-space: nowrap;
       }
     </style>
-    <title>T3 Code (Beta)</title>
+    <title>Skald Code (Beta)</title>
   </head>
   <body>
     <div id="root">
       <div id="boot-shell">
-        <div id="boot-shell-card" aria-label="T3 Code splash screen">
-          <img id="boot-shell-logo" src="/apple-touch-icon.png" alt="T3 Code" />
+        <div id="boot-shell-card" aria-label="Skald Code splash screen">
+          <svg
+            id="boot-shell-logo"
+            xmlns="http://www.w3.org/2000/svg"
+            viewBox="0 0 378 378"
+            role="img"
+            aria-label="Skald Code"
+          >
+            <path
+              d="M293.13,109.10 A131.25,131.25 0 1 1 206.13,58.87"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="37.5"
+              stroke-linecap="round"
+            />
+            <circle cx="189" cy="189" r="75" fill="currentColor" />
+          </svg>
         </div>
       </div>
     </div>

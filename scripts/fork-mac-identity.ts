@@ -110,7 +110,7 @@ const AppUpdate = fromYaml(
   Schema.Struct({
     provider: Schema.Literal("github"),
     owner: Schema.Literal("atlitech"),
-    repo: Schema.Literal("t3code"),
+    repo: Schema.Literal("skald-code"),
     channel: Schema.Literal("atli"),
   }),
 );

@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-// Fork-only (atlitech/t3code). The runtime check of the Linux admission
+// Fork-only (atlitech/skald-code). The runtime check of the Linux admission
 // (run-admission.sh): the upgraded candidate serves its client at GET / and
 // reports the release's version from GET /.well-known/t3/environment.
 

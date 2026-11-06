@@ -38,7 +38,7 @@ env:
 jobs:
   static:
     name: Static checks
-    if: github.repository == 'atlitech/t3code'
+    if: github.repository_id == '1406026313'
     runs-on: ${{ inputs.runner-profile == 'github' && 'ubuntu-24.04' || 'blacksmith-8vcpu-ubuntu-2404' }}
     timeout-minutes: 20
     steps:
@@ -80,7 +80,7 @@ jobs:
 
   tests:
     name: Fork tests
-    if: github.repository == 'atlitech/t3code'
+    if: github.repository_id == '1406026313'
     runs-on: ${{ inputs.runner-profile == 'github' && 'ubuntu-24.04' || 'blacksmith-8vcpu-ubuntu-2404' }}
     timeout-minutes: 20
     steps:
@@ -129,7 +129,7 @@ jobs:
 
   server:
     name: Server tests ${{ matrix.shard }}/2
-    if: github.repository == 'atlitech/t3code'
+    if: github.repository_id == '1406026313'
     runs-on: ${{ inputs.runner-profile == 'github' && 'ubuntu-24.04' || 'blacksmith-4vcpu-ubuntu-2404' }}
     timeout-minutes: 20
     strategy:
@@ -204,7 +204,7 @@ jobs:
 
   check:
     name: Check
-    if: ${{ always() && github.repository == 'atlitech/t3code' }}
+    if: ${{ always() && github.repository_id == '1406026313' }}
     needs: [static, tests, server]
     runs-on: ubuntu-24.04
     timeout-minutes: 2

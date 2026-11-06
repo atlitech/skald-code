@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-// Fork-only (atlitech/t3code). Picks the release the recovery drill upgrades
+// Fork-only (atlitech/skald-code). Picks the release the recovery drill upgrades
 // to: the one the owner named, or the newest admitted release. Either way it
 // must be a published fork release that carries ADMISSION.json, since the
 // drill upgrades from that record's priorVersion.

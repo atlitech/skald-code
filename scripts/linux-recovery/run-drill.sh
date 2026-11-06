@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Fork-only (atlitech/t3code). The drill job of fork-recovery-drill.yml: on a
+# Fork-only (atlitech/skald-code). The drill job of fork-recovery-drill.yml: on a
 # scratch T3 home, upgrades between two admitted fork releases, declares the
 # upgrade failed after it wrote new work, recovers with `t3 recover`, and
 # writes RECOVERY.json (record.ts) and the drilled home as it stood right
