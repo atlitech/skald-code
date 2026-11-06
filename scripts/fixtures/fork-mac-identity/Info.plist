@@ -3,17 +3,17 @@
 <plist version="1.0">
 <dict>
 	<key>CFBundleDisplayName</key>
-	<string>T3 Code (Alpha)</string>
+	<string>Skald Code</string>
 	<key>CFBundleExecutable</key>
-	<string>T3 Code (Alpha)</string>
+	<string>Skald Code</string>
 	<key>CFBundleIconFile</key>
 	<string>icon.icns</string>
 	<key>CFBundleIdentifier</key>
-	<string>com.t3tools.t3code</string>
+	<string>tech.atli.skaldcode</string>
 	<key>CFBundleInfoDictionaryVersion</key>
 	<string>6.0</string>
 	<key>CFBundleName</key>
-	<string>T3 Code (Alpha)</string>
+	<string>Skald Code</string>
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>

@@ -4,9 +4,9 @@ Fork-only runbook. `atli` is upstream `main` plus our commits.
 [`fork-server-release.yml`](../../.github/workflows/fork-server-release.yml)
 publishes the same self-contained Linux x64 server archive an official release
 ships, so a VM that already runs the official background service can switch to
-our build and keep its T3 Connect link. Each release also carries the unsigned
-Mac arm64 desktop app and the personal Android arm64-v8a APK, built from the
-same commit.
+our build and keep its T3 Connect link. Each release also carries the signed
+and notarized Mac arm64 desktop app and the personal Android arm64-v8a APK,
+built from the same commit.
 
 ## Versions
 
@@ -78,6 +78,26 @@ and restart `<n>` at 1.
   App ID gains a capability. The API key is a team key with the App Manager
   role, from App Store Connect's **Users and Access → Integrations**.
 
+- **Settings → Environments**: create `personal-macos-signing`, allowed only on
+  `atli`. Only the Mac build job uses it, and a release does not publish
+  without it:
+
+  | Kind     | Name                                                 | Value                                                        |
+  | -------- | ---------------------------------------------------- | ------------------------------------------------------------ |
+  | Secret   | `T3CODE_PERSONAL_MACOS_CERTIFICATE_BASE64`           | the Developer ID Application certificate, `base64 -i id.p12` |
+  | Secret   | `T3CODE_PERSONAL_MACOS_CERTIFICATE_PASSWORD`         | the password the `.p12` was exported with                    |
+  | Secret   | `T3CODE_PERSONAL_MACOS_PROFILE_BASE64`               | Developer ID profile for `tech.atli.skaldcode`, base64       |
+  | Secret   | `T3CODE_PERSONAL_MACOS_APP_STORE_CONNECT_KEY_BASE64` | the same App Store Connect API key, base64                   |
+  | Variable | `T3CODE_PERSONAL_MACOS_APP_STORE_CONNECT_KEY_ID`     | that key's ID                                                |
+  | Variable | `T3CODE_PERSONAL_MACOS_APP_STORE_CONNECT_ISSUER_ID`  | the issuer ID                                                |
+
+  Only the Account Holder can create the certificate, in Xcode under **Manage
+  Certificates → + → Developer ID Application**. Make the profile under
+  **Profiles → + → Developer ID** for that certificate. The build signs
+  associated-domain entitlements for upstream's Clerk passkey domain, and
+  macOS refuses them unless the App ID has Associated Domains. Passkeys
+  themselves do not work there, since that domain trusts only T3 Tools' apps.
+
 - Optional, under **Variables**: `T3CODE_CLERK_GOOGLE_ANDROID_CLIENT_ID`, the
   Google Android OAuth client ID. Only when it is set does the APK offer native
   Google sign-in.
@@ -116,7 +136,7 @@ version whose tag or release already exists, and an `atli` tip without a
 passing `Check` run (Fork CI runs on every push to `atli`). Every build checks out
 the commit the guard approved, and the publish job creates the tag and the
 release together, with every asset at once. A release publishes only when the
-Linux server, the Mac desktop app, and the Android APK all build, and every
+Linux server, the signed and notarized Mac desktop app, and the Android APK all build, and every
 package's tests pass on that commit (`fork-full-suite.yml`). The Android
 job checks the app's public config before it builds, and the APK's package,
 signing certificate, and versionCode before it uploads. After the release
@@ -249,8 +269,10 @@ have no override.
 
 ## Installing the macOS desktop app
 
-Every release carries the Mac arm64 desktop app as an unsigned DMG, with the
-same version as the server. Download it and check it before installing:
+Every release carries the Mac arm64 desktop app, Skald Code
+(`tech.atli.skaldcode`), as a DMG with the same version as the server. It is
+signed with the Atli LLC Developer ID and notarized, so it opens without a
+Gatekeeper warning. Download it and check it before installing:
 
 ```sh
 gh release download v0.0.46-atli.2 -R atlitech/t3code -p 'T3-Code-*-arm64.dmg' -p SHA256SUMS
@@ -258,28 +280,17 @@ shasum -a 256 -c --ignore-missing SHA256SUMS
 gh attestation verify T3-Code-0.0.46-atli.2-arm64.dmg -R atlitech/t3code
 ```
 
-Copy the app out of the DMG:
+Quit the app, then drag Skald Code from the DMG into `/Applications`. Projects
+and threads live in `~/.t3/userdata` and the desktop's own data in
+`~/Library/Application Support/t3code-v2`, so both carry over. An agent running
+inside the app ends when it quits, so an agent doing the swap must hand it to a
+detached process. The build has no update feed and never replaces itself.
 
-```sh
-hdiutil attach T3-Code-0.0.46-atli.2-arm64.dmg -nobrowse -readonly -mountpoint /tmp/t3-dmg
-ditto "/tmp/t3-dmg/T3 Code (Alpha).app" "T3 Code (Alpha).app"
-hdiutil detach /tmp/t3-dmg
-```
-
-The unsigned app keeps Electron's default signature, which does not verify.
-Sign it ad hoc before installing:
-
-```sh
-codesign --force --deep --sign - "T3 Code (Alpha).app"
-codesign --verify --deep --strict "T3 Code (Alpha).app"
-```
-
-Then quit T3 Code and replace the app in `/Applications`. The bundle ID matches
-the official app, so `~/.t3/userdata` carries over. An agent running inside the
-app ends when it quits, so an agent doing the swap must hand it to a detached
-process. The build has no update feed and never replaces itself. macOS may ask
-once for Keychain access to "T3 Code Safe Storage" because every ad hoc build
-has a new signature.
+Earlier releases shipped an ad hoc signed `T3 Code (Beta).app` (or
+`T3 Code (Alpha).app`) with upstream's bundle ID. Delete it after installing
+Skald Code, or both claim `t3code://` links. macOS asks once for Keychain access to "T3 Code Safe Storage" and again
+for camera, microphone, and screen capture, because the signature and bundle ID
+are new; allow them and they stay allowed across updates.
 
 ### Building it locally
 
@@ -299,12 +310,21 @@ built, reuse the installed binary:
 
 ```sh
 mkdir -p native/resource-monitor/target/aarch64-apple-darwin/release
-cp "/Applications/T3 Code (Alpha).app/Contents/Resources/resource-monitor/t3-resource-monitor" \
+cp "/Applications/Skald Code.app/Contents/Resources/resource-monitor/t3-resource-monitor" \
   native/resource-monitor/target/aarch64-apple-darwin/release/
 T3CODE_DESKTOP_REUSE_RESOURCE_MONITOR=1 T3CODE_DESKTOP_VERSION=0.0.46-atli.2 vp run dist:desktop:dmg:arm64
 ```
 
-Copy the app out, sign it ad hoc, and install it as above.
+A local build is not signed with the Developer ID. Copy the app out of the
+DMG, sign it ad hoc, and install it as above; macOS asks for Keychain access
+after every ad hoc build:
+
+```sh
+hdiutil attach release/T3-Code-0.0.46-atli.2-arm64.dmg -nobrowse -readonly -mountpoint /tmp/t3-dmg
+ditto "/tmp/t3-dmg/Skald Code.app" "Skald Code.app"
+hdiutil detach /tmp/t3-dmg
+codesign --force --deep --sign - "Skald Code.app"
+```
 
 ## Installing the personal Android app
 

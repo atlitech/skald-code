@@ -65,6 +65,7 @@ import {
   WSL_RUNTIME_ARCHIVE_NAME,
   wslRuntimeArchiveStem,
 } from "./build-desktop-artifact.ts";
+import { DESKTOP_APP_ID } from "./lib/desktop-app-id.ts";
 import {
   ReleasePackageManifestError,
   releasePackageFiles,
@@ -1418,7 +1419,7 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
     });
 
     assert.deepStrictEqual(configuration, {
-      appId: "com.t3tools.t3code",
+      appId: DESKTOP_APP_ID,
       teamId: "ABC1234567",
       rpDomains: ["example.clerk.accounts.dev"],
       provisioningProfilePath: "/tmp/t3code.provisionprofile",
@@ -1441,7 +1442,7 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
       "clerk.example.com",
       "example.clerk.accounts.dev",
     ]);
-    assert.include(entitlements, "<string>ABC1234567.com.t3tools.t3code</string>");
+    assert.include(entitlements, `<string>ABC1234567.${DESKTOP_APP_ID}</string>`);
     assert.include(entitlements, "<string>webcredentials:clerk.example.com</string>");
     assert.include(entitlements, "<string>webcredentials:example.clerk.accounts.dev</string>");
     assert.include(entitlements, "<key>com.apple.security.cs.allow-jit</key>");
@@ -1592,6 +1593,9 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
     Effect.gen(function* () {
       const signedWinConfig = (hostPlatform: string) =>
         createBuildConfig("win", "nsis", "1.2.3", true, false, undefined, undefined).pipe(
+          Effect.tap((config) =>
+            Effect.sync(() => assert.equal(config.appId, "com.t3tools.t3code")),
+          ),
           Effect.map((config) => config.win as Record<string, unknown>),
           Effect.provideService(HostProcess.Platform, hostPlatform),
         );

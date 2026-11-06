@@ -204,10 +204,29 @@ describe("fork server release workflow", () => {
     );
   });
 
-  it("ships the Mac app unsigned, without Apple secrets", () => {
-    const text = job("build-mac").join("\n");
-    expect(text).not.toMatch(/secrets\./);
-    expect(text).not.toMatch(/--signed|T3CODE_DESKTOP_SIGNED|CSC_|APPLE_/);
+  it("signs and notarizes the Mac app with the owner's Developer ID, only from atli", () => {
+    const body = job("build-mac");
+    expect(ifOf(body)).toBe(
+      "github.repository == 'atlitech/t3code' && github.ref == 'refs/heads/atli'",
+    );
+    expect(body.join("\n")).toMatch(/^ {4}environment: personal-macos-signing$/m);
+    const env = jobMap(body, "env");
+    expect(env.get("T3CODE_DESKTOP_SIGNED")).toBe('"true"');
+    for (const [name, value] of env) expect(value, name).not.toMatch(/secrets\./);
+
+    const steps = stepsOf(body);
+    const write = stepIndex(
+      steps,
+      /T3CODE_MACOS_PROVISIONING_PROFILE=\$RUNNER_TEMP\/skald-code\.provisionprofile" >> "\$GITHUB_ENV"/,
+    );
+    const build = stepIndex(steps, /vp run dist:desktop:dmg:arm64$/m);
+    expect(write).toBeLessThan(build);
+    expect(steps[write]).toMatch(/APPLE_API_KEY=\$RUNNER_TEMP\/AuthKey\.p8" >> "\$GITHUB_ENV"/);
+    // The certificate and its password reach only the build.
+    for (const name of ["CSC_LINK", "CSC_KEY_PASSWORD"]) {
+      const holders = steps.flatMap((step, index) => (step.includes(`${name}:`) ? [index] : []));
+      expect(holders, name).toEqual([build]);
+    }
   });
 
   it("checks the Mac app's identity, then attests and uploads the DMG", () => {
