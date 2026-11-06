@@ -1,5 +1,7 @@
 import type {
   GuestShareId,
+  OrchestrationV2ListThreadGroupingParentsInput,
+  OrchestrationV2ListThreadGroupingParentsResult,
   OrchestrationV2SearchThreadInput,
   OrchestrationV2SearchThreadResult,
   OrchestrationV2ThreadHistoryPage,
@@ -24,6 +26,7 @@ import {
   CommandId,
   type GuestMessageId,
   isCompactionCommandMessage,
+  isListedThreadLineage,
   isOrchestrationV2WorkActive,
   isProviderNativeSubagentThread,
   MessageId,
@@ -96,6 +99,7 @@ import * as Option from "effect/Option";
 import * as Ref from "effect/Ref";
 import * as Result from "effect/Result";
 import * as Schema from "effect/Schema";
+import * as Semaphore from "effect/Semaphore";
 import * as Stream from "effect/Stream";
 
 import * as ProjectStore from "./ProjectStore.ts";
@@ -479,6 +483,9 @@ export interface OrchestratorV2Shape {
   readonly findGuestShareThreadId: (
     shareId: GuestShareId,
   ) => Effect.Effect<ThreadId | null, OrchestratorV2Error>;
+  readonly listThreadGroupingParents: (
+    input: OrchestrationV2ListThreadGroupingParentsInput,
+  ) => Effect.Effect<OrchestrationV2ListThreadGroupingParentsResult, OrchestratorV2Error>;
   /** Titles of the given threads that exist, archived ones included. */
   readonly getThreadTitles: (
     threadIds: ReadonlyArray<ThreadId>,
@@ -1159,6 +1166,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
   const runtimePolicy = yield* RuntimePolicyV2;
   const threadForkService = yield* ThreadForkServiceV2;
   const threadDispatch = yield* ThreadCommandExecutor.ThreadCommandExecutor;
+  const groupingChanges = yield* Semaphore.make(1);
   // Read once: the policy is fixed for the server's life, and dispatch takes it as an input.
   const { managedPolicy } = serverSettings;
   const runtimeModeCeiling: RuntimeModeCeiling | undefined =
@@ -3135,6 +3143,73 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       { concurrency: 1, discard: true },
     );
 
+  const validateGroupingParent = Effect.fn("orchestrationV2.validateGroupingParent")(function* (
+    command: Extract<
+      OrchestrationV2Command,
+      { readonly type: "thread.create" | "thread.metadata.update" }
+    >,
+    thread: Pick<OrchestrationV2AppThread, "id" | "projectId"> &
+      Partial<Pick<OrchestrationV2AppThread, "lineage" | "delegatedFrom">>,
+  ) {
+    if (command.groupingParentThreadId == null) return;
+    if (
+      (thread.lineage !== undefined && !isListedThreadLineage(thread.lineage)) ||
+      thread.delegatedFrom !== undefined
+    ) {
+      return yield* new OrchestratorDispatchError({
+        commandId: command.commandId,
+        commandType: command.type,
+        cause: "Subagents and side chats stay with their execution parent.",
+      });
+    }
+    const visited = new Set<ThreadId>([thread.id]);
+    let parentId: ThreadId | null = command.groupingParentThreadId;
+    while (parentId !== null) {
+      if (visited.has(parentId))
+        return yield* new OrchestratorDispatchError({
+          commandId: command.commandId,
+          commandType: command.type,
+          cause: "Thread grouping cannot contain a cycle.",
+        });
+      visited.add(parentId);
+      const parent: OrchestrationV2AppThread | null = yield* projectionStore
+        .getThread(parentId)
+        .pipe(
+          Effect.catchTags({ ProjectionStoreThreadNotFoundError: () => Effect.succeed(null) }),
+          Effect.mapError(
+            (cause) => new OrchestratorProjectionError({ threadId: parentId!, cause }),
+          ),
+        );
+      // Archived ancestors retain their links when unarchived, so the cycle walk must include them.
+      if (
+        parent === null ||
+        parent.deletedAt !== null ||
+        (parent.archivedAt !== null && parentId === command.groupingParentThreadId)
+      ) {
+        if (parentId !== command.groupingParentThreadId) break;
+        return yield* new OrchestratorDispatchError({
+          commandId: command.commandId,
+          commandType: command.type,
+          cause: "The grouping parent must be an existing, unarchived thread.",
+        });
+      }
+      if (parent.projectId !== thread.projectId)
+        return yield* new OrchestratorDispatchError({
+          commandId: command.commandId,
+          commandType: command.type,
+          cause: "Grouped threads must belong to the same project.",
+        });
+      if (!isListedThreadLineage(parent.lineage) || parent.delegatedFrom !== undefined) {
+        return yield* new OrchestratorDispatchError({
+          commandId: command.commandId,
+          commandType: command.type,
+          cause: "Subagents and side chats cannot be grouping parents.",
+        });
+      }
+      parentId = parent.groupingParentThreadId ?? null;
+    }
+  });
+
   const dispatchThreadCreate = Effect.fn("orchestrationV2.dispatch.threadCreate")(function* (
     command: Extract<OrchestrationV2Command, { readonly type: "thread.create" }>,
     events: Ref.Ref<Array<OrchestrationV2DomainEvent>>,
@@ -3160,6 +3235,14 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       });
     }
 
+    yield* validateGroupingParent(command, {
+      id: command.threadId,
+      projectId: command.projectId,
+      ...(command.linkOrigin === undefined || command.delegatedFrom === undefined
+        ? {}
+        : { delegatedFrom: command.delegatedFrom }),
+    });
+
     const now = yield* DateTime.now;
     const emitEvent = emit(events, command);
     const thread: OrchestrationV2AppThread = {
@@ -3168,6 +3251,9 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       id: command.threadId,
       projectId: command.projectId,
       title: command.title,
+      ...(command.groupingParentThreadId === undefined
+        ? {}
+        : { groupingParentThreadId: command.groupingParentThreadId }),
       providerInstanceId: command.modelSelection.instanceId,
       modelSelection: command.modelSelection,
       runtimeMode: command.runtimeMode,
@@ -3548,6 +3634,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         });
       }
     }
+    if (command.type === "thread.metadata.update") yield* validateGroupingParent(command, thread);
     if (
       command.type === "thread.metadata.update" &&
       command.expectedWorktreePath !== undefined &&
@@ -4082,6 +4169,9 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
                     Date.parse(thread.limitRecovery.resetAt)
                 ? { snoozedUntil: null, snoozedAt: null, lastSnoozeWakeAt: now }
                 : {}),
+            ...(command.groupingParentThreadId === undefined
+              ? {}
+              : { groupingParentThreadId: command.groupingParentThreadId }),
             ...(command.branch === undefined ? {} : { branch: command.branch }),
             ...(command.worktreePath === undefined ? {} : { worktreePath: command.worktreePath }),
             ...(command.linkedPullRequest === undefined
@@ -14382,6 +14472,12 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       commandThreadId(command),
       dispatchWithReceiptEffect(command),
     );
+    // Cross-thread reparenting must serialize ancestor reads with commits to prevent concurrent cycles.
+    if (
+      (command.type === "thread.create" || command.type === "thread.metadata.update") &&
+      command.groupingParentThreadId !== undefined
+    )
+      return yield* groupingChanges.withPermit(dispatch);
     // A parent's lock comes before its side chats' locks, so a delete cascade and a side chat
     // fork or command never interleave. A fork from a side chat or onto an existing thread would
     // invert that order; dispatch rejects both, so they skip the source lock.
@@ -14875,6 +14971,13 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         .findGuestShareThreadId(shareId)
         .pipe(Effect.mapError(shellProjectionError));
     }),
+    listThreadGroupingParents: Effect.fn("OrchestratorV2.listThreadGroupingParents")(
+      function (input) {
+        return projectionStore
+          .listThreadGroupingParents(input)
+          .pipe(Effect.mapError(shellProjectionError));
+      },
+    ),
     getThreadTitles: Effect.fn("OrchestratorV2.getThreadTitles")(function (threadIds) {
       return projectionStore.getThreadTitles(threadIds).pipe(Effect.mapError(shellProjectionError));
     }),

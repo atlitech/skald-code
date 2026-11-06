@@ -1,6 +1,9 @@
 import type { OlderSettledScope } from "@t3tools/client-runtime/state/threads";
 import type { EnvironmentId } from "@t3tools/contracts";
-import { useMemo, useSyncExternalStore } from "react";
+import { useMemo, useState, useSyncExternalStore } from "react";
+import { buildThreadGrouping } from "@t3tools/client-runtime/state/thread-grouping";
+import { effectiveSnoozed } from "@t3tools/client-runtime/state/thread-settled";
+import { nestThreadListItems } from "./nestedThreadList";
 
 import { scopedProjectKey } from "../../lib/scopedEntities";
 import { useOlderSettledShelf, useOlderSettledShelfGrowth } from "../../state/olderSettledShelf";
@@ -67,10 +70,70 @@ export function useThreadListV2(input: {
   readonly selectedThreadKey: string | null;
 }) {
   const { threads, workingShelfEnabled } = input;
+  const [groupOverrides, setGroupOverrides] = useState<{
+    selection: string | null;
+    values: ReadonlyMap<string, boolean>;
+  }>(() => ({ selection: input.selectedThreadKey, values: new Map() }));
+  const expandedGroups = useMemo(
+    () =>
+      groupOverrides.selection === input.selectedThreadKey
+        ? groupOverrides.values
+        : new Map<string, boolean>(),
+    [groupOverrides, input.selectedThreadKey],
+  );
+  const [expandedShelves, setExpandedShelves] = useState<ReadonlyMap<string, boolean>>(
+    () => new Map(),
+  );
   const layoutTime = useMemo(
     () => threadListV2LayoutTime({ threads, now: input.now, searchQuery: input.searchQuery }),
     [threads, input.now, input.searchQuery],
   );
+  const grouping = useMemo(() => {
+    const scoped = threads.filter(
+      (thread) =>
+        thread.archivedAt === null &&
+        (input.environmentId === null || thread.environmentId === input.environmentId) &&
+        (input.projectRefs == null ||
+          input.projectRefs.some(
+            (ref) =>
+              ref.environmentId === thread.environmentId && ref.projectId === thread.projectId,
+          )),
+    );
+    return buildThreadGrouping(scoped, {
+      isParked: (thread) =>
+        effectiveSnoozed(thread, { now: layoutTime }) ||
+        (thread.settledOverride === "settled" &&
+          !input.queuedThreadKeys.has(`${thread.environmentId}:${thread.id}`)),
+    });
+  }, [threads, input.environmentId, input.projectRefs, layoutTime, input.queuedThreadKeys]);
+  const attentionAncestors = useMemo(() => {
+    const result = new Set<string>();
+    for (const thread of threads) {
+      if (
+        !thread.hasPendingApprovals &&
+        !thread.hasPendingUserInput &&
+        !thread.pendingSubagentRequest
+      )
+        continue;
+      let key = grouping.parentByChild.get(`${thread.environmentId}:${thread.id}`);
+      while (key !== undefined && !result.has(key)) {
+        result.add(key);
+        key = grouping.parentByChild.get(key);
+      }
+    }
+    return result;
+  }, [threads, grouping]);
+  const listedThreads = input.searchQuery.trim().length > 0 ? threads : grouping.roots;
+  const selectedRootThreadKey = useMemo(() => {
+    let key = input.selectedThreadKey;
+    if (input.searchQuery.trim().length > 0) return key;
+    while (key !== null) {
+      const parent = grouping.parentByChild.get(key);
+      if (parent === undefined) break;
+      key = parent;
+    }
+    return key;
+  }, [input.selectedThreadKey, input.searchQuery, grouping]);
   // A thread can stop working when the threads change, or when its exit grace expires.
   const inboxVersion = useSyncExternalStore(
     threadListInboxReturns.subscribe,
@@ -80,6 +143,7 @@ export function useThreadListV2(input: {
     () => observeInbox(workingShelfEnabled ? threads : null, inboxVersion),
     [threads, workingShelfEnabled, inboxVersion],
   );
+  const { isWorking: inboxIsWorking, returnedAt: inboxReturnedAt } = inbox;
   // Compute move availability per section; per-row planning is quadratic.
   const moveAvailability = useMemo(() => {
     const sectionAvailability = (section: "pinned" | "active") =>
@@ -135,7 +199,7 @@ export function useThreadListV2(input: {
     () =>
       buildThreadListV2Items({
         pendingOrder: input.pendingOrder,
-        threads: threads.filter((thread) => thread.archivedAt === null),
+        threads: listedThreads.filter((thread) => thread.archivedAt === null),
         environmentId: input.environmentId,
         projectRefs: input.projectRefs,
         searchQuery: input.searchQuery,
@@ -147,11 +211,12 @@ export function useThreadListV2(input: {
         now: layoutTime,
         workingShelfEnabled,
         workingShelfExpanded: input.workingShelfExpanded,
-        inboxReturnAt: inbox.returnedAt,
-        isWorking: inbox.isWorking,
+        inboxReturnAt: inboxReturnedAt,
+        isWorking: (thread) =>
+          !attentionAncestors.has(`${thread.environmentId}:${thread.id}`) && inboxIsWorking(thread),
         snoozedShelfExpanded: input.snoozedShelfExpanded,
         settledShelfExpanded: input.settledShelfExpanded,
-        selectedThreadKey: input.selectedThreadKey,
+        selectedThreadKey: selectedRootThreadKey,
         isListedSettled: isListed,
         unloadedSettledCount: unloadedCount(
           threads.filter(
@@ -168,6 +233,7 @@ export function useThreadListV2(input: {
     [
       input.pendingOrder,
       threads,
+      listedThreads,
       input.environmentId,
       input.projectRefs,
       input.searchQuery,
@@ -179,11 +245,12 @@ export function useThreadListV2(input: {
       layoutTime,
       workingShelfEnabled,
       input.workingShelfExpanded,
-      inbox.returnedAt,
-      inbox.isWorking,
+      inboxReturnedAt,
+      inboxIsWorking,
+      attentionAncestors,
       input.snoozedShelfExpanded,
       input.settledShelfExpanded,
-      input.selectedThreadKey,
+      selectedRootThreadKey,
       isListed,
       unloadedCount,
       scopes,
@@ -242,7 +309,83 @@ export function useThreadListV2(input: {
       input.shelfPreferencesLoaded,
     ],
   );
-  return { layout, items, contentOnlyThreadKeys, olderSettledShelf };
+  const nestedItems = useMemo(
+    () =>
+      input.searchQuery.trim().length > 0 || grouping.parentByChild.size === 0
+        ? items
+        : nestThreadListItems({
+            items,
+            grouping,
+            layoutInput: {
+              threads,
+              environmentId: input.environmentId,
+              projectRefs: input.projectRefs,
+              searchQuery: "",
+              now: layoutTime,
+              workingShelfEnabled,
+              settlementEnvironmentIds: input.settlementEnvironmentIds,
+              snoozeEnvironmentIds: input.snoozeEnvironmentIds,
+              queuedThreadKeys: input.queuedThreadKeys,
+              selectedThreadKey: input.selectedThreadKey,
+              isWorking: (thread) =>
+                !attentionAncestors.has(`${thread.environmentId}:${thread.id}`) &&
+                inboxIsWorking(thread),
+              inboxReturnAt: inboxReturnedAt,
+            },
+            listInput: {
+              pendingTasks: [],
+              snoozeLabelNow: `${input.now.slice(0, 16)}:00.000Z`,
+              snoozeEnvironmentIds: input.snoozeEnvironmentIds,
+              queuedThreadKeys: input.queuedThreadKeys,
+            },
+            expandedGroups,
+            expandedShelves,
+          }),
+    [
+      items,
+      grouping,
+      threads,
+      input.environmentId,
+      input.projectRefs,
+      input.searchQuery,
+      layoutTime,
+      workingShelfEnabled,
+      input.settlementEnvironmentIds,
+      input.snoozeEnvironmentIds,
+      input.queuedThreadKeys,
+      input.selectedThreadKey,
+      input.now,
+      inboxIsWorking,
+      attentionAncestors,
+      inboxReturnedAt,
+      expandedGroups,
+      expandedShelves,
+    ],
+  );
+  const toggleGroup = (key: string) => {
+    const row = nestedItems.find(
+      (item) =>
+        item.type === "v2-thread" &&
+        `${item.item.thread.environmentId}:${item.item.thread.id}` === key,
+    );
+    setGroupOverrides({
+      selection: input.selectedThreadKey,
+      values: new Map(expandedGroups).set(
+        key,
+        !(row?.type === "v2-thread" && row.childrenExpanded),
+      ),
+    });
+  };
+  const toggleGroupShelf = (key: string, expanded: boolean) =>
+    setExpandedShelves((current) => new Map(current).set(key, !expanded));
+  return {
+    layout,
+    items: nestedItems,
+    contentOnlyThreadKeys,
+    olderSettledShelf,
+    toggleGroup,
+    toggleGroupShelf,
+  };
 }
 
 /** The list's scope per environment: its projects there, or every project. */

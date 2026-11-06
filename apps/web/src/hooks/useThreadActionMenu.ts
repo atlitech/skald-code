@@ -1,3 +1,6 @@
+import { openThreadParentDialog, useMoveThreadToTopLevel } from "../components/ThreadParentDialog";
+import { appAtomRegistry } from "../rpc/atomRegistry";
+import { environmentServerConfigsAtom } from "../state/server";
 import { scopeProjectRef } from "@t3tools/client-runtime/environment";
 import { requestCustomSnooze } from "../components/CustomSnoozeDialog";
 import { openGuestShareDialog } from "../components/chat/guestShareDialogState";
@@ -10,6 +13,7 @@ import {
 import { canSnooze, effectiveSnoozed } from "@t3tools/client-runtime/state/thread-settled";
 import {
   AuthOrchestrationOperateScope,
+  isListedThreadLineage,
   type ScopedThreadRef,
   type ThreadId,
 } from "@t3tools/contracts";
@@ -88,6 +92,7 @@ export function useThreadActionMenu(input: {
     markThreadUnread,
     turnThreadIntoProject,
   } = useThreadActions();
+  const moveThreadToTopLevel = useMoveThreadToTopLevel();
   const updateThreadMetadata = useOrchestrationCommand(threadEnvironment.updateMetadata, {
     reportFailure: false,
   });
@@ -136,6 +141,16 @@ export function useThreadActionMenu(input: {
       const items = buildThreadActionMenuItems({
         canOperate: readEnvironmentScope(threadRef.environmentId, AuthOrchestrationOperateScope),
         canFind: onFind !== undefined,
+        grouping: {
+          supported:
+            isListedThreadLineage(thread.lineage) &&
+            appAtomRegistry.get(environmentServerConfigsAtom).get(threadRef.environmentId)
+              ?.environment.capabilities.threadGrouping === true,
+          hasParent: thread.groupingParentThreadId != null,
+          canMove: appAtomRegistry.get(
+            threadEnvironment.setParent.permissionAtom(threadRef.environmentId),
+          ),
+        },
         branch: thread.branch ?? null,
         projectFilter: null,
         isPinned: thread.pinnedAt != null,
@@ -190,6 +205,12 @@ export function useThreadActionMenu(input: {
         }
       };
       switch (action) {
+        case "move-under-thread":
+          openThreadParentDialog(threadRef);
+          return;
+        case "move-to-top-level":
+          await moveThreadToTopLevel(threadRef);
+          return;
         case "find":
           onFind?.(threadRef);
           return;

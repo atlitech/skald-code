@@ -81,6 +81,7 @@ export interface ThreadLaunchInput {
   readonly commandId: CommandId;
   readonly threadId?: ThreadId;
   readonly reuseExistingThread?: boolean;
+  readonly groupingParentThreadId?: ThreadId | null;
   readonly projectId: ProjectId;
   readonly title: string;
   readonly generateTitle?: boolean;
@@ -929,6 +930,9 @@ const make = Effect.gen(function* () {
                 commandId: input.commandId,
                 threadId: candidateThreadId,
                 expectedEmpty: true,
+                ...(input.groupingParentThreadId === undefined
+                  ? {}
+                  : { groupingParentThreadId: input.groupingParentThreadId }),
               })
             : threads.dispatch({
                 type: "thread.create",
@@ -936,6 +940,9 @@ const make = Effect.gen(function* () {
                 threadId: candidateThreadId,
                 projectId: input.projectId,
                 title: input.title,
+                ...(input.groupingParentThreadId === undefined
+                  ? {}
+                  : { groupingParentThreadId: input.groupingParentThreadId }),
                 modelSelection: input.modelSelection,
                 runtimeMode: input.runtimeMode,
                 interactionMode: input.interactionMode,

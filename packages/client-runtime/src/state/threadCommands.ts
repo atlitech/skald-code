@@ -5,9 +5,16 @@ import * as Option from "effect/Option";
 import { Atom } from "effect/reactivity";
 import {
   WS_METHODS,
+  ORCHESTRATION_V2_WS_METHODS,
   type EnvironmentId,
   type OrchestrationV2ShellSnapshot,
 } from "@t3tools/contracts";
+import {
+  EnvironmentRpcUnavailableError,
+  getInitialServerConfig,
+  requestGuarded,
+  type EnvironmentRpcInput,
+} from "../rpc/client.ts";
 
 import { createOptimisticThreadLifecycle } from "./threadLifecycle.ts";
 import * as DateTime from "effect/DateTime";
@@ -119,6 +126,37 @@ export function createThreadEnvironmentAtoms<R, E>(
   });
 
   const commands = {
+    setParent: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:commands:thread:set-parent",
+      tag: ORCHESTRATION_V2_WS_METHODS.dispatchCommand,
+      execute: Effect.fn("ThreadCommands.setParent")(function* (
+        input: EnvironmentRpcInput<typeof ORCHESTRATION_V2_WS_METHODS.dispatchCommand>,
+      ) {
+        const supervisor = yield* EnvironmentSupervisor.EnvironmentSupervisor;
+        const config = yield* getInitialServerConfig().pipe(
+          Effect.mapError(
+            () =>
+              new EnvironmentRpcUnavailableError({
+                environmentId: supervisor.target.environmentId,
+                message: "Could not read this environment's capabilities.",
+              }),
+          ),
+        );
+        if (
+          config.environment.capabilities.threadGrouping !== true ||
+          input.type !== "thread.metadata.update" ||
+          input.groupingParentThreadId === undefined
+        ) {
+          return yield* new EnvironmentRpcUnavailableError({
+            environmentId: supervisor.target.environmentId,
+            message: "Update this environment's server to group threads.",
+          });
+        }
+        return yield* requestGuarded(ORCHESTRATION_V2_WS_METHODS.dispatchCommand, input);
+      }),
+      scheduler,
+      concurrency: { mode: "serial", key: ({ environmentId }) => environmentId },
+    }),
     create: createEnvironmentCommand(runtime, {
       label: "environment-data:commands:thread:create",
       execute: createThread,
@@ -377,6 +415,14 @@ export function createThreadEnvironmentAtoms<R, E>(
   const optimistic = createOptimisticThreadLifecycle(snapshotAtom);
   return {
     ...commands,
+    setParent: {
+      ...commands.setParent,
+      permissionAtom: (environmentId: EnvironmentId | null) =>
+        commands.setParent.permissionAtom(environmentId, {
+          type: "thread.metadata.update",
+          groupingParentThreadId: null,
+        }),
+    },
     snapshotAtom: optimistic.snapshotAtom,
     settle: optimistic.wrap(commands.settle, (thread, _input, now, accepted) =>
       !accepted &&

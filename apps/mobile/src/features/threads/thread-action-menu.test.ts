@@ -38,11 +38,13 @@ describe("buildThreadActionMenu", () => {
 
   it("shares actions between chat and list, adding only list arrangement controls", () => {
     for (const nested of [false, true]) {
-      const chat = leaves(buildThreadActionMenu({ ...active, nested }));
+      const grouping = { canMove: true, hasParent: true };
+      const chat = leaves(buildThreadActionMenu({ ...active, nested, grouping }));
       const list = leaves(
         buildThreadActionMenu({
           ...active,
           nested,
+          grouping,
           reorder: { canMoveUp: false, canMoveDown: true },
         }),
       );
@@ -64,9 +66,16 @@ describe("buildThreadActionMenu", () => {
           "copy-thread-id",
           "archive",
           "delete",
+          "group-thread",
+          "ungroup-thread",
         ]),
       );
       expect(chat.at(-1)).toMatchObject({ id: "delete", attributes: { destructive: true } });
+      const root = leaves(
+        buildThreadActionMenu({ ...active, nested, grouping: { canMove: true, hasParent: false } }),
+      );
+      expect(root.some((item) => item.id === "group-thread")).toBe(true);
+      expect(root.some((item) => item.id === "ungroup-thread")).toBe(false);
     }
   });
 
@@ -114,6 +123,7 @@ describe("buildThreadActionMenu", () => {
         canOperate: false,
         branch: "feature/mobile-actions",
         reorder: { canMoveUp: true, canMoveDown: true },
+        grouping: { canMove: true, hasParent: true },
       }),
     );
     const readActions = new Set(["copy-thread", "copy-thread-id", "new-thread-on-branch"]);
@@ -130,9 +140,16 @@ describe("buildThreadActionMenu", () => {
       canTurnIntoProject: true,
       isRegeneratingTitle: true,
       autoSettleEnabled: false,
+      grouping: { canMove: false, hasParent: true },
     });
     expect(actions.some((item) => item.id === "snooze")).toBe(false);
-    for (const id of ["archive", "turn-into-project", "regenerate-title"]) {
+    for (const id of [
+      "archive",
+      "turn-into-project",
+      "regenerate-title",
+      "group-thread",
+      "ungroup-thread",
+    ]) {
       expect(actions.find((item) => item.id === id)?.attributes?.disabled).toBe(true);
     }
     const flattened = leaves(actions);

@@ -552,6 +552,7 @@ function ThreadRouteContent(
     menuActions: threadRouteActions,
     handleAction: handleThreadRouteAction,
     customSnoozeSheet,
+    parentPickerSheet,
   } = useThreadActionMenu({
     thread: selectedThread,
     state: {
@@ -1016,6 +1017,7 @@ function ThreadRouteContent(
   const renderThreadRouteBody = () => (
     <>
       {customSnoozeSheet}
+      {parentPickerSheet}
       <ThreadUndoNotice
         visible={routeFocused && !panes.primarySidebarVisible && !props.inspectorPresentation}
       />

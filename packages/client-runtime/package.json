@@ -323,6 +323,10 @@
       "types": "./src/state/subagentRuntime.ts",
       "default": "./src/state/subagentRuntime.ts"
     },
+    "./state/thread-grouping": {
+      "types": "./src/state/threadGrouping.ts",
+      "default": "./src/state/threadGrouping.ts"
+    },
     "./state/thread-sort": {
       "types": "./src/state/threadSort.ts",
       "default": "./src/state/threadSort.ts"

@@ -264,6 +264,8 @@ function ThreadNavigationSidebarPane(props: ThreadNavigationSidebarProps) {
     items: threadListV2Items,
     contentOnlyThreadKeys,
     olderSettledShelf,
+    toggleGroup,
+    toggleGroupShelf,
   } = useThreadListV2({
     threads,
     pendingTasks,
@@ -407,6 +409,8 @@ function ThreadNavigationSidebarPane(props: ThreadNavigationSidebarProps) {
         const scopeKey = scopedProjectKey(thread.environmentId, thread.projectId);
         return (
           <ThreadListV2Row
+            grouping={item}
+            onToggleChildren={() => toggleGroup(`${thread.environmentId}:${thread.id}`)}
             onNewThreadOnBranch={props.onNewThreadOnBranch}
             thread={thread}
             variant={item.item.variant}
@@ -485,7 +489,12 @@ function ThreadNavigationSidebarPane(props: ThreadNavigationSidebarProps) {
             count={item.count}
             disabled={item.disabled}
             expanded={item.expanded}
-            onToggle={toggleWorkingShelf}
+            onToggle={
+              item.groupingParentKey === undefined
+                ? toggleWorkingShelf
+                : () => toggleGroupShelf(item.key, item.expanded)
+            }
+            depth={item.depth}
             pane="sidebar"
           />
         );
@@ -495,7 +504,12 @@ function ThreadNavigationSidebarPane(props: ThreadNavigationSidebarProps) {
             count={item.count}
             disabled={item.disabled}
             expanded={item.expanded}
-            onToggle={toggleSnoozedShelf}
+            onToggle={
+              item.groupingParentKey === undefined
+                ? toggleSnoozedShelf
+                : () => toggleGroupShelf(item.key, item.expanded)
+            }
+            depth={item.depth}
             pane="sidebar"
           />
         );
@@ -505,7 +519,12 @@ function ThreadNavigationSidebarPane(props: ThreadNavigationSidebarProps) {
             count={item.count}
             disabled={item.disabled}
             expanded={item.expanded}
-            onToggle={toggleSettledShelf}
+            onToggle={
+              item.groupingParentKey === undefined
+                ? toggleSettledShelf
+                : () => toggleGroupShelf(item.key, item.expanded)
+            }
+            depth={item.depth}
             pane="sidebar"
           />
         );

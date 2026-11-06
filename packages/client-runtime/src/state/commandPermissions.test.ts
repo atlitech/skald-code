@@ -15,6 +15,7 @@ import {
   AuthSettingsWriteScope,
   AuthSourceControlWriteScope,
   ThreadId,
+  CommandId,
   EnvironmentId,
   ORCHESTRATION_V2_WS_METHODS,
   ScheduledTaskId,
@@ -23,6 +24,7 @@ import {
   type PeerLinkSummary,
 } from "@t3tools/contracts";
 import * as Cause from "effect/Cause";
+import * as SecureRandom from "effect/crypto/SecureRandom";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
@@ -31,6 +33,7 @@ import { Atom, AtomRegistry, AsyncResult } from "effect/reactivity";
 import { EnvironmentRegistry } from "../connection/registry.ts";
 import { createCommandPermissions } from "./commandPermissions.ts";
 import { createEnvironmentRpcCommand } from "./runtime.ts";
+import { createThreadEnvironmentAtoms } from "./threadCommands.ts";
 import { AVAILABLE_CONNECTION_STATE, BearerConnectionTarget } from "../connection/model.ts";
 import { createPeerLinkEnvironmentAtoms } from "./peerLinks.ts";
 
@@ -54,9 +57,15 @@ const grant = (allowed: boolean): AuthSessionState => ({
   permissions: allowed ? [AuthOrchestrationOperateScope] : [],
 });
 const runtime = Atom.runtime(
-  Layer.succeed(EnvironmentRegistry, {
-    run: (_id: EnvironmentId, effect: Effect.Effect<unknown>) => effect,
-  } as unknown as EnvironmentRegistry["Service"]),
+  Layer.mergeAll(
+    Layer.succeed(EnvironmentRegistry, {
+      run: (_id: EnvironmentId, effect: Effect.Effect<unknown>) => effect,
+    } as unknown as EnvironmentRegistry["Service"]),
+    Layer.succeed(
+      SecureRandom.SecureRandom,
+      SecureRandom.make((size) => new Uint8Array(size)),
+    ),
+  ),
 );
 const permissions = createCommandPermissions(runtime, WS_METHODS.scheduledTasksDelete);
 const setup = Effect.gen(function* () {
@@ -67,6 +76,33 @@ const setup = Effect.gen(function* () {
 });
 
 describe("command permissions", () => {
+  it.effect("rejects grouping a thread through a read-only connection before RPC execution", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const registry = yield* setup;
+        registry.set(sessions(env), AsyncResult.success(grant(false)));
+        const { setParent } = createThreadEnvironmentAtoms(runtime, () => Atom.make(null));
+        expect(registry.get(setParent.permissionAtom(env))).toBe(false);
+        const result = yield* Effect.promise(() =>
+          setParent.run(registry, {
+            environmentId: env,
+            input: {
+              type: "thread.metadata.update",
+              commandId: CommandId.make("group-thread"),
+              threadId: ThreadId.make("child"),
+              groupingParentThreadId: ThreadId.make("parent"),
+            },
+          }),
+        );
+        expect(result._tag).toBe("Failure");
+        if (result._tag === "Failure") {
+          expect(Cause.squash(result.cause)).toMatchObject({
+            _tag: "EnvironmentAuthorizationError",
+          });
+        }
+      }),
+    ),
+  );
   it.effect("requires the destination read grant to refresh providers", () =>
     Effect.scoped(
       Effect.gen(function* () {
@@ -177,23 +213,29 @@ describe("command permissions", () => {
     ),
   );
 
-  it.effect.each([WS_METHODS.scheduledTasksDelete, ORCHESTRATION_V2_WS_METHODS.stopWorkflow])(
-    "uses the target grant for both availability and execution of %s",
-    (method) =>
-      Effect.scoped(
-        Effect.gen(function* () {
-          const registry = yield* setup;
-          const permissions = createCommandPermissions(runtime, method);
-          registry.set(sessions(env), AsyncResult.success(grant(true)));
-          expect(registry.get(permissions.permissionAtom(env))).toBe(true);
-          expect(permissions.permissionAtom(env)).toBe(permissions.permissionAtom(env));
-          yield* permissions.authorize(registry, env);
-          registry.set(sessions(other), AsyncResult.success(grant(false)));
-          expect(registry.get(permissions.permissionAtom(other))).toBe(false);
-          const denied = yield* permissions.authorize(registry, other).pipe(Effect.flip);
-          expect(denied._tag).toBe("EnvironmentAuthorizationError");
-        }),
-      ),
+  it.effect.each([
+    WS_METHODS.scheduledTasksDelete,
+    ORCHESTRATION_V2_WS_METHODS.stopWorkflow,
+    ORCHESTRATION_V2_WS_METHODS.dispatchCommand,
+  ])("uses the target grant for both availability and execution of %s", (method) =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const registry = yield* setup;
+        const permissions = createCommandPermissions(runtime, method);
+        const input =
+          method === ORCHESTRATION_V2_WS_METHODS.dispatchCommand
+            ? { type: "thread.metadata.update", groupingParentThreadId: null }
+            : undefined;
+        registry.set(sessions(env), AsyncResult.success(grant(true)));
+        expect(registry.get(permissions.permissionAtom(env, input))).toBe(true);
+        expect(permissions.permissionAtom(env, input)).toBe(permissions.permissionAtom(env, input));
+        yield* permissions.authorize(registry, env, input);
+        registry.set(sessions(other), AsyncResult.success(grant(false)));
+        expect(registry.get(permissions.permissionAtom(other, input))).toBe(false);
+        const denied = yield* permissions.authorize(registry, other, input).pipe(Effect.flip);
+        expect(denied._tag).toBe("EnvironmentAuthorizationError");
+      }),
+    ),
   );
   it.effect("waits for an initial grant", () =>
     Effect.scoped(

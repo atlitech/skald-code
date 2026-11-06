@@ -4,6 +4,9 @@ import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, it } from "@effect/vitest";
 import {
   AuthSessionId,
+  AuthOrchestrationOperateScope,
+  CommandId,
+  ORCHESTRATION_V2_WS_METHODS,
   AuthSourceControlWriteScope,
   EnvironmentId,
   EventId,
@@ -19,6 +22,7 @@ import {
   WsServerRefreshProvidersRpc,
   WsSubscribeServerConfigRpc,
   type OrchestrationV2StoredEvent,
+  type OrchestrationV2ThreadLaunchInput,
   type OrchestrationV2ThreadShell,
   type OrchestrationProjectShell,
   type ServerConfig,
@@ -1422,6 +1426,90 @@ it.effect("a publish whose push fails still refreshes the new remote", () =>
       [yield* Queue.take(refreshes), yield* Queue.take(refreshes)],
       ["identity /repo refresh=true", "status /repo"],
     );
+  }).pipe(
+    Effect.provide(
+      Layer.mergeAll(
+        Layer.fresh(layerConfigSources),
+        Layer.mock(PreviewAutomationBroker.PreviewAutomationBroker)({}),
+        Layer.mock(ServerBrowser.ServerBrowser)({}),
+      ),
+    ),
+    Effect.scoped,
+  ),
+);
+
+it.effect("preserves the grouping parent when launching through RPC", () =>
+  Effect.gen(function* () {
+    const parents = yield* Queue.unbounded<ThreadId | null | undefined>();
+    const services = Layer.mergeAll(
+      layerUnusedConfigRpcServices,
+      Layer.mock(ServerRuntimeStartup.ServerRuntimeStartup)({ enqueueCommand: (effect) => effect }),
+      Layer.mock(ThreadLaunchService.ThreadLaunchService)({
+        launch: (input) =>
+          Queue.offer(parents, input.groupingParentThreadId).pipe(
+            Effect.andThen(
+              Effect.fail(
+                new ThreadLaunchService.ThreadLaunchError({
+                  operation: "create-thread",
+                  commandId: input.commandId,
+                  projectId: input.projectId,
+                  cause: "Stop before provider execution",
+                }),
+              ),
+            ),
+          ),
+      }),
+      Layer.mock(ExternalLauncher.ExternalLauncher)({}),
+      Layer.mock(ProviderRegistry.ProviderRegistry)({}),
+      Layer.mock(UsageLimitSources.UsageLimitSources)({}),
+      Layer.mock(RemoteOpenTargets.RemoteOpenTargets)({}),
+      Layer.mock(DirectEndpoints.DirectEndpoints)({}),
+      Layer.mock(ManagedProjectFolders.ManagedProjectFolders)({ namedProjectsRoot: "/unused" }),
+      Layer.mock(ScratchThreadPromotion.ScratchThreadPromotion)({}),
+      Layer.mock(ServerEnvironment.ServerEnvironment)({}),
+      Layer.mock(EnvironmentAuth.EnvironmentAuth)({}),
+    );
+    const server = yield* RpcServer.makeNoSerialization(WsRpcGroup, {
+      ...WS_RPC_SERVER_OPTIONS,
+      onFromServer: () => Effect.void,
+    }).pipe(
+      Effect.provide(
+        layerWsRpc(
+          {
+            sessionId: AuthSessionId.make("launch-group-test"),
+            subject: "launch-group-test",
+            method: "browser-session-cookie",
+            scopes: [AuthOrchestrationOperateScope],
+          },
+          {},
+          yield* ServerBrowser.ServerBrowser,
+          () => Effect.void,
+          { secretReferences: true },
+        ).pipe(
+          Layer.provide(services),
+          Layer.merge(RpcAuthorization.layer([AuthOrchestrationOperateScope])),
+        ),
+      ),
+    );
+    for (const groupingParentThreadId of [ThreadId.make("parent"), null, undefined]) {
+      yield* server.write(0, {
+        _tag: "Request",
+        id: RpcMessage.RequestId(`launch-${groupingParentThreadId}`),
+        tag: ORCHESTRATION_V2_WS_METHODS.launchThread,
+        payload: {
+          commandId: CommandId.make(`launch-${groupingParentThreadId}`),
+          projectId: ProjectId.make("project"),
+          title: "Worker",
+          ...(groupingParentThreadId === undefined ? {} : { groupingParentThreadId }),
+          modelSelection: { instanceId: ProviderInstanceId.make("devReplay"), model: "showcase" },
+          runtimeMode: "approval-required",
+          interactionMode: "default",
+          workspaceStrategy: { type: "root" },
+        } satisfies OrchestrationV2ThreadLaunchInput,
+        headers: Headers.empty,
+      });
+      assert.equal(yield* Queue.take(parents), groupingParentThreadId);
+    }
   }).pipe(
     Effect.provide(
       Layer.mergeAll(

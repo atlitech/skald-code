@@ -24,6 +24,7 @@ export interface ThreadActionMenuState {
   readonly titleRegenerationSupported: boolean;
   readonly snoozePresets: ReadonlyArray<SnoozePreset>;
   readonly reorder?: { readonly canMoveUp: boolean; readonly canMoveDown: boolean };
+  readonly grouping?: { readonly canMove: boolean; readonly hasParent: boolean };
 }
 
 export function buildThreadSnoozeMenuActions(presets: ReadonlyArray<SnoozePreset>): MenuAction[] {
@@ -158,6 +159,26 @@ export function buildThreadActionMenu(state: ThreadActionMenuState): MenuAction[
     pin,
     secondary: [
       ...title,
+      ...(state.grouping
+        ? [
+            {
+              id: "group-thread",
+              title: "Move under thread…",
+              image: "folder",
+              attributes: { disabled: !state.grouping.canMove },
+            },
+            ...(state.grouping.hasParent
+              ? [
+                  {
+                    id: "ungroup-thread",
+                    title: "Move to top level",
+                    image: "arrow.up",
+                    attributes: { disabled: !state.grouping.canMove },
+                  },
+                ]
+              : []),
+          ]
+        : []),
       ...autoSettle,
       ...(lifecycle.id === "archive" ? [] : [archive]),
       { id: "delete", title: "Delete", image: "trash", attributes: { destructive: true } },

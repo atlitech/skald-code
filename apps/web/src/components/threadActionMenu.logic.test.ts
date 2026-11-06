@@ -32,12 +32,15 @@ describe("buildThreadActionMenuItems", () => {
       const items = buildThreadActionMenuItems({
         ...baseState,
         canOperate: false,
+        grouping: { supported: true, hasParent: reversed, canMove: true },
         isPinned: reversed,
         isSettled: reversed,
         isSnoozed: reversed,
       });
       const expected = reversed
         ? [
+            "move-under-thread",
+            "move-to-top-level",
             "unpin",
             "unsettle",
             "unsnooze",
@@ -48,6 +51,7 @@ describe("buildThreadActionMenuItems", () => {
             "delete",
           ]
         : [
+            "move-under-thread",
             "pin",
             "settle",
             "snooze",

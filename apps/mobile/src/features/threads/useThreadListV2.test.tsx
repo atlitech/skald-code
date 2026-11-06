@@ -241,4 +241,110 @@ it("reuses a large thread list across tab renders and updates when its inputs ch
   expect(loaded.layout.items).toHaveLength(160);
   expect(loaded.olderSettledShelf.isListed(threads[150]!)).toBe(true);
   expect(loaded.items).not.toBe(loading.items);
+
+  const parent = {
+    ...threads[0]!,
+    runtime: { ...threads[0]!.runtime!, status: "running" as const },
+  };
+  const child = { ...threads[2]!, groupingParentThreadId: parent.id };
+  const approval = {
+    ...threads[4]!,
+    groupingParentThreadId: child.id,
+    hasPendingApprovals: true,
+  };
+  const groupedInput = {
+    ...input,
+    threads: [parent, child, approval],
+    selectedThreadKey: `${environmentId}:${approval.id}`,
+  };
+  await act(async () => root.render(<Probe input={groupedInput} tab="chats" />));
+  const grouped = seen.at(-1)!;
+  expect(grouped.layout.workingCount).toBe(0);
+  expect(
+    grouped.items.filter((item) => item.type === "v2-thread").map((item) => item.depth),
+  ).toEqual([0, 1, 2]);
+  expect(grouped.items[0]).toMatchObject({ childAttentionCount: 1, childrenExpanded: true });
+  await act(async () => grouped.toggleGroup(`${environmentId}:${parent.id}`));
+  expect(seen.at(-1)!.items.filter((item) => item.type === "v2-thread")).toHaveLength(1);
+  await act(async () =>
+    root.render(
+      <Probe
+        input={{ ...groupedInput, selectedThreadKey: `${environmentId}:${child.id}` }}
+        tab="chats"
+      />,
+    ),
+  );
+  expect(seen.at(-1)!.items[0]).toMatchObject({ childrenExpanded: true });
+  await act(async () =>
+    root.render(<Probe input={{ ...groupedInput, searchQuery: approval.title }} tab="chats" />),
+  );
+  expect(
+    seen
+      .at(-1)!
+      .items.filter((item) => item.type === "v2-thread")
+      .map((item) => item.item.thread.id),
+  ).toEqual([approval.id]);
+
+  for (const shelf of ["working", "settled", "snoozed"] as const) {
+    const makeThread = (name: string, parentId?: ThreadId) => ({
+      ...threads[0]!,
+      id: ThreadId.make(`${shelf}-${name}`),
+      groupingParentThreadId: parentId ?? null,
+      runtime:
+        shelf === "working"
+          ? { ...threads[0]!.runtime!, status: "running" as const }
+          : threads[0]!.runtime,
+      settledOverride: shelf === "settled" ? ("settled" as const) : ("active" as const),
+      settledAt: shelf === "settled" ? "2026-01-01T00:00:00.000Z" : null,
+      snoozedUntil: shelf === "snoozed" ? "2026-01-03T00:00:00.000Z" : null,
+    });
+    const ancestor = makeThread("root");
+    const middle = makeThread("middle", ancestor.id);
+    const leaf = makeThread("leaf", middle.id);
+    const selectedPathInput = {
+      ...input,
+      threads: [
+        ancestor,
+        middle,
+        leaf,
+        makeThread("other-root"),
+        makeThread("other-middle", ancestor.id),
+        makeThread("other-leaf", middle.id),
+      ],
+      selectedThreadKey: `${environmentId}:${leaf.id}`,
+      settledShelfExpanded: false,
+    };
+    await act(async () => root.render(<Probe input={selectedPathInput} tab="chats" />));
+    await act(async () => {
+      for (const thread of [ancestor, middle]) {
+        seen.at(-1)!.toggleGroupShelf(`${environmentId}:${thread.id}:v2-${shelf}-shelf`, true);
+      }
+    });
+    expect(
+      seen
+        .at(-1)!
+        .items.filter((item) => item.type === "v2-thread")
+        .map((item) => [item.item.thread.id, item.depth]),
+    ).toEqual([
+      [ancestor.id, 0],
+      [middle.id, 1],
+      [leaf.id, 2],
+    ]);
+    await act(async () => seen.at(-1)!.toggleGroup(`${environmentId}:${ancestor.id}`));
+    expect(seen.at(-1)!.items.filter((item) => item.type === "v2-thread")).toHaveLength(1);
+    await act(async () =>
+      root.render(
+        <Probe
+          input={{ ...selectedPathInput, selectedThreadKey: `${environmentId}:${middle.id}` }}
+          tab="chats"
+        />,
+      ),
+    );
+    expect(
+      seen
+        .at(-1)!
+        .items.filter((item) => item.type === "v2-thread")
+        .map((item) => item.item.thread.id),
+    ).toEqual([ancestor.id, middle.id]);
+  }
 });

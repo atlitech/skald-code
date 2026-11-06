@@ -9,6 +9,7 @@ import {
   CheckpointScopeId,
   MessageId,
   type ModelSelection,
+  type OrchestrationV2AppThread,
   type OrchestrationV2ProviderThread,
   type OrchestrationV2TurnItem,
   type OrchestrationV2ThreadHistoryPage,
@@ -1940,6 +1941,7 @@ it.effect("SQL list older settled threads below a cursor", () =>
       readonly settledDay: number | null;
       readonly project?: string;
       readonly subagent?: boolean;
+      readonly grouped?: boolean;
       readonly archived?: boolean;
       readonly snoozedUntilDay?: number;
     }) =>
@@ -1961,6 +1963,7 @@ it.effect("SQL list older settled threads below a cursor", () =>
           branch: null,
           worktreePath: null,
           activeProviderThreadId: null,
+          groupingParentThreadId: input.grouped ? id("b") : null,
           lineage: {
             parentThreadId: input.subagent === true ? id("b") : null,
             relationshipToParent: input.subagent === true ? "subagent" : null,
@@ -1985,6 +1988,7 @@ it.effect("SQL list older settled threads below a cursor", () =>
     yield* createThread({ name: "recent", settledDay: 20 });
     yield* createThread({ name: "unsettled", settledDay: null });
     yield* createThread({ name: "child", settledDay: 1, subagent: true });
+    yield* createThread({ name: "grouped-child", settledDay: 1, grouped: true });
     yield* createThread({ name: "archived", settledDay: 1, archived: true });
 
     const list = (
@@ -8555,3 +8559,116 @@ it.layer(layerTest)("ProjectionStoreV2", (it) => {
     }),
   );
 });
+
+it.effect("lists grouping parents from durable ancestry with bounded title search", () =>
+  Effect.gen(function* () {
+    const store = yield* ProjectionStore.ProjectionStoreV2;
+    const now = yield* DateTime.now;
+    const id = (name: string) => ThreadId.make(`thread:grouping-picker:${name}`);
+    const projectId = ProjectId.make("project:grouping-picker");
+    const create = (name: string, overrides: Partial<OrchestrationV2AppThread> = {}) =>
+      store.apply({
+        id: EventId.make(`event:grouping-picker:${name}`),
+        type: "thread.created",
+        threadId: id(name),
+        occurredAt: now,
+        payload: {
+          createdBy: "user",
+          creationSource: "web",
+          id: id(name),
+          projectId,
+          title: name,
+          providerInstanceId,
+          modelSelection,
+          runtimeMode: "full-access",
+          interactionMode: "default",
+          branch: null,
+          worktreePath: null,
+          activeProviderThreadId: null,
+          lineage: { parentThreadId: null, relationshipToParent: null, rootThreadId: id(name) },
+          forkedFrom: null,
+          createdAt: now,
+          updatedAt: now,
+          archivedAt: null,
+          settledOverride: null,
+          settledAt: null,
+          lastVisitedAt: null,
+          deletedAt: null,
+          ...overrides,
+        },
+      });
+    yield* create("child");
+    yield* create("old-parent", {
+      settledOverride: "settled",
+      settledAt: DateTime.makeUnsafe("2020-01-01T00:00:00.000Z"),
+    });
+    yield* create("safe-archived", { archivedAt: now });
+    yield* create("through-archived", { groupingParentThreadId: id("safe-archived") });
+    yield* create("through-missing", { groupingParentThreadId: id("missing") });
+    yield* create("deleted", { deletedAt: now, groupingParentThreadId: id("child") });
+    yield* create("through-deleted", { groupingParentThreadId: id("deleted") });
+    yield* create("unsafe-archived", { archivedAt: now, groupingParentThreadId: id("child") });
+    yield* create("descendant", { groupingParentThreadId: id("unsafe-archived") });
+    yield* create("foreign", { projectId: ProjectId.make("project:other") });
+    yield* create("through-foreign", { groupingParentThreadId: id("foreign") });
+    yield* create("delegated", {
+      delegatedFrom: {
+        environmentId: EnvironmentId.make("remote"),
+        threadId: id("remote"),
+        title: "Remote",
+      },
+    });
+    yield* create("through-delegated", { groupingParentThreadId: id("delegated") });
+    yield* create("subagent", {
+      lineage: {
+        parentThreadId: id("old-parent"),
+        rootThreadId: id("old-parent"),
+        relationshipToParent: "subagent",
+      },
+    });
+    yield* create("side-chat", {
+      lineage: {
+        parentThreadId: id("old-parent"),
+        rootThreadId: id("old-parent"),
+        relationshipToParent: "fork",
+        sideChat: true,
+      },
+    });
+    yield* create("cycle-a", { groupingParentThreadId: id("cycle-b") });
+    yield* create("cycle-b", { groupingParentThreadId: id("cycle-a") });
+    const parents = yield* store.listThreadGroupingParents({ threadId: id("child") });
+    assert.sameMembers(
+      parents.threads.map((thread) => thread.id),
+      [id("old-parent"), id("through-archived"), id("through-missing"), id("through-deleted")],
+    );
+    assert.isFalse(parents.hasMore);
+    assert.deepEqual(
+      yield* store.listThreadGroupingParents({ threadId: id("child"), query: " OLD-PARENT " }),
+      {
+        threads: [{ id: id("old-parent"), title: "old-parent" }],
+        hasMore: false,
+      },
+    );
+    for (const name of ["missing", "deleted", "delegated", "subagent", "side-chat"]) {
+      assert.deepEqual(yield* store.listThreadGroupingParents({ threadId: id(name) }), {
+        threads: [],
+        hasMore: false,
+      });
+    }
+    for (let index = 0; index < 101; index += 1)
+      yield* create(`search-parent-${String(index).padStart(3, "0")}`);
+    const page = yield* store.listThreadGroupingParents({
+      threadId: id("child"),
+      query: "search-parent",
+    });
+    assert.equal(page.threads.length, 100);
+    assert.isTrue(page.hasMore);
+    assert.deepEqual(
+      yield* store.listThreadGroupingParents({ threadId: id("child"), query: "search-parent-100" }),
+      {
+        threads: [{ id: id("search-parent-100"), title: "search-parent-100" }],
+        hasMore: false,
+      },
+    );
+  }).pipe(Effect.provide(layerTest)),
+);

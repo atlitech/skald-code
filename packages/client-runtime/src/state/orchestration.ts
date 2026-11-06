@@ -164,6 +164,12 @@ export function createOrchestrationEnvironmentAtoms<R, E>(
       completeWhen: (result) => result.complete !== false,
       idleTtlMs: 0,
     }),
+    listThreadGroupingParents: createEnvironmentRpcQueryAtomFamily(runtime, {
+      label: "environment-data:orchestration:grouping-parents",
+      tag: ORCHESTRATION_V2_WS_METHODS.listThreadGroupingParents,
+      staleTimeMs: 0,
+      idleTtlMs: 0,
+    }),
     threadSearch: createEnvironmentRpcQueryAtomFamily(runtime, {
       label: "environment-data:orchestration:thread-search",
       tag: ORCHESTRATION_V2_WS_METHODS.searchThreads,

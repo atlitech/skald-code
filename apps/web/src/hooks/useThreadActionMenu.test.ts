@@ -34,6 +34,19 @@ function recordEffect(action: string) {
   state.completed.resolve();
 }
 
+vi.mock("../components/ThreadParentDialog", () => ({
+  openThreadParentDialog: () => recordEffect("move-under-thread"),
+  useMoveThreadToTopLevel: () => async () => recordEffect("move-to-top-level"),
+}));
+vi.mock("../state/server", () => ({ environmentServerConfigsAtom: "configs" }));
+vi.mock("../rpc/atomRegistry", () => ({
+  appAtomRegistry: {
+    get: (key: string) =>
+      key === "configs"
+        ? new Map([["secondary", { environment: { capabilities: { threadGrouping: true } } }]])
+        : true,
+  },
+}));
 vi.mock("../components/CustomSnoozeDialog", () => ({ requestCustomSnooze: vi.fn() }));
 vi.mock("react", () => ({
   useCallback: (callback: unknown) => callback,
@@ -58,11 +71,17 @@ vi.mock("../state/entities", () => ({
     worktreePath: null,
     runtime: null,
     latestRun: null,
+    lineage: { parentThreadId: null, relationshipToParent: null, rootThreadId: "thread" },
   }),
   useProjects: () => [{ id: "project", environmentId: "secondary" }],
 }));
 vi.mock("../state/environments", () => ({ usePrimaryEnvironmentId: () => "primary" }));
-vi.mock("../state/threads", () => ({ threadEnvironment: { updateMetadata: "metadata" } }));
+vi.mock("../state/threads", () => ({
+  threadEnvironment: {
+    updateMetadata: "metadata",
+    setParent: { permissionAtom: () => "permissions" },
+  },
+}));
 vi.mock("../state/use-atom-command", () => ({
   useAtomCommand: () => async () => {
     recordEffect("metadata");
@@ -166,19 +185,25 @@ beforeEach(() => {
 });
 
 describe("thread menu permissions", () => {
-  it.each(["rename", "regenerate-title", "delete", "pin", "settle", "archive"] as const)(
-    "%s rechecks after the native menu closes",
-    async (action) => {
-      state.granted.add("secondary");
-      const choice = deferred<ThreadActionMenuId | null>();
-      state.show.mockReturnValue(choice.promise);
-      createMenu().openMenu(position);
-      state.granted.delete("secondary");
-      choice.resolve(action);
-      await state.completed.promise;
-      expect(state.effects).toEqual([]);
-    },
-  );
+  it.each([
+    "rename",
+    "regenerate-title",
+    "delete",
+    "pin",
+    "settle",
+    "archive",
+    "move-under-thread",
+    "move-to-top-level",
+  ] as const)("%s rechecks after the native menu closes", async (action) => {
+    state.granted.add("secondary");
+    const choice = deferred<ThreadActionMenuId | null>();
+    state.show.mockReturnValue(choice.promise);
+    createMenu().openMenu(position);
+    state.granted.delete("secondary");
+    choice.resolve(action);
+    await state.completed.promise;
+    expect(state.effects).toEqual([]);
+  });
 
   it("offers find only to a header that can open it, without task permission", async () => {
     createMenu().openMenu(position);

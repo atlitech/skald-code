@@ -376,7 +376,16 @@ export interface ThreadListV2Layout {
   readonly contentOnlyThreadKeys: ReadonlySet<string>;
 }
 
-export interface ThreadListV2ThreadListItem {
+export interface ThreadListV2Grouping {
+  readonly depth?: number;
+  readonly groupingParentKey?: string;
+  readonly childCount?: number;
+  readonly childWorkingCount?: number;
+  readonly childAttentionCount?: number;
+  readonly childrenExpanded?: boolean;
+}
+
+export interface ThreadListV2ThreadListItem extends ThreadListV2Grouping {
   readonly type: "v2-thread";
   readonly key: string;
   readonly item: ThreadListV2Item;
@@ -398,26 +407,26 @@ export interface ThreadListV2PendingListItem {
   readonly showTrailingDivider: boolean;
 }
 
-export interface ThreadListV2WorkingShelfListItem {
+export interface ThreadListV2WorkingShelfListItem extends ThreadListV2Grouping {
   readonly type: "v2-working-shelf";
-  readonly key: "v2-working-shelf";
+  readonly key: string;
   readonly count: number;
   readonly expanded: boolean;
   readonly disabled: boolean;
 }
 
-export interface ThreadListV2SnoozedShelfListItem {
+export interface ThreadListV2SnoozedShelfListItem extends ThreadListV2Grouping {
   readonly type: "v2-snoozed-shelf";
-  readonly key: "v2-snoozed-shelf";
+  readonly key: string;
   readonly count: number;
   readonly expanded: boolean;
   /** Include disabled state in item equality; recycled cells ignore render-closure updates. */
   readonly disabled: boolean;
 }
 
-export interface ThreadListV2SettledShelfListItem {
+export interface ThreadListV2SettledShelfListItem extends ThreadListV2Grouping {
   readonly type: "v2-settled-shelf";
-  readonly key: "v2-settled-shelf";
+  readonly key: string;
   readonly count: number;
   readonly expanded: boolean;
   readonly disabled: boolean;
@@ -447,6 +456,17 @@ export function threadListV2ListItemsAreEqual(
   previous: ThreadListV2ListItem,
   item: ThreadListV2ListItem,
 ): boolean {
+  if (previous.type !== "v2-pending" && item.type !== "v2-pending") {
+    if (
+      previous.depth !== item.depth ||
+      previous.groupingParentKey !== item.groupingParentKey ||
+      previous.childCount !== item.childCount ||
+      previous.childWorkingCount !== item.childWorkingCount ||
+      previous.childAttentionCount !== item.childAttentionCount ||
+      previous.childrenExpanded !== item.childrenExpanded
+    )
+      return false;
+  }
   switch (item.type) {
     case "v2-thread":
       return (
