@@ -5,7 +5,7 @@
 
 import * as NodeRuntime from "@effect/platform-node/NodeRuntime";
 import * as NodeServices from "@effect/platform-node/NodeServices";
-import * as Crypto from "effect/Crypto";
+import * as Digest from "effect/crypto/Digest";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Path from "effect/Path";
@@ -154,9 +154,11 @@ export const writeAdmissionRecord = Effect.fn("writeAdmissionRecord")(function* 
 }) {
   const fs = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
-  const crypto = yield* Crypto.Crypto;
+  const digestService = yield* Digest.Digest;
 
-  const archiveSha256 = toHex(yield* crypto.digest("SHA-256", yield* fs.readFile(options.archive)));
+  const archiveSha256 = toHex(
+    yield* digestService.digest(Digest.sha256, yield* fs.readFile(options.archive)),
+  );
   const probe = yield* decodeProbeChecks(yield* fs.readFileString(options.probe));
   const summary = (file: string, stage: string) =>
     Effect.flatMap(fs.readFileString(file), decodeReadbackSummary).pipe(

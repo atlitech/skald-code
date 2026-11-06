@@ -5,7 +5,7 @@
 
 import * as NodeRuntime from "@effect/platform-node/NodeRuntime";
 import * as NodeServices from "@effect/platform-node/NodeServices";
-import * as Crypto from "effect/Crypto";
+import * as Digest from "effect/crypto/Digest";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Path from "effect/Path";
@@ -373,7 +373,7 @@ export const writeReleaseManifest = Effect.fn("writeReleaseManifest")(function* 
 }) {
   const fs = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
-  const crypto = yield* Crypto.Crypto;
+  const digestService = yield* Digest.Digest;
 
   const admission = yield* fs.readFileString(options.admission).pipe(
     Effect.mapError(
@@ -389,7 +389,7 @@ export const writeReleaseManifest = Effect.fn("writeReleaseManifest")(function* 
   const files = yield* Effect.forEach(names, (file) =>
     Effect.gen(function* () {
       const bytes = yield* fs.readFile(path.join(options.dir, file));
-      const digest = yield* crypto.digest("SHA-256", bytes);
+      const digest = yield* digestService.digest(Digest.sha256, bytes);
       return { file, size: bytes.length, sha256: toHex(digest) };
     }),
   );

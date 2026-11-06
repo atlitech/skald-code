@@ -5,7 +5,7 @@
 
 import * as NodeRuntime from "@effect/platform-node/NodeRuntime";
 import * as NodeServices from "@effect/platform-node/NodeServices";
-import * as Crypto from "effect/Crypto";
+import * as Digest from "effect/crypto/Digest";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Option from "effect/Option";
@@ -298,10 +298,10 @@ export const writeRecoveryRecord = Effect.fn("writeRecoveryRecord")(function* (o
 }) {
   const fs = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
-  const crypto = yield* Crypto.Crypto;
+  const digestService = yield* Digest.Digest;
   const sha256 = (file: string) =>
     Effect.map(
-      Effect.flatMap(fs.readFile(file), (bytes) => crypto.digest("SHA-256", bytes)),
+      Effect.flatMap(fs.readFile(file), (bytes) => digestService.digest(Digest.sha256, bytes)),
       toHex,
     );
   const installed = (version: string) =>

@@ -1,5 +1,10 @@
+import { DEFAULT_HOSTED_APP_URL } from "@t3tools/shared/connectAuth";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
+import appleAppSiteAssociation from "../web/public/.well-known/apple-app-site-association.json";
+import assetLinks from "../web/public/.well-known/assetlinks.json";
+
+// Keep config parsing independent of local env files and build credentials.
 const environment = vi.hoisted(() => ({ values: {} as Record<string, string> }));
 vi.mock("../../scripts/lib/public-config.ts", () => ({
   loadRepoEnv: () => environment.values,
@@ -130,4 +135,16 @@ it.each([
   const result = await config(value === undefined ? {} : { APP_VARIANT: value });
   expect(result.ios?.bundleIdentifier).toBe(identifier);
   expect(result.android?.package).toBe(identifier);
+  // Copied thread links open this app only while app.t3.codes lists it.
+  const host = new URL(DEFAULT_HOSTED_APP_URL).host;
+  expect(result.ios?.associatedDomains).toContain(`applinks:${host}`);
+  if (value !== "personal")
+    expect(appleAppSiteAssociation.applinks.details[0]?.appIDs).toContain(
+      `${result.ios?.appleTeamId}.${identifier}`,
+    );
+  expect(result.android?.intentFilters?.[0]?.data).toEqual([
+    { scheme: "https", host, pathPrefix: "/threads/" },
+  ]);
+  if (value !== "personal")
+    expect(assetLinks.map((link) => link.target.package_name)).toContain(identifier);
 });
