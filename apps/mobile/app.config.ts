@@ -18,6 +18,14 @@ const APP_VARIANT = resolveAppVariant(repoEnv.APP_VARIANT);
 const isPersonalBuild = APP_VARIANT === "personal";
 const isIosPersonalTeamBuild = repoEnv.T3CODE_IOS_PERSONAL_TEAM === "1";
 const runtimeVersionPolicy = resolveRuntimeVersionPolicy(process.env.MOBILE_VERSION_POLICY);
+const unsignedAndroidBenchmark = repoEnv.T3CODE_ANDROID_CI_UNSIGNED === "1";
+
+if (
+  repoEnv.T3CODE_ANDROID_CI_UNSIGNED !== undefined &&
+  (!unsignedAndroidBenchmark || !isPersonalBuild || repoEnv.CI !== "true")
+) {
+  throw new Error("T3CODE_ANDROID_CI_UNSIGNED must be 1 with APP_VARIANT=personal and CI=true.");
+}
 
 function resolveRuntimeVersionPolicy(value: string | undefined) {
   switch (value) {
@@ -259,6 +267,11 @@ const widgetsPlugin: NonNullable<ExpoConfig["plugins"]>[number] = [
 const personalIosSigningPlugin: NonNullable<ExpoConfig["plugins"]>[number] = [
   "./plugins/withPersonalIosSigningTeam.cjs",
   { provisioningProfiles: iosProvisioningProfiles },
+];
+
+const personalAndroidSigningPlugin: NonNullable<ExpoConfig["plugins"]>[number] = [
+  "./plugins/withPersonalAndroidSigning.cjs",
+  { unsigned: unsignedAndroidBenchmark },
 ];
 
 const sharingPlugin: NonNullable<ExpoConfig["plugins"]>[number] = [
@@ -547,7 +560,7 @@ const config: ExpoConfig = {
     ...(isPersonalBuild
       ? [
           "./plugins/withPersonalAndroidProfileable.cjs",
-          "./plugins/withPersonalAndroidSigning.cjs",
+          personalAndroidSigningPlugin,
           "./plugins/withoutPersonalAndroidObserve.cjs",
         ]
       : []),

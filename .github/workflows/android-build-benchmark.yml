@@ -1,0 +1,137 @@
+name: Android build benchmark
+
+on:
+  workflow_dispatch:
+    inputs:
+      optimized:
+        description: Use native compiler and Metro transform caches
+        type: boolean
+        default: true
+      version:
+        description: Build metadata only; this workflow never publishes a release
+        type: string
+        default: 0.1.8-atli.1
+  push:
+    branches: ["ci/android/**"]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: android-benchmark-${{ github.ref }}
+  cancel-in-progress: false
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  build-android:
+    name: Build unsigned personal Android APK
+    if: github.repository_id == '1406026313'
+    runs-on: blacksmith-8vcpu-ubuntu-2404
+    timeout-minutes: 60
+    env:
+      APP_VARIANT: personal
+      T3CODE_ANDROID_CI_UNSIGNED: "1"
+      MOBILE_VERSION_POLICY: appVersion
+      T3CODE_RELEASE_VERSION: ${{ inputs.version || '0.1.8-atli.1' }}
+      T3CODE_CLERK_PUBLISHABLE_KEY: ${{ vars.T3CODE_CLERK_PUBLISHABLE_KEY }}
+      T3CODE_CLERK_JWT_TEMPLATE: ${{ vars.T3CODE_CLERK_JWT_TEMPLATE }}
+      T3CODE_CLERK_CLI_OAUTH_CLIENT_ID: ${{ vars.T3CODE_CLERK_CLI_OAUTH_CLIENT_ID }}
+      T3CODE_RELAY_URL: ${{ vars.T3CODE_RELAY_URL }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          sparse-checkout: |
+            /*
+            !/.repos/
+          sparse-checkout-cone-mode: false
+
+      - name: Setup Vite+
+        uses: voidzero-dev/setup-vp@250f29ce396baf5e8f24498e17c0dfdebabc26eb # v1
+        with:
+          node-version-file: package.json
+          cache: false
+          run-install: false
+
+      - name: Install dependencies
+        run: vp install --filter=@t3tools/mobile... --filter=@t3tools/scripts...
+
+      - name: Expose pnpm
+        run: |
+          pnpm_version="$(node --print "require('./package.json').packageManager.split('@').pop()")"
+          echo "$HOME/.vite-plus/package_manager/pnpm/$pnpm_version/pnpm/bin" >> "$GITHUB_PATH"
+
+      - name: Setup Java
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Setup Gradle cache
+        uses: gradle/actions/setup-gradle@4c125117fe7c5aed11272ec4213f602f012f89f2 # v5
+        with:
+          cache-read-only: false
+
+      - name: Setup native and Metro caches
+        if: github.event_name == 'push' || inputs.optimized
+        uses: ./.github/actions/setup-android-build-cache
+
+      - name: Check public config
+        run: |
+          (cd apps/mobile && vp exec expo config --type public --json) > "$RUNNER_TEMP/expo-config.json"
+          node scripts/fork-android-config.ts --config "$RUNNER_TEMP/expo-config.json"
+
+      - name: Generate the Android project
+        run: cd apps/mobile && EXPO_NO_GIT_STATUS=1 vp exec expo prebuild --clean --platform android --no-install
+
+      - name: Build unsigned release APK
+        run: |
+          cache_args=()
+          if [[ "${T3CODE_ANDROID_BUILD_CACHE:-0}" == "1" ]]; then
+            cache_args=(-I "$GITHUB_WORKSPACE/apps/mobile/scripts/android-ci.gradle")
+          fi
+          cd apps/mobile/android
+          /usr/bin/time -v ./gradlew :app:assembleRelease -PreactNativeArchitectures=arm64-v8a \
+            "${cache_args[@]}" --build-cache --parallel --max-workers=8 --profile --console=plain \
+            -Dorg.gradle.jvmargs="-Xmx8g -XX:MaxMetaspaceSize=2g" \
+            2>&1 | tee "$RUNNER_TEMP/android-build.log"
+
+      - name: Check unsigned APK and embedded bundle
+        run: |
+          apk=apps/mobile/android/app/build/outputs/apk/release/app-release-unsigned.apk
+          "$ANDROID_HOME/build-tools/36.0.0/aapt" dump badging "$apk" > "$RUNNER_TEMP/android-badging.txt"
+          grep -q "package: name='tech.atli.skaldcode'" "$RUNNER_TEMP/android-badging.txt"
+          if grep -q application-debuggable "$RUNNER_TEMP/android-badging.txt"; then
+            echo "::error::Benchmark unexpectedly produced a debuggable APK."
+            exit 1
+          fi
+          unzip -p "$apk" assets/index.android.bundle > "$RUNNER_TEMP/android-bundle.hbc"
+          test -s "$RUNNER_TEMP/android-bundle.hbc"
+          if "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify "$apk"; then
+            echo "::error::Benchmark unexpectedly produced a signed APK."
+            exit 1
+          fi
+
+      - name: Report compiler cache usage
+        if: always() && env.T3CODE_ANDROID_BUILD_CACHE == '1'
+        run: ccache --show-stats --verbose | tee "$RUNNER_TEMP/android-ccache.txt" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Check native compiler integration
+        run: node --test apps/mobile/scripts/android-ci-cache.integration.mts
+
+      - name: Upload build diagnostics and unsigned APK
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: android-benchmark-${{ github.run_attempt }}
+          compression-level: 0
+          path: |
+            apps/mobile/android/build/reports/profile/
+            apps/mobile/android/app/build/outputs/apk/release/app-release-unsigned.apk
+            ${{ runner.temp }}/android-build.log
+            ${{ runner.temp }}/android-ccache.txt
+            ${{ runner.temp }}/android-badging.txt
+          retention-days: 7

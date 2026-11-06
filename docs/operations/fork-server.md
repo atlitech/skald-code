@@ -162,6 +162,20 @@ Owner action, once: enable immutable releases on atlitech/skald-code
 (**Settings → General → Releases**), so GitHub also refuses to change a
 published release's assets or move its tag.
 
+### Measuring Android build time
+
+Use `android-build-benchmark.yml` to test Android build changes without signing
+credentials or publication. Push a branch named `ci/android/<name>`, or dispatch
+the workflow on that branch. Re-run the same commit after its caches have saved
+to measure a warm build. Dispatch with `optimized=false` to compare against
+Gradle caching alone. The artifacts include an unsigned APK, Gradle profiles,
+build logs, and compiler-cache statistics; the APK is not an installable release.
+
+The release and benchmark share compiler-cache setup. Only compiler objects and
+Metro transforms are persisted; generated `app/build` outputs are not safe to
+restore because some tasks omit inputs. Keep signing and APK identity checks
+enabled when changing the release build.
+
 ## Verification scope
 
 Not every package in a release is checked the same way. By the owner decision

@@ -119,6 +119,38 @@ describe("personal iOS configuration", () => {
   );
 });
 
+describe("personal Android benchmark signing", () => {
+  it.each([undefined, "1"])(
+    "requires signing unless CI explicitly opts out (%j)",
+    async (unsigned) => {
+      const result = await config({
+        APP_VARIANT: "personal",
+        CI: "true",
+        ...(unsigned ? { T3CODE_ANDROID_CI_UNSIGNED: unsigned } : {}),
+      });
+      expect(result.plugins).toContainEqual([
+        "./plugins/withPersonalAndroidSigning.cjs",
+        { unsigned: unsigned === "1" },
+      ]);
+      expect(result.android?.package).toBe("tech.atli.skaldcode");
+      expect(result.updates?.enabled).toBe(false);
+    },
+  );
+
+  it.each([
+    { APP_VARIANT: "personal", CI: "true", T3CODE_ANDROID_CI_UNSIGNED: "true" },
+    { APP_VARIANT: "personal", CI: "true", T3CODE_ANDROID_CI_UNSIGNED: "0" },
+    { APP_VARIANT: "personal", CI: "true", T3CODE_ANDROID_CI_UNSIGNED: "" },
+    { APP_VARIANT: "personal", CI: "false", T3CODE_ANDROID_CI_UNSIGNED: "1" },
+    { APP_VARIANT: "personal", CI: "", T3CODE_ANDROID_CI_UNSIGNED: "1" },
+    { APP_VARIANT: "production", CI: "true", T3CODE_ANDROID_CI_UNSIGNED: "1" },
+    { APP_VARIANT: "development", CI: "true", T3CODE_ANDROID_CI_UNSIGNED: "1" },
+    { APP_VARIANT: "preview", CI: "true", T3CODE_ANDROID_CI_UNSIGNED: "1" },
+  ])("rejects an unsigned build with %j", async (values) => {
+    await expect(config(values)).rejects.toThrow("T3CODE_ANDROID_CI_UNSIGNED");
+  });
+});
+
 it.each(["prod", ""])("rejects APP_VARIANT=%j before selecting production IDs", async (value) => {
   await expect(config({ APP_VARIANT: value })).rejects.toThrow(
     "APP_VARIANT must be development, preview, or production.",

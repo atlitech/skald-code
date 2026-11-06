@@ -28,7 +28,7 @@ function insertBefore(contents, anchor, insertion, description) {
   return contents.slice(0, index) + insertion + contents.slice(index);
 }
 
-module.exports = function withPersonalAndroidSigning(config) {
+module.exports = function withPersonalAndroidSigning(config, { unsigned = false } = {}) {
   return withAppBuildGradle(config, (nextConfig) => {
     if (nextConfig.modResults.language !== "groovy") {
       throw new Error("withPersonalAndroidSigning: app/build.gradle must use Groovy.");
@@ -36,16 +36,21 @@ module.exports = function withPersonalAndroidSigning(config) {
 
     let contents = nextConfig.modResults.contents;
     if (contents.includes("t3PersonalSigningValue")) {
+      if (unsigned) {
+        throw new Error("withPersonalAndroidSigning: use a clean prebuild to change signing mode.");
+      }
       return nextConfig;
     }
 
-    contents = insertBefore(contents, "android {", SIGNING_HELPERS, "the android block");
-    contents = insertBefore(
-      contents,
-      "        debug {\n            storeFile file('debug.keystore')",
-      PERSONAL_SIGNING_CONFIG,
-      "the debug signing config",
-    );
+    if (!unsigned) {
+      contents = insertBefore(contents, "android {", SIGNING_HELPERS, "the android block");
+      contents = insertBefore(
+        contents,
+        "        debug {\n            storeFile file('debug.keystore')",
+        PERSONAL_SIGNING_CONFIG,
+        "the debug signing config",
+      );
+    }
 
     const releaseStart = contents.indexOf("        release {");
     const releaseEnd = contents.indexOf("        }", releaseStart);
@@ -56,9 +61,10 @@ module.exports = function withPersonalAndroidSigning(config) {
     }
 
     const releaseBlock = contents.slice(releaseStart, releaseEnd);
+    if (unsigned && releaseBlock.includes("signingConfig null")) return nextConfig;
     const signedReleaseBlock = releaseBlock.replace(
       "signingConfig signingConfigs.debug",
-      "signingConfig signingConfigs.personal",
+      unsigned ? "signingConfig null" : "signingConfig signingConfigs.personal",
     );
     if (signedReleaseBlock === releaseBlock) {
       throw new Error(

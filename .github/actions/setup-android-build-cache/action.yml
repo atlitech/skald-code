@@ -1,0 +1,37 @@
+name: Setup Android compiler caches
+description: Persist C/C++ objects and Metro transforms without restoring generated app outputs.
+runs:
+  using: composite
+  steps:
+    - name: Install ccache
+      shell: bash
+      run: |
+        if ! command -v ccache > /dev/null; then
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends ccache
+        fi
+
+    - name: Configure compiler caches
+      shell: bash
+      run: |
+        {
+          echo "T3CODE_ANDROID_BUILD_CACHE=1"
+          echo "CCACHE_DIR=$HOME/.cache/t3-android/ccache"
+          echo "CCACHE_BASEDIR=$GITHUB_WORKSPACE"
+          echo "CCACHE_COMPILERCHECK=content"
+          echo "CCACHE_MAXSIZE=2G"
+          echo "T3CODE_METRO_CACHE_DIR=$HOME/.cache/t3-android/metro"
+        } >> "$GITHUB_ENV"
+
+    - name: Restore compiler caches
+      uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
+      with:
+        path: ~/.cache/t3-android
+        key: android-compile-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('pnpm-lock.yaml', 'apps/mobile/scripts/android-ci*', 'apps/mobile/metro.config.js') }}-${{ github.run_id }}-${{ github.run_attempt }}
+        restore-keys: |
+          android-compile-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('pnpm-lock.yaml', 'apps/mobile/scripts/android-ci*', 'apps/mobile/metro.config.js') }}-
+          android-compile-v1-${{ runner.os }}-${{ runner.arch }}-
+
+    - name: Reset compiler cache statistics
+      shell: bash
+      run: ccache --zero-stats
