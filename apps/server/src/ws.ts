@@ -2231,6 +2231,9 @@ export const layerWsRpc = (
                       ? {}
                       : { reuseExistingThread: input.reuseExistingThread }),
                     projectId: input.projectId,
+                    ...(input.groupingParentThreadId === undefined
+                      ? {}
+                      : { groupingParentThreadId: input.groupingParentThreadId }),
                     title: input.title,
                     ...(input.generateTitle === undefined
                       ? {}

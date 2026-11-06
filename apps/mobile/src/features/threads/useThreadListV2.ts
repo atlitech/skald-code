@@ -124,6 +124,16 @@ export function useThreadListV2(input: {
     return result;
   }, [threads, grouping]);
   const listedThreads = input.searchQuery.trim().length > 0 ? threads : grouping.roots;
+  const selectedRootThreadKey = useMemo(() => {
+    let key = input.selectedThreadKey;
+    if (input.searchQuery.trim().length > 0) return key;
+    while (key !== null) {
+      const parent = grouping.parentByChild.get(key);
+      if (parent === undefined) break;
+      key = parent;
+    }
+    return key;
+  }, [input.selectedThreadKey, input.searchQuery, grouping]);
   // A thread can stop working when the threads change, or when its exit grace expires.
   const inboxVersion = useSyncExternalStore(
     threadListInboxReturns.subscribe,
@@ -206,7 +216,7 @@ export function useThreadListV2(input: {
           !attentionAncestors.has(`${thread.environmentId}:${thread.id}`) && inboxIsWorking(thread),
         snoozedShelfExpanded: input.snoozedShelfExpanded,
         settledShelfExpanded: input.settledShelfExpanded,
-        selectedThreadKey: input.selectedThreadKey,
+        selectedThreadKey: selectedRootThreadKey,
         isListedSettled: isListed,
         unloadedSettledCount: unloadedCount(
           threads.filter(
@@ -240,7 +250,7 @@ export function useThreadListV2(input: {
       attentionAncestors,
       input.snoozedShelfExpanded,
       input.settledShelfExpanded,
-      input.selectedThreadKey,
+      selectedRootThreadKey,
       isListed,
       unloadedCount,
       scopes,

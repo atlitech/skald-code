@@ -1,4 +1,7 @@
-import { buildThreadGrouping } from "@t3tools/client-runtime/state/thread-grouping";
+import {
+  buildThreadGrouping,
+  isThreadGroupingParent,
+} from "@t3tools/client-runtime/state/thread-grouping";
 import type { EnvironmentThreadShell } from "@t3tools/client-runtime/state/shell";
 import { CommandId, type ThreadId } from "@t3tools/contracts";
 import { useAtomValue } from "@effect/atom-react";
@@ -30,7 +33,7 @@ export function ThreadParentSheet(props: {
     if (
       thread.environmentId !== props.thread.environmentId ||
       thread.projectId !== props.thread.projectId ||
-      thread.archivedAt !== null
+      !isThreadGroupingParent(thread)
     )
       return false;
     let cursor: string | undefined = `${thread.environmentId}:${thread.id}`;

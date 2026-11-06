@@ -1,4 +1,8 @@
-import { isListedThreadLineage, type OrchestrationV2AppThreadLineage } from "@t3tools/contracts";
+import {
+  isListedThreadLineage,
+  type OrchestrationV2AppThreadLineage,
+  type OrchestrationV2DelegatedFrom,
+} from "@t3tools/contracts";
 
 interface GroupableThread {
   readonly id: string;
@@ -8,7 +12,19 @@ interface GroupableThread {
   readonly archivedAt: string | null;
   readonly deletedAt?: string | null;
   readonly settledOverride?: "settled" | "active" | null;
+  readonly delegatedFrom?: OrchestrationV2DelegatedFrom | null | undefined;
   readonly lineage: OrchestrationV2AppThreadLineage;
+}
+
+export function isThreadGroupingParent(
+  thread: Pick<GroupableThread, "archivedAt" | "deletedAt" | "lineage" | "delegatedFrom">,
+) {
+  return (
+    thread.archivedAt === null &&
+    thread.deletedAt == null &&
+    thread.delegatedFrom == null &&
+    isListedThreadLineage(thread.lineage)
+  );
 }
 
 export function buildThreadGrouping<T extends GroupableThread>(
@@ -26,10 +42,8 @@ export function buildThreadGrouping<T extends GroupableThread>(
       parent !== undefined &&
       parentKey !== key &&
       parent.projectId === thread.projectId &&
-      parent.archivedAt === null &&
-      parent.deletedAt == null &&
-      (!isParked(parent) || isParked(thread)) &&
-      isListedThreadLineage(parent.lineage)
+      isThreadGroupingParent(parent) &&
+      (!isParked(parent) || isParked(thread))
     ) {
       parentByChild.set(key, parentKey);
     }

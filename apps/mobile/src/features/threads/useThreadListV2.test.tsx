@@ -284,4 +284,67 @@ it("reuses a large thread list across tab renders and updates when its inputs ch
       .items.filter((item) => item.type === "v2-thread")
       .map((item) => item.item.thread.id),
   ).toEqual([approval.id]);
+
+  for (const shelf of ["working", "settled", "snoozed"] as const) {
+    const makeThread = (name: string, parentId?: ThreadId) => ({
+      ...threads[0]!,
+      id: ThreadId.make(`${shelf}-${name}`),
+      groupingParentThreadId: parentId ?? null,
+      runtime:
+        shelf === "working"
+          ? { ...threads[0]!.runtime!, status: "running" as const }
+          : threads[0]!.runtime,
+      settledOverride: shelf === "settled" ? ("settled" as const) : ("active" as const),
+      settledAt: shelf === "settled" ? "2026-01-01T00:00:00.000Z" : null,
+      snoozedUntil: shelf === "snoozed" ? "2026-01-03T00:00:00.000Z" : null,
+    });
+    const ancestor = makeThread("root");
+    const middle = makeThread("middle", ancestor.id);
+    const leaf = makeThread("leaf", middle.id);
+    const selectedPathInput = {
+      ...input,
+      threads: [
+        ancestor,
+        middle,
+        leaf,
+        makeThread("other-root"),
+        makeThread("other-middle", ancestor.id),
+        makeThread("other-leaf", middle.id),
+      ],
+      selectedThreadKey: `${environmentId}:${leaf.id}`,
+      settledShelfExpanded: false,
+    };
+    await act(async () => root.render(<Probe input={selectedPathInput} tab="chats" />));
+    await act(async () => {
+      for (const thread of [ancestor, middle]) {
+        seen.at(-1)!.toggleGroupShelf(`${environmentId}:${thread.id}:v2-${shelf}-shelf`, true);
+      }
+    });
+    expect(
+      seen
+        .at(-1)!
+        .items.filter((item) => item.type === "v2-thread")
+        .map((item) => [item.item.thread.id, item.depth]),
+    ).toEqual([
+      [ancestor.id, 0],
+      [middle.id, 1],
+      [leaf.id, 2],
+    ]);
+    await act(async () => seen.at(-1)!.toggleGroup(`${environmentId}:${ancestor.id}`));
+    expect(seen.at(-1)!.items.filter((item) => item.type === "v2-thread")).toHaveLength(1);
+    await act(async () =>
+      root.render(
+        <Probe
+          input={{ ...selectedPathInput, selectedThreadKey: `${environmentId}:${middle.id}` }}
+          tab="chats"
+        />,
+      ),
+    );
+    expect(
+      seen
+        .at(-1)!
+        .items.filter((item) => item.type === "v2-thread")
+        .map((item) => item.item.thread.id),
+    ).toEqual([ancestor.id, middle.id]);
+  }
 });

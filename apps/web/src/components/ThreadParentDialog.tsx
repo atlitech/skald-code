@@ -1,11 +1,9 @@
 import { useAtomValue } from "@effect/atom-react";
+import { CommandId, type ScopedThreadRef, type ThreadId } from "@t3tools/contracts";
 import {
-  CommandId,
-  isListedThreadLineage,
-  type ScopedThreadRef,
-  type ThreadId,
-} from "@t3tools/contracts";
-import { buildThreadGrouping } from "@t3tools/client-runtime/state/thread-grouping";
+  buildThreadGrouping,
+  isThreadGroupingParent,
+} from "@t3tools/client-runtime/state/thread-grouping";
 import { scopedThreadKey } from "@t3tools/client-runtime/environment";
 import { useState } from "react";
 import { create } from "zustand";
@@ -77,8 +75,7 @@ function ThreadParentDialog({ threadRef }: { threadRef: ScopedThreadRef }) {
     (candidate) =>
       candidate.environmentId === threadRef.environmentId &&
       candidate.projectId === thread?.projectId &&
-      candidate.archivedAt === null &&
-      isListedThreadLineage(candidate.lineage) &&
+      isThreadGroupingParent(candidate) &&
       !excluded.has(`${candidate.environmentId}:${candidate.id}`) &&
       candidate.title.toLocaleLowerCase().includes(query.toLocaleLowerCase()),
   );

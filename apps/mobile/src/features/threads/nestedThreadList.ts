@@ -20,10 +20,15 @@ export function nestThreadListItems(input: {
 }) {
   const rows: ThreadListV2ListItem[] = [];
   const selectedAncestors = new Set<string>();
+  const selectedChildByParent = new Map<string, string>();
   let selected = input.layoutInput.selectedThreadKey ?? undefined;
   while (selected !== undefined) {
-    selected = input.grouping.parentByChild.get(selected);
-    if (selected !== undefined) selectedAncestors.add(selected);
+    const parent = input.grouping.parentByChild.get(selected);
+    if (parent !== undefined) {
+      selectedAncestors.add(parent);
+      selectedChildByParent.set(parent, selected);
+    }
+    selected = parent;
   }
   const summaries = new Map<string, { working: number; attention: number }>();
   const summarize = (key: string): { working: number; attention: number } => {
@@ -74,6 +79,7 @@ export function nestThreadListItems(input: {
       const layout = buildThreadListV2Items({
         ...input.layoutInput,
         threads: children,
+        selectedThreadKey: selectedChildByParent.get(key) ?? null,
         pendingOrder: null,
         searchQuery: "",
         settledLimit: undefined,

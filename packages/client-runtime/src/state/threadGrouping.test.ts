@@ -1,4 +1,4 @@
-import { ThreadId } from "@t3tools/contracts";
+import { EnvironmentId, ThreadId } from "@t3tools/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
 import { buildThreadGrouping } from "./threadGrouping.ts";
@@ -31,12 +31,20 @@ describe("thread grouping", () => {
     expect(first.lineage.parentThreadId).toBeNull();
   });
 
-  it.each(["missing", "archived", "deleted", "project", "environment", "subagent"])(
+  it.each(["missing", "archived", "deleted", "project", "environment", "subagent", "delegated"])(
     "keeps a child visible when its parent is %s",
     (state) => {
       const child = thread("child", "parent");
       const parent = {
         ...thread("parent"),
+        delegatedFrom:
+          state === "delegated"
+            ? {
+                environmentId: EnvironmentId.make("remote"),
+                threadId: ThreadId.make("owner"),
+                title: "Owner",
+              }
+            : null,
         archivedAt: state === "archived" ? "2026-11-06" : null,
         deletedAt: state === "deleted" ? "2026-11-06" : null,
         projectId: state === "project" ? "other" : "project",

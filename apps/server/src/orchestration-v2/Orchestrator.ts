@@ -3175,7 +3175,12 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
             (cause) => new OrchestratorProjectionError({ threadId: parentId!, cause }),
           ),
         );
-      if (parent === null || parent.deletedAt !== null || parent.archivedAt !== null) {
+      // Archived ancestors retain their links when unarchived, so the cycle walk must include them.
+      if (
+        parent === null ||
+        parent.deletedAt !== null ||
+        (parent.archivedAt !== null && parentId === command.groupingParentThreadId)
+      ) {
         if (parentId !== command.groupingParentThreadId) break;
         return yield* new OrchestratorDispatchError({
           commandId: command.commandId,
