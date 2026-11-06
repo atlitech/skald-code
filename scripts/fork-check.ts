@@ -8,15 +8,34 @@ import * as NodeServices from "@effect/platform-node/NodeServices";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Schema from "effect/Schema";
+import * as Option from "effect/Option";
+import * as Path from "effect/Path";
 import * as Stream from "effect/Stream";
-import { Command } from "effect/cli";
+import { Command, Flag } from "effect/cli";
 import { ChildProcess, ChildProcessSpawner } from "effect/process";
 
 import { hasPassedCheck, REQUIRED_CHECK } from "./fork-release-guard.ts";
+import { shardedTestFiles } from "./lib/sharded-tests.ts";
 
 const UPSTREAM_REPOSITORY = "pingdotgg/t3code";
 // Vitest's default include, so no extension a package runs is skipped.
 const TEST_FILE = /\.(test|spec)\.[cm]?[jt]sx?$/;
+
+type ForkSuite = "all" | "server" | "other";
+
+interface ForkCheckOptions {
+  readonly suite?: ForkSuite;
+  readonly shard?: string;
+  readonly cacheServer?: boolean;
+  readonly report?: string;
+}
+
+interface ForkTestCommand {
+  readonly command: string;
+  readonly args: ReadonlyArray<string>;
+  readonly cwd: string;
+  readonly env?: Record<string, string>;
+}
 
 export interface ForkTestGroup {
   /** Repository-relative package directory, where `vp run test` runs. */
@@ -38,6 +57,7 @@ export interface ForkTestSelection {
 export const selectForkTests = (
   changedPaths: ReadonlyArray<string>,
   packageDirs: ReadonlyArray<string>,
+  suite: ForkSuite = "all",
 ): ForkTestSelection => {
   const byDepth = [...packageDirs].toSorted((left, right) => right.length - left.length);
   const groups = new Map<string, Array<string>>();
@@ -55,11 +75,61 @@ export const selectForkTests = (
   }
   return {
     groups: [...groups.entries()]
+      .filter(([dir]) => suite === "all" || (dir === "apps/server") === (suite === "server"))
       .toSorted(([left], [right]) => left.localeCompare(right))
       .map(([packageDir, files]) => ({ packageDir, files: files.toSorted() })),
     orphans: orphans.toSorted(),
   };
 };
+
+export function forkTestCommands(
+  group: ForkTestGroup,
+  options: Pick<ForkCheckOptions, "cacheServer" | "report"> = {},
+): ReadonlyArray<ForkTestCommand> {
+  if (group.files.length === 0) return [];
+  if (group.packageDir === "apps/mobile") {
+    // Appending files to the package's chained test script only filters its final Android command.
+    return [
+      {
+        command: "vp",
+        args: ["test", "run", "--project", "unit", "--project", "react", ...group.files],
+        cwd: group.packageDir,
+      },
+      {
+        command: "vp",
+        args: [
+          "test",
+          "run",
+          "--project",
+          "react",
+          ...new Set(["src/components/FilePreviewModal.test.tsx", ...group.files]),
+        ],
+        cwd: group.packageDir,
+        env: { T3_MOBILE_TEST_PLATFORM: "android" },
+      },
+    ];
+  }
+  if (group.packageDir === "apps/server" && options.cacheServer) {
+    return [
+      {
+        command: "node",
+        cwd: ".",
+        args: [
+          "scripts/test-cached.ts",
+          "--concurrency",
+          "1",
+          "--verify-hits",
+          "1",
+          "--uncached",
+          "apps/server/integration/transferBudgetV2.integration.test.ts",
+          ...(options.report ? ["--report", options.report] : []),
+          ...group.files.map((file) => `${group.packageDir}/${file}`),
+        ],
+      },
+    ];
+  }
+  return [{ command: "vp", args: ["run", "test", ...group.files], cwd: group.packageDir }];
+}
 
 export class ForkCheckError extends Schema.TaggedError<ForkCheckError>()("ForkCheckError", {
   detail: Schema.String,
@@ -114,15 +184,21 @@ const read = Effect.fn("ForkCheck.read")(
 
 /** Runs a command in `cwd` with its output streamed to this process's own; returns the exit code. */
 const runInherited = Effect.fn("ForkCheck.runInherited")(
-  function* (command: string, args: ReadonlyArray<string>, cwd: string) {
+  function* ({ command, args, cwd, env }: ForkTestCommand) {
     const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
     const child = yield* spawner.spawn(
-      ChildProcess.make(command, args, { cwd, stdout: "inherit", stderr: "inherit" }),
+      ChildProcess.make(command, args, {
+        cwd,
+        env,
+        extendEnv: true,
+        stdout: "inherit",
+        stderr: "inherit",
+      }),
     );
     return Number(yield* child.exitCode);
   },
   Effect.scoped,
-  (effect, command) => effect.pipe(Effect.mapError(spawnFailed(command))),
+  (effect, { command }) => effect.pipe(Effect.mapError(spawnFailed(command))),
 );
 
 const CheckRunLine = Schema.fromJsonString(
@@ -227,7 +303,15 @@ const testedPackageDirs = Effect.gen(function* () {
     .map((dir) => dir.replace(/\/$/, ""));
 });
 
-export const forkCheck = Effect.fn("forkCheck")(function* () {
+export const forkCheck = Effect.fn("forkCheck")(function* (options: ForkCheckOptions = {}) {
+  if ((options.shard || options.cacheServer) && options.suite !== "server") {
+    return yield* new ForkCheckError({
+      detail: "--shard and --cache-server require --suite server.",
+    });
+  }
+  if (options.report && !options.cacheServer) {
+    return yield* new ForkCheckError({ detail: "--report requires --cache-server." });
+  }
   const base = yield* upstreamBase;
   yield* Effect.log(`Built on upstream ${UPSTREAM_REPOSITORY}@${base}.`);
 
@@ -249,7 +333,7 @@ export const forkCheck = Effect.fn("forkCheck")(function* () {
   ]))
     .split("\0")
     .filter((path) => path.length > 0);
-  const selection = selectForkTests(changed, yield* testedPackageDirs);
+  const selection = selectForkTests(changed, yield* testedPackageDirs, options.suite);
   if (selection.orphans.length > 0) {
     return yield* new ForkCheckError({
       detail: `No package runs these fork test files: ${selection.orphans.join(", ")}`,
@@ -258,18 +342,47 @@ export const forkCheck = Effect.fn("forkCheck")(function* () {
 
   const failed: Array<string> = [];
   for (const group of selection.groups) {
-    yield* Effect.log(`${group.packageDir}: ${group.files.length} fork test file(s).`);
-    const exitCode = yield* runInherited("vp", ["run", "test", ...group.files], group.packageDir);
-    if (exitCode !== 0) failed.push(group.packageDir);
+    const path = yield* Path.Path;
+    const root = path.resolve(group.packageDir);
+    const files = options.shard
+      ? (yield* Effect.tryPromise({
+          try: () => shardedTestFiles(root, options.shard!, group.files),
+          catch: (cause) =>
+            new ForkCheckError({ detail: `Could not discover shard ${options.shard}.`, cause }),
+        })).map((file) => path.relative(root, file).replaceAll("\\", "/"))
+      : group.files;
+    yield* Effect.log(
+      `${group.packageDir}: ${files.length} fork test file(s)${options.shard ? ` in shard ${options.shard}` : ""}.`,
+    );
+    for (const testCommand of forkTestCommands({ ...group, files }, options)) {
+      const exitCode = yield* runInherited(testCommand);
+      if (exitCode !== 0) {
+        failed.push(group.packageDir);
+        break;
+      }
+    }
   }
   if (failed.length > 0) {
     return yield* new ForkCheckError({ detail: `Fork tests failed in ${failed.join(", ")}.` });
   }
 });
 
-const command = Command.make("fork-check", {}, () => forkCheck()).pipe(
-  Command.withDescription("Check the fork's changes on top of a green upstream commit."),
-);
+const command = Command.make(
+  "fork-check",
+  {
+    suite: Flag.Literals("suite", ["all", "server", "other"]).pipe(Flag.withDefault("all")),
+    shard: Flag.String("shard").pipe(Flag.optional),
+    cacheServer: Flag.Boolean("cache-server").pipe(Flag.withDefault(false)),
+    report: Flag.String("report").pipe(Flag.optional),
+  },
+  (input) =>
+    forkCheck({
+      suite: input.suite,
+      cacheServer: input.cacheServer,
+      ...Option.match(input.shard, { onNone: () => ({}), onSome: (shard) => ({ shard }) }),
+      ...Option.match(input.report, { onNone: () => ({}), onSome: (report) => ({ report }) }),
+    }),
+).pipe(Command.withDescription("Check the fork's changes on top of a green upstream commit."));
 
 if (import.meta.main) {
   Command.run(command, { version: "0.0.0" }).pipe(
