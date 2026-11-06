@@ -12,9 +12,8 @@ on:
   workflow_dispatch:
     inputs:
       target-version:
-        description: "Admitted fork release to upgrade to (for example 0.0.46-atli.5). Leave empty for the newest admitted release."
-        required: false
-        default: ""
+        description: "Legacy admitted release whose prior version created recovery points (for example 0.0.46-atli.5). New updates no longer create them."
+        required: true
         type: string
 
 concurrency:

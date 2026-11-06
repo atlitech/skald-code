@@ -79,6 +79,12 @@ export interface ReleaseAssetFile {
   readonly sha256: string;
 }
 
+const UpdaterAsset = Schema.Struct({
+  file: Schema.String,
+  size: Schema.Number,
+  sha256: Schema.String,
+});
+
 const ReleaseManifestAsset = Schema.Struct({
   platform: Schema.String,
   arch: Schema.String,
@@ -117,6 +123,7 @@ const ReleaseManifest = Schema.Struct({
   commit: Schema.String,
   version: Schema.String,
   assets: Schema.Array(ReleaseManifestAsset),
+  updaterAssets: Schema.optionalKey(Schema.Array(UpdaterAsset)),
   verificationScope: VerificationScope,
 });
 export type ReleaseManifest = typeof ReleaseManifest.Type;
@@ -247,9 +254,16 @@ export const buildReleaseManifest = Effect.fn("buildReleaseManifest")(function* 
     return yield* new ReleaseManifestError({ detail: "there are no release assets." });
   }
   const assets: Array<ReleaseManifestAsset> = [];
+  const updaterAssets: Array<ReleaseAssetFile> = [];
+  const requiredUpdaterFiles = [
+    `T3-Code-${input.version}-arm64.zip`,
+    `T3-Code-${input.version}-arm64.zip.blockmap`,
+    "atli-mac.yml",
+  ];
+  const updaterFiles = [...requiredUpdaterFiles, `T3-Code-${input.version}-arm64.dmg.blockmap`];
   for (const asset of input.files.toSorted((left, right) => left.file.localeCompare(right.file))) {
     const parsed = parseAssetName(input.version, asset.file);
-    if (!parsed) {
+    if (!parsed && !updaterFiles.includes(asset.file)) {
       return yield* new ReleaseManifestError({
         detail: `'${asset.file}' is not named t3-${input.version}-<platform>-<arch>.tar.gz, T3-Code-${input.version}-arm64.dmg, or T3-Code-${input.version}-android-arm64-v8a.apk.`,
       });
@@ -262,6 +276,15 @@ export const buildReleaseManifest = Effect.fn("buildReleaseManifest")(function* 
     if (!Number.isSafeInteger(asset.size) || asset.size <= 0) {
       return yield* new ReleaseManifestError({ detail: `'${asset.file}' is empty.` });
     }
+    if (!parsed) {
+      if (updaterAssets.some((existing) => existing.file === asset.file)) {
+        return yield* new ReleaseManifestError({
+          detail: `duplicate updater asset ${asset.file}.`,
+        });
+      }
+      updaterAssets.push(asset);
+      continue;
+    }
     if (
       assets.some(
         (existing) => existing.platform === parsed.platform && existing.arch === parsed.arch,
@@ -273,6 +296,14 @@ export const buildReleaseManifest = Effect.fn("buildReleaseManifest")(function* 
     }
     assets.push({ ...parsed, file: asset.file, size: asset.size, sha256: asset.sha256 });
   }
+  if (
+    updaterAssets.length > 0 &&
+    requiredUpdaterFiles.some((file) => !updaterAssets.some((asset) => asset.file === file))
+  ) {
+    return yield* new ReleaseManifestError({
+      detail: "the Mac updater needs its ZIP, blockmap, and atli-mac.yml.",
+    });
+  }
   const verificationScope = yield* buildVerificationScope({
     version: input.version,
     assets,
@@ -283,6 +314,7 @@ export const buildReleaseManifest = Effect.fn("buildReleaseManifest")(function* 
     commit: input.commit,
     version: input.version,
     assets,
+    ...(updaterAssets.length > 0 ? { updaterAssets } : {}),
     verificationScope,
   };
   const manifestJson = yield* encodeManifestJson(manifest).pipe(
@@ -292,7 +324,9 @@ export const buildReleaseManifest = Effect.fn("buildReleaseManifest")(function* 
     manifest,
     manifestJson: `${manifestJson}\n`,
     // sha256sum's text-mode format, so `sha256sum -c SHA256SUMS` verifies it.
-    sha256sums: assets.map((asset) => `${asset.sha256}  ${asset.file}\n`).join(""),
+    sha256sums: [...assets, ...updaterAssets]
+      .map((asset) => `${asset.sha256}  ${asset.file}\n`)
+      .join(""),
   };
 });
 

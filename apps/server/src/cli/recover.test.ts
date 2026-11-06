@@ -20,7 +20,8 @@ import * as TestConsole from "effect/testing/TestConsole";
 import * as HostProcess from "@t3tools/shared/HostProcess";
 
 import * as BootService from "../cloud/bootService.ts";
-import { createRecoveryPoint, verifySnapshot } from "../cloud/recoveryPoint.ts";
+import { verifySnapshot } from "../cloud/recoveryPoint.ts";
+import { seedLegacyRecoveryPoint as createRecoveryPoint } from "../cloud/testkit/legacyRecoveryPoint.ts";
 import * as SqlitePersistence from "../persistence/Sqlite.ts";
 import * as ProcessRunner from "../processRunner.ts";
 import { runRecover } from "./recover.ts";

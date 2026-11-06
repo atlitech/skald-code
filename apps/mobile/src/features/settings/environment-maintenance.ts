@@ -6,7 +6,8 @@ import {
   type ServerProvider,
 } from "@t3tools/contracts";
 import {
-  CLI_RELEASES_PAGE_URL,
+  cliReleaseRepository,
+  isForkReleaseVersion,
   cliReleaseChannelOf,
   cliReleaseIndexPageUrl,
   newestCliReleaseVersion,
@@ -61,32 +62,33 @@ async function fetchReleases(url: string, accept: string, signal: AbortSignal) {
 
 export async function findEnvironmentUpdate(currentVersion: string, signal: AbortSignal) {
   const channel = cliReleaseChannelOf(currentVersion);
+  const releasesUrl = `https://github.com/${cliReleaseRepository(currentVersion)}/releases`;
+  const stable = channel === "stable" && !isForkReleaseVersion(currentVersion);
   // Public release pages avoid the anonymous API quota shared by devices on the same network.
   const response = await fetchReleases(
-    channel === "stable" ? `${CLI_RELEASES_PAGE_URL}/latest` : `${CLI_RELEASES_PAGE_URL}.atom`,
-    channel === "stable" ? "application/json" : "application/atom+xml",
+    stable ? `${releasesUrl}/latest` : `${releasesUrl}.atom`,
+    stable ? "application/json" : "application/atom+xml",
     signal,
   );
-  const releases =
-    channel === "stable"
-      ? [decodeRelease(await response.json())]
-      : Array.from(
-          (await response.text()).matchAll(
-            /<id>tag:github\.com,2008:Repository\/\d+\/([^<]+)<\/id>/g,
-          ),
-          ([, tag_name = ""]) => ({ tag_name }),
-        );
-  let version = newestCliReleaseVersion(releases, channel);
+  const releases = stable
+    ? [decodeRelease(await response.json())]
+    : Array.from(
+        (await response.text()).matchAll(
+          /<id>tag:github\.com,2008:Repository\/\d+\/([^<]+)<\/id>/g,
+        ),
+        ([, tag_name = ""]) => ({ tag_name }),
+      );
+  let version = newestCliReleaseVersion(releases, channel, currentVersion);
 
   // The feed only includes ten releases, so later nightlies can displace a published preview.
   for (let page = 1; version === undefined; page++) {
     const response = await fetchReleases(
-      cliReleaseIndexPageUrl(page),
+      cliReleaseIndexPageUrl(page, currentVersion),
       "application/vnd.github+json",
       signal,
     );
     const releases = decodeReleases(await response.json());
-    version = newestCliReleaseVersion(releases, channel);
+    version = newestCliReleaseVersion(releases, channel, currentVersion);
     if (releases.length < 100) break;
   }
 

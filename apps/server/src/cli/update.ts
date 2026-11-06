@@ -35,11 +35,6 @@ import {
   recordPinnedRuntimeLauncher,
   windowsShimTarget,
 } from "../cloud/pinnedRuntime.ts";
-import {
-  createRecoveryPoint,
-  RECOVERY_POINT_STEP,
-  type RecoveryPoint,
-} from "../cloud/recoveryPoint.ts";
 import { PRE_ADMISSION_FORK_VERSIONS, verifyReleaseAdmission } from "../cloud/releaseAdmission.ts";
 import {
   runStagedServicePreflight,
@@ -75,12 +70,13 @@ const RELEASE_INDEX_MAX_PAGES = 10;
 
 export const resolveNewestVersion = Effect.fn("cli.update.resolve_newest")(function* (
   channel: CliReleaseChannel,
+  currentVersion = packageJson.version,
 ) {
   const httpClient = yield* HttpClient.HttpClient;
   const environment = yield* HostProcess.Environment;
   const githubToken = environment.GH_TOKEN?.trim() || environment.GITHUB_TOKEN?.trim() || undefined;
   for (let page = 1; page <= RELEASE_INDEX_MAX_PAGES; page += 1) {
-    const request = HttpClientRequest.get(cliReleaseIndexPageUrl(page)).pipe(
+    const request = HttpClientRequest.get(cliReleaseIndexPageUrl(page, currentVersion)).pipe(
       HttpClientRequest.setHeader("Accept", "application/vnd.github+json"),
     );
     const authenticatedRequest =
@@ -101,7 +97,7 @@ export const resolveNewestVersion = Effect.fn("cli.update.resolve_newest")(funct
         () => new CliUpdateError({ reason: "The t3 release index had an unexpected shape." }),
       ),
     );
-    const version = newestCliReleaseVersion(releases, channel);
+    const version = newestCliReleaseVersion(releases, channel, currentVersion);
     if (version !== undefined) return version;
     if (releases.length === 0) break;
   }
@@ -411,45 +407,6 @@ const belongsToBootService = Effect.fn("cli.update.belongs_to_boot_service")(fun
   return false;
 });
 
-/**
- * The version the live service-managed server on this home runs, read from
- * its command line: the launcher starts `<versions>/<version>/t3 serve`.
- * Undefined when no such server is alive or its command line does not say.
- */
-const runningServiceServerVersion = Effect.fn("cli.update.running_service_server_version")(
-  function* (input: { readonly serverRuntimeStatePath: string; readonly versionsDir: string }) {
-    const platform = yield* HostProcess.Platform;
-    const fs = yield* FileSystem.FileSystem;
-    const path = yield* Path.Path;
-    const runner = yield* ProcessRunner.ProcessRunner;
-    const state = yield* readPersistedServerRuntimeState(input.serverRuntimeStatePath);
-    if (Option.isNone(state) || !state.value.serviceManaged || !isProcessAlive(state.value.pid)) {
-      return undefined;
-    }
-    const pid = String(state.value.pid);
-    const commandLine =
-      platform === "linux"
-        ? yield* fs.readFileString(`/proc/${pid}/cmdline`).pipe(Effect.orElseSucceed(() => ""))
-        : platform === "darwin"
-          ? yield* runner
-              .run({
-                command: "ps",
-                args: ["-o", "command=", "-p", pid],
-                timeout: Duration.seconds(5),
-              })
-              .pipe(
-                Effect.map((result) => (result.code === 0 ? result.stdout : "")),
-                Effect.orElseSucceed(() => ""),
-              )
-          : "";
-    const prefix = `${input.versionsDir}${path.sep}`;
-    const start = commandLine.indexOf(prefix);
-    if (start < 0) return undefined;
-    const version = commandLine.slice(start + prefix.length).split(path.sep)[0];
-    return version !== undefined && isExactServiceVersion(version) ? version : undefined;
-  },
-);
-
 export const runUpdate = Effect.fn("cli.update.run")(function* (input: {
   readonly baseDir: string;
   readonly logsDir: string;
@@ -617,33 +574,6 @@ export const runUpdate = Effect.fn("cli.update.run")(function* (input: {
     }
   }
 
-  // Cache recovery after preflight and before publish so retries do not evict good points.
-  // For deferred restarts, use the live process version rather than service-state.
-  const fromVersion =
-    serviceInstalled && restartPending
-      ? ((yield* runningServiceServerVersion({
-          serverRuntimeStatePath: input.serverRuntimeStatePath,
-          versionsDir: pinnedRuntimeVersionsDir(path, input.baseDir),
-        })) ?? currentVersion)
-      : (serviceVersion ?? currentVersion);
-  let keptPoint: RecoveryPoint | undefined;
-  const keepRecoveryPoint = yield* Effect.cached(
-    createRecoveryPoint({
-      baseDir: input.baseDir,
-      dbPath: input.dbPath,
-      fromVersion,
-      toVersion: targetVersion,
-    }).pipe(
-      Effect.tap((point) =>
-        Effect.sync(() => {
-          keptPoint = Option.getOrUndefined(point);
-        }),
-      ),
-      Effect.provideService(FileSystem.FileSystem, fs),
-      Effect.provideService(Path.Path, path),
-    ),
-  );
-
   const runtime = yield* ensurePinnedRuntimeInstalled({
     onProgress: progress.report,
     baseDir: input.baseDir,
@@ -700,7 +630,6 @@ export const runUpdate = Effect.fn("cli.update.run")(function* (input: {
               ),
             ),
           ),
-          Effect.andThen(keepRecoveryPoint),
           Effect.asVoid,
         ),
   }).pipe(
@@ -709,11 +638,6 @@ export const runUpdate = Effect.fn("cli.update.run")(function* (input: {
       if (error._tag === "PinnedRuntimePreflightBlockedError") {
         return new CliUpdateError({
           reason: `Not switching to t3@${targetVersion}: ${error.reason}`,
-        });
-      }
-      if (error.step === RECOVERY_POINT_STEP) {
-        return new CliUpdateError({
-          reason: `Not switching to t3@${targetVersion}: could not keep a recovery point of the database at ${input.dbPath}. Nothing was changed.`,
         });
       }
       if (error.step === ADMITTED_ARCHIVE_MISMATCH_STEP) {
@@ -734,12 +658,6 @@ export const runUpdate = Effect.fn("cli.update.run")(function* (input: {
       ),
     ),
   );
-
-  if (keptPoint !== undefined) {
-    yield* Console.log(
-      `  Kept recovery point ${keptPoint.id} (${keptPoint.dir}); \`t3 recover ${keptPoint.id}\` restores t3@${keptPoint.record.from.version} and the database as it is now.`,
-    );
-  }
 
   const launchedAs = (yield* HostProcess.IsExecutable) ? yield* resolveLauncherPath : undefined;
   const repointed = yield* repointLauncher({

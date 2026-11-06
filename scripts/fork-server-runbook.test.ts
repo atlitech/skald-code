@@ -103,9 +103,7 @@ describe("fork server runbook", () => {
   it("shows how to dispatch the recovery drill and read its records", () => {
     const drill = section("Recovery drill");
     expect(drill).toMatch(/\[recovering a failed update\]\(#recovering-a-failed-update\)/);
-    expect(drill).toMatch(
-      /gh workflow run fork-recovery-drill\.yml --repo atlitech\/t3code --ref atli\n/,
-    );
+
     expect(drill).toMatch(/--ref atli -f target-version=[^\s]+\n/);
     expect(drill).toMatch(/`priorVersion` in the target's\s+`ADMISSION\.json`/);
     expect(drill).toMatch(/must already\s+carry\s+`t3 recover`/);

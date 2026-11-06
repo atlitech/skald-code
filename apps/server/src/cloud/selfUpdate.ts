@@ -32,7 +32,6 @@ import { databaseMigrationHead } from "../persistence/databaseMigrationHead.ts";
 import * as ManagedPolicy from "../policy/ManagedPolicy.ts";
 import { managedUpdateMirror, managedUpdateRefusal } from "../policy/managedUpdates.ts";
 import * as ProcessRunner from "../processRunner.ts";
-import { createRecoveryPoint, RECOVERY_POINT_STEP } from "./recoveryPoint.ts";
 import { verifyReleaseAdmission } from "./releaseAdmission.ts";
 import {
   ADMITTED_ARCHIVE_MISMATCH_STEP,
@@ -196,27 +195,6 @@ export const make = Effect.fn("cloud.server_self_update.make")(function* () {
     }
 
     return yield* Effect.gen(function* () {
-      // Keep and cache the recovery point after preflight, before publishing the runtime.
-      // Use this running server version: service-state may name a deferred update.
-      const keepRecoveryPoint = yield* Effect.cached(
-        createRecoveryPoint({
-          baseDir: serverConfig.baseDir,
-          dbPath: serverConfig.dbPath,
-          fromVersion: packageJson.version,
-          toVersion: targetVersion,
-        }).pipe(
-          Effect.tap((point) =>
-            Option.isSome(point)
-              ? Effect.logInfo("Kept a recovery point before the server update.", {
-                  recoveryPointId: point.value.id,
-                  recoveryPointPath: point.value.dir,
-                })
-              : Effect.void,
-          ),
-          Effect.provideService(FileSystem.FileSystem, fs),
-          Effect.provideService(Path.Path, path),
-        ),
-      );
       yield* reportProgress("downloading");
       // A fork version installs only with an admission record for its exact
       // archive. Unlike `t3 update`, there is no override here.
@@ -245,27 +223,22 @@ export const make = Effect.fn("cloud.server_self_update.make")(function* () {
             runtime,
             databasePath: serverConfig.dbPath,
             targetVersion,
-          }).pipe(Effect.andThen(keepRecoveryPoint), Effect.asVoid),
+          }),
       }).pipe(
         Effect.mapError((error) =>
           error._tag === "PinnedRuntimePreflightBlockedError"
             ? failWith(error.reason, error)
-            : error.step === RECOVERY_POINT_STEP
+            : error.step === ADMITTED_ARCHIVE_MISMATCH_STEP
               ? failWith(
-                  `Not switching to t3@${targetVersion}: could not keep a recovery point of the database.`,
+                  `The archive downloaded for t3@${targetVersion} is not the one its admission record admitted.`,
                   error,
                 )
-              : error.step === ADMITTED_ARCHIVE_MISMATCH_STEP
+              : mirror !== undefined && isUnpublishedRelease(error)
                 ? failWith(
-                    `The archive downloaded for t3@${targetVersion} is not the one its admission record admitted.`,
+                    `${mirror.organization}'s update mirror has no t3@${targetVersion} for this machine.`,
                     error,
                   )
-                : mirror !== undefined && isUnpublishedRelease(error)
-                  ? failWith(
-                      `${mirror.organization}'s update mirror has no t3@${targetVersion} for this machine.`,
-                      error,
-                    )
-                  : failWith(`Could not prepare t3@${targetVersion}.`, error),
+                : failWith(`Could not prepare t3@${targetVersion}.`, error),
         ),
       );
 
