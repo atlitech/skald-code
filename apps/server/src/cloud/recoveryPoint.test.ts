@@ -21,19 +21,18 @@ import * as TestClock from "effect/testing/TestClock";
 import {
   acquireRecoverLock,
   appendRecoveryAction,
-  createRecoveryPoint,
   DatabaseDisplaceError,
   DatabaseReturnError,
   displaceDatabase,
   listRecoveryPoints,
   loadRecoveryPoint,
   prepareRestore,
-  RECOVERY_POINT_STEP,
   RecoveryPointError,
   restoreSnapshot,
   returnDisplacedDatabase,
   verifySnapshot,
 } from "./recoveryPoint.ts";
+import { seedLegacyRecoveryPoint as createRecoveryPoint } from "./testkit/legacyRecoveryPoint.ts";
 import * as SqlitePersistence from "../persistence/Sqlite.ts";
 
 const START = DateTime.toEpochMillis(DateTime.makeUnsafe("2026-10-09T10:11:12.123Z"));
@@ -73,8 +72,6 @@ const makeHome = Effect.fn("test.make_recovery_home")(function* (options?: {
   yield* TestClock.setTime(START);
   return { fs, path, baseDir, dbPath, fromRuntime };
 });
-
-const pointsDirOf = (path: Path.Path, baseDir: string) => path.join(baseDir, "recovery", "points");
 
 const createPoint = (baseDir: string, dbPath: string, fromVersion = "1.2.3", toVersion = "1.2.4") =>
   createRecoveryPoint({ baseDir, dbPath, fromVersion, toVersion });
@@ -163,129 +160,6 @@ const recordingLockMoves =
   };
 
 it.layer(NodeServices.layer)("recovery point", (it) => {
-  it.effect("keeps only an online backup and its record before an update", () =>
-    Effect.gen(function* () {
-      const { fs, path, baseDir, dbPath, fromRuntime } = yield* makeHome({
-        archiveSha256: "  ABCDEF0123\n",
-      });
-
-      const point = Option.getOrThrow(yield* createPoint(baseDir, dbPath));
-
-      const id = "20261009T101112123Z-1.2.3-to-1.2.4";
-      expect(point.id).toBe(id);
-      expect(point.dir).toBe(path.join(pointsDirOf(path, baseDir), id));
-      expect((yield* fs.readDirectory(point.dir)).toSorted()).toEqual([
-        "recovery.json",
-        "statev2.sqlite",
-      ]);
-      expect(yield* fs.readDirectory(pointsDirOf(path, baseDir))).toEqual([id]);
-      expect(readRows(point.snapshotPath)).toEqual([{ value: "kept" }]);
-      const record: unknown = JSON.parse(
-        yield* fs.readFileString(path.join(point.dir, "recovery.json")),
-      );
-      expect(record).toEqual({
-        id,
-        createdAt: "2026-10-09T10:11:12.123Z",
-        from: { version: "1.2.3", runtimePath: fromRuntime, archiveSha256: "abcdef0123" },
-        to: { version: "1.2.4" },
-        snapshot: {
-          size: NodeFS.statSync(point.snapshotPath).size,
-          sha256: fileSha256(point.snapshotPath),
-        },
-        actions: [],
-      });
-      expect(point.record).toEqual(record);
-      expect(fileMode(path.join(baseDir, "recovery"))).toBe(0o700);
-      expect(fileMode(pointsDirOf(path, baseDir))).toBe(0o700);
-      expect(fileMode(point.dir)).toBe(0o700);
-      expect(fileMode(point.snapshotPath)).toBe(0o600);
-    }),
-  );
-
-  it.effect("records a null archive digest when the from runtime has none", () =>
-    Effect.gen(function* () {
-      const { baseDir, dbPath } = yield* makeHome();
-      const point = Option.getOrThrow(yield* createPoint(baseDir, dbPath));
-      expect(point.record.from.archiveSha256).toBeNull();
-    }),
-  );
-
-  it.effect.each([
-    { name: "a home without a database", removeDatabase: true, toVersion: "1.2.4" },
-    { name: "an update to the same version", removeDatabase: false, toVersion: "1.2.3" },
-  ])("keeps no point for $name", ({ removeDatabase, toVersion }) =>
-    Effect.gen(function* () {
-      const { fs, path, baseDir, dbPath } = yield* makeHome();
-      if (removeDatabase) yield* fs.remove(dbPath);
-
-      expect(Option.isNone(yield* createPoint(baseDir, dbPath, "1.2.3", toVersion))).toBe(true);
-      expect(yield* fs.exists(path.join(baseDir, "recovery"))).toBe(false);
-    }),
-  );
-
-  it.effect("a fourth point prunes only the oldest", () =>
-    Effect.gen(function* () {
-      const { fs, path, baseDir, dbPath } = yield* makeHome();
-      const displaced = path.join(baseDir, "recovery", "displaced", "20200101T000000000Z-old");
-      yield* fs.makeDirectory(displaced, { recursive: true });
-      yield* fs.writeFileString(path.join(displaced, "statev2.sqlite"), "displaced");
-      const pointsDir = pointsDirOf(path, baseDir);
-      // Neither a staging directory nor one without a valid record is a point.
-      yield* fs.makeDirectory(path.join(pointsDir, ".staging-other"), { recursive: true });
-      yield* fs.makeDirectory(path.join(pointsDir, "00000000T000000000Z-junk"), {
-        recursive: true,
-      });
-      const runtimeBefore = yield* fs.readDirectory(path.join(baseDir, "runtime", "versions"));
-
-      const ids: string[] = [];
-      for (const toVersion of ["1.2.4", "1.2.5", "1.2.6", "1.2.7"]) {
-        ids.push(Option.getOrThrow(yield* createPoint(baseDir, dbPath, "1.2.3", toVersion)).id);
-        yield* TestClock.adjust(Duration.seconds(1));
-      }
-
-      expect((yield* listRecoveryPoints(baseDir)).map((point) => point.id)).toEqual(
-        ids.slice(1).toReversed(),
-      );
-      expect((yield* fs.readDirectory(pointsDir)).toSorted()).toEqual(
-        [".staging-other", "00000000T000000000Z-junk", ...ids.slice(1)].toSorted(),
-      );
-      expect(yield* fs.readDirectory(path.join(baseDir, "runtime", "versions"))).toEqual(
-        runtimeBefore,
-      );
-      expect(yield* fs.readFileString(path.join(displaced, "statev2.sqlite"))).toBe("displaced");
-    }),
-  );
-
-  it.effect("fails and leaves nothing behind when the database cannot be backed up", () =>
-    Effect.gen(function* () {
-      const { fs, path, baseDir, dbPath } = yield* makeHome();
-      yield* fs.writeFileString(
-        dbPath,
-        "this is not a SQLite database, just some bytes\n".repeat(50),
-      );
-
-      const error = yield* createPoint(baseDir, dbPath).pipe(Effect.flip);
-
-      expect(error._tag).toBe("PinnedRuntimeInstallError");
-      expect(error.step).toBe(RECOVERY_POINT_STEP);
-      expect(yield* fs.readDirectory(pointsDirOf(path, baseDir))).toEqual([]);
-    }),
-  );
-
-  it.effect("fails when the recovery directory cannot hold points", () =>
-    Effect.gen(function* () {
-      const { fs, path, baseDir, dbPath } = yield* makeHome();
-      yield* fs.makeDirectory(path.join(baseDir, "recovery"), { recursive: true });
-      yield* fs.writeFileString(pointsDirOf(path, baseDir), "a file, not a directory");
-
-      const error = yield* createPoint(baseDir, dbPath).pipe(Effect.flip);
-
-      expect(error.step).toBe(RECOVERY_POINT_STEP);
-      expect(yield* fs.readFileString(pointsDirOf(path, baseDir))).toBe("a file, not a directory");
-      expect(yield* fs.readDirectory(path.join(baseDir, "recovery"))).toEqual(["points"]);
-    }),
-  );
-
   it.effect.each(["", ".", "..", "../points", "a/b", ".staging-x", "a\\b"])(
     "load refuses the id %j",
     (id) =>

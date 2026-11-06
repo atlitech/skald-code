@@ -16,8 +16,8 @@ nightlies use (`0.0.46-nightly.<date>.<run>`).
 
 - It sorts above the official stable the VM came from. Switching needs no
   `--allow-downgrade`, and clients never offer the older stable as an update.
-- It sorts below the next official stable (`0.0.46`). Clients offer that once it
-  ships; see [Updates offered by clients](#updates-offered-by-clients).
+- It sorts below the next official stable (`0.0.46`), but fork update checks stay
+  on atli releases; see [Updates offered by clients](#updates-offered-by-clients).
 - `atli.<n>` compares numerically, so `atli.10` is newer than `atli.9`.
 - It sorts below `0.0.46-nightly.*`. A VM on a nightly needs
   `--allow-downgrade` to switch.
@@ -134,8 +134,8 @@ gh workflow run fork-server-release.yml -R atlitech/t3code --ref atli -f version
 A guard job runs before any build. It refuses a dispatch from any other ref, a
 version whose tag or release already exists, and an `atli` tip without a
 passing `Check` run (Fork CI runs on every push to `atli`). Every build checks out
-the commit the guard approved, and the publish job creates the tag and the
-release together, with every asset at once. A release publishes only when the
+the commit the guard approved. The publish job uploads every asset to a draft,
+then publishes it so update clients only see complete releases. A release publishes only when the
 Linux server, the signed and notarized Mac desktop app, and the Android APK all build, and every
 package's tests pass on that commit (`fork-full-suite.yml`). The Android
 job checks the app's public config before it builds, and the APK's package,
@@ -284,7 +284,18 @@ Quit the app, then drag Skald Code from the DMG into `/Applications`. Projects
 and threads live in `~/.t3/userdata` and the desktop's own data in
 `~/Library/Application Support/t3code-v2`, so both carry over. An agent running
 inside the app ends when it quits, so an agent doing the swap must hand it to a
-detached process. The build has no update feed and never replaces itself.
+detached process. Install the first OTA-enabled release this way once: older
+builds have no update feed and cannot discover it. Later releases use the
+existing in-app download and restart flow. Keep **Settings → About → Update
+track** on Stable; it follows atli prereleases in this fork. Nightly is not
+published for the fork.
+
+Each release includes the signed, notarized ZIP used by the Mac updater,
+`atli-mac.yml`, and blockmaps. CI checks the identity and signature of both the
+DMG app and the ZIP app, their embedded fork feed, and the payload sizes and
+SHA-512 hashes before publication. `manifest.json` lists these extra files in
+`updaterAssets`; `SHA256SUMS` includes them. They are build-checked, not
+runtime-verified; the Linux admission remains the only runtime verification.
 
 Earlier releases shipped an ad hoc signed `T3 Code (Beta).app` (or
 `T3 Code (Alpha).app`) with upstream's bundle ID. Delete it after installing
@@ -404,12 +415,23 @@ watch.
 
 ## Updates offered by clients
 
-Clients check upstream's releases, never the fork's. While the fork version is
-ahead of upstream stable, nothing is offered. Plain `t3 update` also refuses,
-because the newest upstream stable is older than the fork version. After
-upstream ships `0.0.46`, clients offer it. With the drop-in in place, the
-service downloads from the fork, gets a 404, and keeps running the fork build.
-To take the official version, follow [Rolling back](#rolling-back-to-an-official-version).
+OTA-enabled Mac builds check `atlitech/t3code`'s `atli` channel. The update
+button downloads the signed ZIP and restarts the app when requested. **Update
+everything** can bring the connected Linux server to the same release first.
+
+On an updated fork server, plain `t3 update` discovers the newest published
+`-atli.N` release and downloads it from the fork. Existing servers need one
+explicit version update to get this discovery behavior. Checks from the
+updated mobile app also follow the server's fork version. Upstream releases
+are not offered for fork hosts. Explicit mirror/base-URL overrides still win.
+
+Linux updates continue to require `ADMISSION.json`, verify the archive's
+checksum, and use upstream's temporary service-update rollback backup.
+Discovery does not bypass admission. No Linux desktop package is shipped by this workflow.
+
+Older clients can still offer upstream versions. Update those clients, or use
+`t3 update` on the server. To return to upstream intentionally, follow
+[Rolling back](#rolling-back-to-an-official-version).
 
 ## Rolling back to an official version
 
@@ -431,10 +453,16 @@ database. An official build keeps no recovery point, so back up
 
 ### Recovering a failed update
 
-Before `t3 update` or the in-app update switches this home to another server
-version, it keeps a recovery point under `~/.t3/recovery/points/`: a backup of
-the database and a record of the version it came from. The newest three
-points are kept. To go back to one:
+Updates use upstream's temporary rollback backup while the background
+service tries the new runtime. The service launcher removes it after a
+successful update or rollback. Updates no longer create or prune retained
+recovery points, so they do not accumulate three additional database copies.
+Preflight still uses a temporary database copy to check migrations.
+
+Older fork builds may have kept a recovery point under
+`~/.t3/recovery/points/`. Existing points and displaced databases are left
+untouched; this change does not reclaim their disk space. `t3 recover` remains
+available for restoring those legacy points. To go back to one:
 
 1. List the points and pick the one kept before the failed update:
 
@@ -487,12 +515,12 @@ prior release, writes data, upgrades to the target release, writes new work
 with it, declares the upgrade failed, and runs `t3 recover <id>`. The server
 runs in the foreground on the runner, not as a service.
 
-The target is an admitted release, by default the newest one. The prior is the
-`priorVersion` in the target's `ADMISSION.json`, and it must already carry
-`t3 recover`. Dispatch the workflow from `atli`; nothing else starts it:
+This is a legacy recovery drill: explicitly select an admitted release whose
+prior version still created recovery points. New updates do not create them.
+The prior is the `priorVersion` in the target's `ADMISSION.json`, and it must already
+carry `t3 recover`. Dispatch the workflow from `atli`; nothing else starts it:
 
 ```sh
-gh workflow run fork-recovery-drill.yml --repo atlitech/t3code --ref atli
 gh workflow run fork-recovery-drill.yml --repo atlitech/t3code --ref atli -f target-version=0.0.46-atli.5
 ```
 

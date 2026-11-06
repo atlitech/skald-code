@@ -65,6 +65,29 @@ describe("DesktopUpdates", () => {
     ).pipe(Effect.provide(harness.layer));
   });
 
+  it.effect("follows atli prereleases and refuses the unpublished nightly track", () => {
+    const harness = makeHarness({
+      appVersion: "1.2.4-atli.9",
+      env: { T3CODE_DESKTOP_MOCK_UPDATES: "false" },
+      appUpdateYml: "provider: github\nowner: atlitech\nrepo: t3code\nchannel: atli\n",
+    });
+    return Effect.scoped(
+      Effect.gen(function* () {
+        const updates = yield* DesktopUpdates.DesktopUpdates;
+        yield* updates.configure;
+        assert.equal(harness.updaterChannel(), "atli");
+        assert.isTrue(harness.allowPrerelease());
+        assert.isFalse(harness.allowDowngrade());
+        assert.isTrue((yield* updates.check("manual")).checked);
+        const blocked = yield* updates.setChannel("nightly").pipe(Effect.flip);
+        assert.include(blocked.message, "atli releases");
+        const restored = yield* updates.setChannel("latest");
+        assert.isTrue(restored.enabled);
+        assert.equal(harness.updaterChannel(), "atli");
+      }),
+    ).pipe(Effect.provide(Layer.merge(TestClock.layer(), harness.layer)));
+  });
+
   it.effect("checks for newer releases after an update has been downloaded", () => {
     const harness = makeHarness();
 

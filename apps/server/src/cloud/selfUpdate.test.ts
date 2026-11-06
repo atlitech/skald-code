@@ -516,175 +516,24 @@ const makeHomeWithDatabase = Effect.fn("test.make_self_update_home")(function* (
   };
 });
 
-it.layer(NodeServices.layer)("server self update recovery point", (it) => {
-  it.effect.each([
-    ["the running version with a service state", true],
-    ["the running version without a service state", false],
-  ] as const)("keeps one recovery point from %s before publishing", ([, serviceState]) =>
-    Effect.gen(function* () {
-      const fs = yield* FileSystem.FileSystem;
-      const path = yield* Path.Path;
-      const home = yield* makeHomeWithDatabase({ serviceState });
-      const targetDir = path.join(home.baseDir, "runtime", "versions", "1.1.0");
-      const pointsAtPublish: string[][] = [];
-      const { selfUpdate, order, dbPath } = yield* makeHarness({
-        baseDir: home.baseDir,
-        onRename: (_from, to) =>
-          to === targetDir
-            ? fs
-                .readDirectory(home.pointsDir)
-                .pipe(Effect.map((names) => void pointsAtPublish.push(names)))
-            : Effect.void,
-      });
-      expect(dbPath).toBe(home.dbPath);
-
-      expect((yield* selfUpdate.update({ targetVersion: "1.1.0" })).updateId).toBe("launcher-id");
-      expect(order).toEqual(["download", "extract", "preflight", "accept"]);
-      const points = yield* fs.readDirectory(home.pointsDir);
-      expect(points).toEqual([`19700101T000000000Z-${home.fromVersion}-to-1.1.0`]);
-      // The point was already in place when the new runtime was published.
-      expect(pointsAtPublish).toEqual([points]);
-      const pointDir = path.join(home.pointsDir, points[0] ?? "");
-      expect((yield* fs.readDirectory(pointDir)).toSorted()).toEqual([
-        "recovery.json",
-        "statev2.sqlite",
-      ]);
-      const snapshotPath = path.join(pointDir, "statev2.sqlite");
-      const record: unknown = JSON.parse(
-        yield* fs.readFileString(path.join(pointDir, "recovery.json")),
-      );
-      expect(record).toEqual({
-        id: points[0],
-        createdAt: "1970-01-01T00:00:00.000Z",
-        from: {
-          version: home.fromVersion,
-          runtimePath: home.fromRuntime,
-          archiveSha256: serviceState ? SERVICE_ARCHIVE_SHA256 : null,
-        },
-        to: { version: "1.1.0" },
-        snapshot: { size: NodeFS.statSync(snapshotPath).size, sha256: fileSha256(snapshotPath) },
-        actions: [],
-      });
-    }),
-  );
-
-  it.effect(
-    "keeps a point from the running version while a deferred restart already names the target",
-    () =>
+it.layer(NodeServices.layer)("server self update backup retention", (it) => {
+  it.effect.each([false, true])(
+    "updates without touching recovery storage (existing: %s)",
+    (existing) =>
       Effect.gen(function* () {
         const fs = yield* FileSystem.FileSystem;
-        const path = yield* Path.Path;
-        const home = yield* makeHomeWithDatabase({
-          serviceState: true,
-          restartPendingVersion: "1.1.0",
-        });
-        const { selfUpdate } = yield* makeHarness({ baseDir: home.baseDir });
-
+        const home = yield* makeHomeWithDatabase({ serviceState: true });
+        if (existing) yield* fs.writeFileString(home.pointsDir, "legacy recovery storage");
+        const before = fileSha256(home.dbPath);
+        const { selfUpdate, order } = yield* makeHarness({ baseDir: home.baseDir });
         yield* selfUpdate.update({ targetVersion: "1.1.0" });
-        const points = yield* fs.readDirectory(home.pointsDir);
-        expect(points).toEqual([`19700101T000000000Z-${SERVICE_VERSION}-to-1.1.0`]);
-        const record: { readonly from: unknown } = JSON.parse(
-          yield* fs.readFileString(path.join(home.pointsDir, points[0] ?? "", "recovery.json")),
-        );
-        expect(record.from).toEqual({
-          version: SERVICE_VERSION,
-          runtimePath: home.fromRuntime,
-          archiveSha256: SERVICE_ARCHIVE_SHA256,
-        });
+        expect(order).toEqual(["download", "extract", "preflight", "accept"]);
+        if (existing)
+          expect(yield* fs.readFileString(home.pointsDir)).toBe("legacy recovery storage");
+        else expect(yield* fs.exists(home.pointsDir)).toBe(false);
+        expect(fileSha256(home.dbPath)).toBe(before);
+        expect(yield* fs.readFileString(home.displacedPath)).toBe("an earlier database\n");
       }),
-  );
-
-  it.effect("keeps a single point when a concurrent publish makes validation run twice", () =>
-    Effect.gen(function* () {
-      const fs = yield* FileSystem.FileSystem;
-      const path = yield* Path.Path;
-      const home = yield* makeHomeWithDatabase({ serviceState: true });
-      const targetDir = path.join(home.baseDir, "runtime", "versions", "1.1.0");
-      const { selfUpdate, order } = yield* makeHarness({
-        baseDir: home.baseDir,
-        // Another update publishes the same version first, so this one
-        // validates the published runtime again instead of its own.
-        onRename: (from, to) =>
-          to === targetDir
-            ? Effect.gen(function* () {
-                yield* fs.makeDirectory(targetDir, { recursive: true });
-                yield* fs.writeFileString(path.join(targetDir, "t3"), "#!/bin/sh\n");
-                yield* fs.writeFileString(path.join(targetDir, ".install-complete"), "1.1.0\n");
-                return yield* PlatformError.systemError({
-                  _tag: "AlreadyExists",
-                  module: "FileSystem",
-                  method: "rename",
-                  pathOrDescriptor: from,
-                });
-              })
-            : Effect.void,
-      });
-
-      yield* selfUpdate.update({ targetVersion: "1.1.0" });
-      expect(order).toEqual(["download", "extract", "preflight", "preflight", "accept"]);
-      expect(yield* fs.readDirectory(home.pointsDir)).toHaveLength(1);
-    }),
-  );
-
-  it.effect("prunes only the oldest point on the fourth update", () =>
-    Effect.gen(function* () {
-      const fs = yield* FileSystem.FileSystem;
-      const path = yield* Path.Path;
-      const home = yield* makeHomeWithDatabase({ serviceState: true });
-      const versions = ["1.1.0", "1.1.1", "1.1.2", "1.1.3"];
-      for (const version of versions) {
-        // A prepared update hands the server over, so each one is a fresh server.
-        const { selfUpdate } = yield* makeHarness({ baseDir: home.baseDir, version });
-        yield* selfUpdate.update({ targetVersion: version });
-        yield* TestClock.adjust(Duration.seconds(1));
-      }
-
-      expect((yield* fs.readDirectory(home.pointsDir)).toSorted()).toEqual([
-        `19700101T000001000Z-${SERVICE_VERSION}-to-1.1.1`,
-        `19700101T000002000Z-${SERVICE_VERSION}-to-1.1.2`,
-        `19700101T000003000Z-${SERVICE_VERSION}-to-1.1.3`,
-      ]);
-      expect(
-        (yield* fs.readDirectory(path.join(home.baseDir, "runtime", "versions"))).toSorted(),
-      ).toEqual([SERVICE_VERSION, ...versions]);
-      expect(yield* fs.readFileString(home.displacedPath)).toBe("an earlier database\n");
-    }),
-  );
-
-  it.effect.each([
-    ["the backup fails", "garbage"],
-    ["the recovery directory cannot be written", "points-file"],
-  ] as const)("refuses the update and changes nothing when %s", ([, failure]) =>
-    Effect.gen(function* () {
-      const fs = yield* FileSystem.FileSystem;
-      const path = yield* Path.Path;
-      const home = yield* makeHomeWithDatabase({
-        serviceState: true,
-        database: failure === "garbage" ? "garbage" : "sqlite",
-      });
-      if (failure === "points-file") yield* fs.writeFileString(home.pointsDir, "not a directory\n");
-      const databaseSha256 = fileSha256(home.dbPath);
-      const { selfUpdate, order } = yield* makeHarness({ baseDir: home.baseDir });
-
-      const error = yield* selfUpdate.update({ targetVersion: "1.1.0" }).pipe(Effect.flip);
-
-      expect(error.reason).toBe(
-        "Not switching to t3@1.1.0: could not keep a recovery point of the database.",
-      );
-      // The preflight ran and the launcher was never asked to switch.
-      expect(order).toEqual(["download", "extract", "preflight"]);
-      expect(yield* fs.readDirectory(path.join(home.baseDir, "runtime", "versions"))).toEqual([
-        SERVICE_VERSION,
-      ]);
-      expect(yield* fs.readFileString(home.serviceStatePath)).toBe(SERVICE_STATE);
-      expect(fileSha256(home.dbPath)).toBe(databaseSha256);
-      expect(yield* fs.readFileString(home.displacedPath)).toBe("an earlier database\n");
-      if (failure === "points-file") {
-        expect(yield* fs.readFileString(home.pointsDir)).toBe("not a directory\n");
-      } else {
-        expect(yield* fs.readDirectory(home.pointsDir)).toEqual([]);
-      }
-    }),
   );
 });
 

@@ -2,15 +2,15 @@ name: Fork server release
 
 # Fork-only (atlitech/t3code). Builds the self-contained Linux x64 server
 # archive the official release ships and, from the same commit, the signed and
-# notarized Mac arm64 desktop DMG and the personal Android arm64-v8a APK, and publishes
+# notarized Mac arm64 desktop DMG and OTA payload and the personal Android arm64-v8a APK, and publishes
 # all three with SHA256SUMS and manifest.json as a prerelease, in the layout
 # scripts/install.sh and `t3 update` download from. A release publishes only
 # when all three build and every package's tests pass. Before anything publishes,
 # the admission job installs that exact archive over data the previously
 # admitted release wrote, upgrades and runs it, and the release ships its
 # attested ADMISSION.json only when every check passed. Releases are
-# immutable: the guard refuses a used version, and publish creates the tag and
-# the release with every asset at once. Only after it publishes does the
+# immutable: the guard refuses a used version, and publish uploads every asset
+# to a draft before exposing the release to update clients. Only after it publishes does the
 # personal iOS app, built from the same commit, go to TestFlight.
 # Runbook: docs/operations/fork-server.md.
 
@@ -156,10 +156,8 @@ jobs:
         run: cargo build --locked --release --manifest-path native/resource-monitor/Cargo.toml --target x86_64-unknown-linux-gnu
 
       # t3#build builds @t3tools/web first and copies it into apps/server/dist/client.
-      # Without GITHUB_REPOSITORY the client links release notes to upstream's
-      # releases, which publish the versions clients offer; the fork's do not.
       - name: Build server and web client
-        run: env -u GITHUB_REPOSITORY -u T3CODE_DESKTOP_UPDATE_REPOSITORY vp run --filter t3 build
+        run: vp run --filter t3 build
 
       - name: Build CLI single-executable
         run: node apps/server/scripts/cli.ts build-exe --verbose
@@ -227,6 +225,7 @@ jobs:
       T3CODE_RELAY_URL: ${{ vars.T3CODE_RELAY_URL }}
       T3CODE_DESKTOP_VERSION: ${{ needs.guard.outputs.version }}
       T3CODE_DESKTOP_SIGNED: "true"
+      T3CODE_DESKTOP_UPDATE_REPOSITORY: atlitech/t3code
       # The Developer ID profile's team; the build also signs passkey entitlements with it.
       T3CODE_APPLE_TEAM_ID: H6L3F33KRM
       VERSION: ${{ needs.guard.outputs.version }}
@@ -280,17 +279,14 @@ jobs:
           echo "T3CODE_MACOS_PROVISIONING_PROFILE=$RUNNER_TEMP/skald-code.provisionprofile" >> "$GITHUB_ENV"
           echo "APPLE_API_KEY=$RUNNER_TEMP/AuthKey.p8" >> "$GITHUB_ENV"
 
-      # Writes release/T3-Code-<version>-arm64.dmg; electron-builder reads the
-      # certificate from CSC_LINK. Without GITHUB_REPOSITORY the build configures
-      # no update feed, as a local build does: fork releases carry no desktop
-      # updater metadata.
+      # The ZIP is Squirrel.Mac's signed update payload.
       - name: Build desktop DMG
         env:
           CSC_LINK: ${{ secrets.T3CODE_PERSONAL_MACOS_CERTIFICATE_BASE64 }}
           CSC_KEY_PASSWORD: ${{ secrets.T3CODE_PERSONAL_MACOS_CERTIFICATE_PASSWORD }}
           APPLE_API_KEY_ID: ${{ vars.T3CODE_PERSONAL_MACOS_APP_STORE_CONNECT_KEY_ID }}
           APPLE_API_ISSUER: ${{ vars.T3CODE_PERSONAL_MACOS_APP_STORE_CONNECT_ISSUER_ID }}
-        run: env -u GITHUB_REPOSITORY -u T3CODE_DESKTOP_UPDATE_REPOSITORY vp run dist:desktop:dmg:arm64
+        run: vp run dist:desktop:dmg:arm64
 
       - name: Check the app's bundle identifier, version, and signature
         shell: bash
@@ -306,28 +302,43 @@ jobs:
             echo "::error::Expected one app in the DMG; found ${#apps[@]}."
             exit 1
           fi
-          if [[ -e "${apps[0]}/Contents/Resources/app-update.yml" ]]; then
-            echo "::error::The app carries an update feed (app-update.yml); fork releases publish no updater metadata."
+          ditto -x -k "release/T3-Code-$VERSION-arm64.zip" "$RUNNER_TEMP/ota"
+          ota_apps=("$RUNNER_TEMP/ota"/*.app)
+          if (( ${#ota_apps[@]} != 1 )); then
+            echo "::error::Expected one app in the OTA ZIP."
             exit 1
           fi
-          plutil -convert xml1 -o - "${apps[0]}/Contents/Info.plist" > "$RUNNER_TEMP/Info.plist"
-          codesign -dv --verbose=2 "${apps[0]}" > "$RUNNER_TEMP/codesign.txt" 2>&1 || true
-          node scripts/fork-mac-identity.ts \
-            --info-plist "$RUNNER_TEMP/Info.plist" \
-            --codesign "$RUNNER_TEMP/codesign.txt" \
-            --release-version "$VERSION"
+          for app in "${apps[0]}" "${ota_apps[0]}"; do
+            codesign --verify --deep --strict "$app"
+            plutil -convert xml1 -o - "$app/Contents/Info.plist" > "$RUNNER_TEMP/Info.plist"
+            codesign -dv --verbose=2 "$app" > "$RUNNER_TEMP/codesign.txt" 2>&1 || true
+            node scripts/fork-mac-identity.ts \
+              --info-plist "$RUNNER_TEMP/Info.plist" \
+              --codesign "$RUNNER_TEMP/codesign.txt" \
+              --release-version "$VERSION" \
+              --app-update-yml "$app/Contents/Resources/app-update.yml" \
+              --release-dir release
+          done
 
       - name: Attest DMG provenance
         uses: actions/attest-build-provenance@v3
         with:
-          subject-path: release/T3-Code-${{ needs.guard.outputs.version }}-arm64.dmg
+          subject-path: |
+            release/T3-Code-${{ needs.guard.outputs.version }}-arm64.dmg
+            release/T3-Code-${{ needs.guard.outputs.version }}-arm64.zip
+            release/T3-Code-${{ needs.guard.outputs.version }}-arm64.*.blockmap
+            release/atli-mac.yml
 
       # publish downloads every `release-*` artifact into one directory.
       - name: Upload DMG
         uses: actions/upload-artifact@v7
         with:
           name: release-darwin-arm64
-          path: release/T3-Code-${{ needs.guard.outputs.version }}-arm64.dmg
+          path: |
+            release/T3-Code-${{ needs.guard.outputs.version }}-arm64.dmg
+            release/T3-Code-${{ needs.guard.outputs.version }}-arm64.zip
+            release/T3-Code-${{ needs.guard.outputs.version }}-arm64.*.blockmap
+            release/atli-mac.yml
           if-no-files-found: error
           retention-days: 7
 
@@ -572,9 +583,8 @@ jobs:
     with:
       ref: ${{ needs.guard.outputs.sha }}
 
-  # Creates the tag and the release together, with every asset in one call, so
-  # a published release never changes. A failed run is retried by dispatching
-  # the next version, never by re-running this job against a used one.
+  # Upload to a draft so update clients never see an incomplete release.
+  # A failed run needs a new version; published releases never change.
   publish:
     name: Publish release
     needs: [guard, build-linux, admission, build-mac, build-android, test-full]
@@ -610,7 +620,7 @@ jobs:
             args:
               - --filter=@t3tools/scripts...
 
-      - name: Download archive, DMG, and APK
+      - name: Download archive, desktop update assets, and APK
         uses: actions/download-artifact@v8
         with:
           pattern: release-*
@@ -655,9 +665,10 @@ jobs:
           set -euo pipefail
           gh release create "$TAG" release/* \
             --target "$SHA" \
-            --prerelease \
+            --draft --prerelease \
             --title "T3 Code $VERSION (atli fork, Linux x64 server, Mac arm64 app, and Android APK)" \
             --notes-file "$RUNNER_TEMP/release-notes.md"
+          gh release edit "$TAG" --draft=false
 
   # Uploads the personal iOS app (tech.atli.skaldcode) to TestFlight for the
   # owner's internal testers, from the guarded commit, once the release has

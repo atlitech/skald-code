@@ -2,9 +2,20 @@
 import * as NodeFS from "node:fs";
 import * as NodePath from "node:path";
 import { assert, it } from "@effect/vitest";
+import * as NodeCryptoServices from "@effect/platform-node/NodeCrypto";
+import * as NodeServices from "@effect/platform-node/NodeServices";
+import * as NodeCrypto from "node:crypto";
+import * as FileSystem from "effect/FileSystem";
+import * as Path from "effect/Path";
+import * as Layer from "effect/Layer";
 import * as Effect from "effect/Effect";
 
-import { checkMacIdentity, classifyCodesign, readPlistStrings } from "./fork-mac-identity.ts";
+import {
+  checkMacIdentity,
+  checkMacUpdateArtifacts,
+  classifyCodesign,
+  readPlistStrings,
+} from "./fork-mac-identity.ts";
 
 // Fixtures: an electron-builder Info.plist converted with `plutil -convert
 // xml1`, and `codesign -dv --verbose=2` output for an unsigned app, an ad hoc
@@ -97,4 +108,44 @@ it.effect("refuses a wrong identity, version, signer, or a missing notarization"
       assert.match(error.message, /no stapled notarization ticket/);
     }
   }),
+);
+
+it.effect("validates the fork feed and OTA payload bytes before publication", () =>
+  Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem;
+    const path = yield* Path.Path;
+    const releaseDir = yield* fs.makeTempDirectoryScoped();
+    const zip = `T3-Code-${version}-arm64.zip`;
+    const bytes = "signed app payload";
+    yield* fs.writeFileString(path.join(releaseDir, zip), bytes);
+    yield* fs.writeFileString(path.join(releaseDir, `${zip}.blockmap`), "blockmap");
+    const sha512 = NodeCrypto.createHash("sha512").update(bytes).digest("base64");
+    const manifest = { version, files: [{ url: zip, sha512, size: bytes.length }] };
+    // JSON is YAML too; these exercise the decoded release metadata.
+    const writeManifest = (value: unknown) =>
+      fs.writeFileString(path.join(releaseDir, "atli-mac.yml"), JSON.stringify(value));
+    const appUpdateYml = "provider: github\nowner: atlitech\nrepo: t3code\nchannel: atli\n";
+    yield* writeManifest(manifest);
+    yield* checkMacUpdateArtifacts({ appUpdateYml, releaseDir, version });
+    const wrongFeed = yield* Effect.flip(
+      checkMacUpdateArtifacts({
+        appUpdateYml: appUpdateYml.replace("atlitech", "pingdotgg"),
+        releaseDir,
+        version,
+      }),
+    );
+    assert.equal(wrongFeed._tag, "SchemaError");
+    for (const invalid of [
+      { ...manifest, version: "1.0.0" },
+      { ...manifest, files: [{ ...manifest.files[0], url: "../foreign.zip" }] },
+      { ...manifest, files: [{ ...manifest.files[0], size: 1 }] },
+      { ...manifest, files: [{ ...manifest.files[0], sha512: "wrong" }] },
+    ]) {
+      yield* writeManifest(invalid);
+      const error = yield* Effect.flip(
+        checkMacUpdateArtifacts({ appUpdateYml, releaseDir, version }),
+      );
+      assert.equal(error._tag, "MacIdentityError");
+    }
+  }).pipe(Effect.provide(Layer.mergeAll(NodeServices.layer, NodeCryptoServices.layer))),
 );

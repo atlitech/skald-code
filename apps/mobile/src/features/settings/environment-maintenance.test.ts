@@ -88,6 +88,18 @@ describe("environment release checks", () => {
     expect(await findEnvironmentUpdate("1.0.0-preview.20260925.1", signal)).toBeNull();
   });
 
+  it("checks fork hosts against atli prereleases instead of upstream stable", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => {
+        expect(url).toBe("https://github.com/atlitech/t3code/releases.atom");
+        return feed("v1.2.4", "v1.2.4-nightly.20261106.1", "v1.2.4-atli.10");
+      }),
+    );
+    expect(await findEnvironmentUpdate("1.2.4-atli.9", signal)).toBe("1.2.4-atli.10");
+    expect(await findEnvironmentUpdate("1.2.4-atli.10", signal)).toBeNull();
+  });
+
   it("finds a published preview beyond the ten-entry feed and first API page", async () => {
     const nightlies = Array.from({ length: 10 }, (_, i) => `v1.0.0-nightly.20260930.${i}`);
     vi.stubGlobal(

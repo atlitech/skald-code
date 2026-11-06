@@ -91,6 +91,35 @@ it.effect("names the commit, version and every asset, agreeing with SHA256SUMS",
   }),
 );
 
+it.effect("checksums OTA files without claiming their payload was runtime-verified", () =>
+  Effect.gen(function* () {
+    const updaterAssets = [
+      "atli-mac.yml",
+      `T3-Code-${version}-arm64.zip`,
+      `T3-Code-${version}-arm64.zip.blockmap`,
+    ].map((file) => ({ ...dmg, file }));
+    const release = yield* buildReleaseManifest({
+      commit,
+      version,
+      files: [linux, dmg, apk, ...updaterAssets],
+      admission,
+    });
+    assert.lengthOf(release.manifest.updaterAssets!, 3);
+    assert.lengthOf(release.manifest.verificationScope.entries, 3);
+    const sums = parseSha256Sums(release.sha256sums);
+    for (const asset of updaterAssets) assert.equal(sums.get(asset.file), asset.sha256);
+    const failure = yield* Effect.flip(
+      buildReleaseManifest({
+        commit,
+        version,
+        files: [linux, dmg, apk, updaterAssets[0]!],
+        admission,
+      }),
+    );
+    assert.include(failure.message, "ZIP, blockmap, and atli-mac.yml");
+  }),
+);
+
 it.effect(
   "scopes Linux as runtime-verified by its admission, and Mac and Android as build-checked",
   () =>

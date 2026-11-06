@@ -127,7 +127,7 @@ describe("fork recovery drill workflow", () => {
     expect(workflow).not.toMatch(/if:\s*false\b/);
   });
 
-  it("drills the dispatched target, defaulting to the newest admitted release", () => {
+  it("drills the explicitly selected legacy release", () => {
     const steps = stepsOf(job("drill"));
     const target = stepIndex(steps, /node scripts\/linux-recovery\/drill-target\.ts/);
     expect(steps[target]).toMatch(/id: target/);

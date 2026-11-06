@@ -4,6 +4,12 @@
 // signed with the owner's Developer ID and notarized, or Gatekeeper blocks the download.
 // See the fork runbook.
 
+import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
+import * as Digest from "effect/crypto/Digest";
+import * as Base64 from "effect/encoding/Base64";
+import * as Layer from "effect/Layer";
+import * as Path from "effect/Path";
+import { fromYaml } from "@t3tools/shared/schemaYaml";
 import * as NodeRuntime from "@effect/platform-node/NodeRuntime";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import * as Effect from "effect/Effect";
@@ -100,9 +106,68 @@ export const checkMacIdentity = Effect.fn("checkMacIdentity")(function* (input: 
   } as const;
 });
 
+const AppUpdate = fromYaml(
+  Schema.Struct({
+    provider: Schema.Literal("github"),
+    owner: Schema.Literal("atlitech"),
+    repo: Schema.Literal("t3code"),
+    channel: Schema.Literal("atli"),
+  }),
+);
+const UpdateManifest = fromYaml(
+  Schema.Struct({
+    version: Schema.String,
+    files: Schema.Array(
+      Schema.Struct({ url: Schema.String, sha512: Schema.String, size: Schema.Number }),
+    ),
+  }),
+);
+
+const decodeAppUpdate = Schema.decodeEffect(AppUpdate);
+const decodeUpdateManifest = Schema.decodeEffect(UpdateManifest);
+
+export const checkMacUpdateArtifacts = Effect.fn("checkMacUpdateArtifacts")(function* (input: {
+  readonly appUpdateYml: string;
+  readonly releaseDir: string;
+  readonly version: string;
+}) {
+  const fs = yield* FileSystem.FileSystem;
+  const path = yield* Path.Path;
+  const digest = yield* Digest.Digest;
+  yield* decodeAppUpdate(input.appUpdateYml);
+  const manifest = yield* decodeUpdateManifest(
+    yield* fs.readFileString(path.join(input.releaseDir, "atli-mac.yml")),
+  );
+  const zip = `T3-Code-${input.version}-arm64.zip`;
+  const dmg = `T3-Code-${input.version}-arm64.dmg`;
+  if (manifest.version !== input.version || !manifest.files.some((file) => file.url === zip)) {
+    return yield* new MacIdentityError({
+      problems: ["The OTA manifest must name this release and its ZIP payload."],
+    });
+  }
+  for (const file of manifest.files) {
+    if (file.url !== zip && file.url !== dmg) {
+      return yield* new MacIdentityError({ problems: [`Unexpected OTA payload: ${file.url}.`] });
+    }
+    const bytes = yield* fs.readFile(path.join(input.releaseDir, file.url));
+    const sha512 = Base64.encode(yield* digest.digest(Digest.sha512, bytes));
+    if (bytes.length !== file.size || sha512 !== file.sha512) {
+      return yield* new MacIdentityError({
+        problems: [`OTA checksum or size mismatch for ${file.url}.`],
+      });
+    }
+  }
+  const blockmap = yield* fs.stat(path.join(input.releaseDir, `${zip}.blockmap`));
+  if (blockmap.size === 0n) {
+    return yield* new MacIdentityError({ problems: ["The ZIP blockmap is empty."] });
+  }
+});
+
 const command = Command.make(
   "fork-mac-identity",
   {
+    appUpdateYml: Flag.String("app-update-yml"),
+    releaseDir: Flag.String("release-dir"),
     infoPlist: Flag.String("info-plist").pipe(
       Flag.withDescription("The app's Info.plist as XML (plutil -convert xml1)."),
     ),
@@ -122,6 +187,11 @@ const command = Command.make(
         codesign: yield* fs.readFileString(options.codesign),
         version: options.version,
       });
+      yield* checkMacUpdateArtifacts({
+        appUpdateYml: yield* fs.readFileString(options.appUpdateYml),
+        releaseDir: options.releaseDir,
+        version: options.version,
+      });
       yield* Effect.log(
         `${identity.bundleIdentifier} ${identity.version}, ${identity.signature}: the release's app.`,
       );
@@ -132,7 +202,7 @@ const command = Command.make(
 
 if (import.meta.main) {
   Command.run(command, { version: "0.0.0" }).pipe(
-    Effect.provide(NodeServices.layer),
+    Effect.provide(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer)),
     NodeRuntime.runMain,
   );
 }

@@ -191,17 +191,13 @@ describe("fork server release workflow", () => {
     expect(env.get("T3CODE_DESKTOP_VERSION")).toBe("${{ needs.guard.outputs.version }}");
 
     const build = stepsOf(body).findIndex((step) =>
-      /run: env -u GITHUB_REPOSITORY -u T3CODE_DESKTOP_UPDATE_REPOSITORY vp run dist:desktop:dmg:arm64$/m.test(
-        step,
-      ),
+      /run: vp run dist:desktop:dmg:arm64$/m.test(step),
     );
     expect(build).toBeGreaterThan(stepsOf(body).indexOf(rust!));
   });
 
-  it("builds the Linux web client to link upstream's release notes", () => {
-    expect(job("build-linux").join("\n")).toMatch(
-      /run: env -u GITHUB_REPOSITORY -u T3CODE_DESKTOP_UPDATE_REPOSITORY vp run --filter t3 build$/m,
-    );
+  it("builds the Linux web client with the fork release source", () => {
+    expect(job("build-linux").join("\n")).toMatch(/run: vp run --filter t3 build$/m);
   });
 
   it("signs and notarizes the Mac app with the owner's Developer ID, only from atli", () => {
@@ -212,6 +208,7 @@ describe("fork server release workflow", () => {
     expect(body.join("\n")).toMatch(/^ {4}environment: personal-macos-signing$/m);
     const env = jobMap(body, "env");
     expect(env.get("T3CODE_DESKTOP_SIGNED")).toBe('"true"');
+    expect(env.get("T3CODE_DESKTOP_UPDATE_REPOSITORY")).toBe("atlitech/t3code");
     for (const [name, value] of env) expect(value, name).not.toMatch(/secrets\./);
 
     const steps = stepsOf(body);
@@ -232,11 +229,7 @@ describe("fork server release workflow", () => {
   it("checks the Mac app's identity, then attests and uploads the DMG", () => {
     const steps = stepsOf(job("build-mac"));
     const dmg = "release/T3-Code-${{ needs.guard.outputs.version }}-arm64.dmg";
-    const build = steps.findIndex((step) =>
-      /run: env -u GITHUB_REPOSITORY -u T3CODE_DESKTOP_UPDATE_REPOSITORY vp run dist:desktop:dmg:arm64$/m.test(
-        step,
-      ),
-    );
+    const build = steps.findIndex((step) => /run: vp run dist:desktop:dmg:arm64$/m.test(step));
     const identity = steps.findIndex((step) => /node scripts\/fork-mac-identity\.ts/.test(step));
     const attest = steps.findIndex((step) => ATTEST.test(step));
     const upload = steps.findIndex((step) => /uses: actions\/upload-artifact@/.test(step));
@@ -253,19 +246,32 @@ describe("fork server release workflow", () => {
     expect(check).toMatch(/codesign -dv --verbose=2 [^\n]*2>&1 \|\| true/);
     expect(check).toMatch(/--release-version "\$VERSION"/);
     expect(check).toMatch(/hdiutil detach/);
-    // No update feed: fork releases publish no desktop updater metadata.
+    // Both distributables must carry the fork feed and the same signed identity.
     expect(check).toMatch(/Contents\/Resources\/app-update\.yml/);
 
-    expect(steps[attest]).toContain(`subject-path: ${dmg}`);
+    expect(steps[attest]).toContain(dmg);
+    expect(check).toContain("--app-update-yml");
+    expect(check).toContain("codesign --verify --deep --strict");
+    expect(check).toContain('ditto -x -k "release/T3-Code-$VERSION-arm64.zip"');
     expect(steps[upload]).toMatch(/name: release-darwin-arm64\n/);
-    expect(steps[upload]).toContain(`path: ${dmg}`);
+    expect(steps[upload]).toContain(dmg);
+    for (const step of [steps[attest], steps[upload]]) {
+      expect(step).toContain("release/atli-mac.yml");
+      expect(step).toContain("release/T3-Code-${{ needs.guard.outputs.version }}-arm64.zip");
+      expect(step).toContain("release/T3-Code-${{ needs.guard.outputs.version }}-arm64.*.blockmap");
+    }
     expect(steps[upload]).toMatch(/if-no-files-found: error/);
   });
 
   it("never uploads to an existing release or replaces an asset", () => {
     expect(workflow).not.toMatch(/--clobber/);
     expect(workflow).not.toMatch(/gh\s+release\s+upload/);
-    expect(workflow).not.toMatch(/gh\s+release\s+edit/);
+    expect(workflow.match(/gh release edit [^\n]+/g)).toEqual([
+      'gh release edit "$TAG" --draft=false',
+    ]);
+    const publish = stepsOf(job("publish")).find((step) => step.includes("gh release create"))!;
+    expect(publish).toContain("--draft --prerelease");
+    expect(publish.indexOf("gh release edit")).toBeGreaterThan(publish.indexOf("--notes-file"));
     const creates = workflow.match(/gh release create /g) ?? [];
     expect(creates).toHaveLength(1);
     expect(job("publish").join("\n")).toMatch(

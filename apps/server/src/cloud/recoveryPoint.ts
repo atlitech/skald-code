@@ -11,11 +11,8 @@ import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
 import { fromJsonStringPretty } from "@t3tools/shared/schemaJson";
 
-import { PinnedRuntimeInstallError, pinnedRuntimeVersionsDir } from "./pinnedRuntime.ts";
-import { snapshotDatabase } from "./servicePreflight.ts";
-
 /**
- * Recovery points bind an online database backup to its prior runtime version.
+ * Legacy recovery points bind a database backup to its prior runtime version.
  * Displaced databases live under recovery/displaced and are never pruned.
  */
 const RECOVERY_DIR = "recovery";
@@ -24,16 +21,9 @@ const DISPLACED_DIR = "displaced";
 const RECORD_FILE = "recovery.json";
 const LOCK_FILE = "recover.lock";
 const SNAPSHOT_FILE = "statev2.sqlite";
-// Mirrors pinnedRuntime.ts: the sha256 of the archive a runtime was unpacked from.
-const ARCHIVE_DIGEST_FILE = ".archive-sha256";
-const STAGING_PREFIX = ".staging-";
-const RETAINED_POINTS = 3;
 // SQLite's companions of a live database, moved with it so a restored
 // snapshot is never opened against another database's journal.
 const DATABASE_COMPANION_SUFFIXES = ["", "-wal", "-shm"] as const;
-
-/** The install step a failed recovery point fails an update's validation with. */
-export const RECOVERY_POINT_STEP = "keeping a recovery point of the database";
 
 const RecoveryAction = Schema.Struct({
   at: Schema.String,
@@ -175,87 +165,6 @@ const readPoints = Effect.fn("cloud.recovery_point.read_points")(function* (poin
   const points = yield* Effect.forEach(names, (name) => readPoint(pointsDir, name));
   return points.flatMap((point) => (Option.isSome(point) ? [point.value] : []));
 });
-
-/**
- * Publish a staged backup atomically before switching runtimes; a failed backup blocks update.
- * Keep the newest three points, skipping fresh homes and same-version updates.
- */
-export const createRecoveryPoint = Effect.fn("cloud.recovery_point.create")(
-  function* (input: {
-    readonly baseDir: string;
-    readonly dbPath: string;
-    readonly fromVersion: string;
-    readonly toVersion: string;
-  }) {
-    const fs = yield* FileSystem.FileSystem;
-    const path = yield* Path.Path;
-    if (input.fromVersion === input.toVersion) return Option.none<RecoveryPoint>();
-    if (!(yield* fs.exists(input.dbPath))) return Option.none<RecoveryPoint>();
-
-    const now = yield* DateTime.now;
-    const id = `${compactUtc(now)}-${input.fromVersion}-to-${input.toVersion}`;
-    if (!isSafeRecoveryPointId(id)) {
-      return yield* new RecoveryPointError({ detail: `'${id}' is not a recovery point id.` });
-    }
-    const { recoveryDir, pointsDir } = recoveryPaths(path, input.baseDir);
-    yield* makePrivateDirectory(recoveryDir);
-    yield* makePrivateDirectory(pointsDir);
-
-    const stagingDir = path.join(pointsDir, `${STAGING_PREFIX}${id}`);
-    const pointDir = path.join(pointsDir, id);
-    const record = yield* Effect.gen(function* () {
-      yield* fs.remove(stagingDir, { recursive: true, force: true });
-      yield* makePrivateDirectory(stagingDir);
-      const snapshotPath = path.join(stagingDir, SNAPSHOT_FILE);
-      yield* snapshotDatabase(input.dbPath, snapshotPath);
-      yield* fs.chmod(snapshotPath, 0o600);
-      const snapshot = yield* sha256File(snapshotPath);
-
-      const runtimePath = path.join(
-        pinnedRuntimeVersionsDir(path, input.baseDir),
-        input.fromVersion,
-      );
-      const archiveSha256 = (yield* fs
-        .readFileString(path.join(runtimePath, ARCHIVE_DIGEST_FILE))
-        .pipe(Effect.option)).pipe(
-        Option.map((digest) => digest.trim().toLowerCase()),
-        Option.filter((digest) => digest.length > 0),
-        Option.getOrNull,
-      );
-      const record: RecoveryPointRecord = {
-        id,
-        createdAt: DateTime.formatIso(now),
-        from: { version: input.fromVersion, runtimePath, archiveSha256 },
-        to: { version: input.toVersion },
-        snapshot,
-        actions: [],
-      };
-      yield* writeRecord(stagingDir, record);
-      yield* fs.rename(stagingDir, pointDir);
-      yield* fs.chmod(pointDir, 0o700);
-      return record;
-    }).pipe(
-      Effect.tapError(() =>
-        fs.remove(stagingDir, { recursive: true, force: true }).pipe(Effect.ignore),
-      ),
-    );
-
-    const points = yield* readPoints(pointsDir);
-    yield* Effect.forEach(
-      points.slice(RETAINED_POINTS),
-      (point) => fs.remove(point.dir, { recursive: true }),
-      { discard: true },
-    );
-
-    return Option.some<RecoveryPoint>({
-      id,
-      dir: pointDir,
-      snapshotPath: path.join(pointDir, SNAPSHOT_FILE),
-      record,
-    });
-  },
-  Effect.mapError((cause) => new PinnedRuntimeInstallError({ step: RECOVERY_POINT_STEP, cause })),
-);
 
 /** This home's recovery points, newest first. Staging and invalid entries are skipped. */
 export const listRecoveryPoints = Effect.fn("cloud.recovery_point.list")(
