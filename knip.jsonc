@@ -112,6 +112,7 @@
         "index.ts!",
         "fingerprint.config.js",
         "plugins/*.cjs",
+        "scripts/android-ci-expo.cjs",
         "scripts/generate-device-stream.mts",
         "src/features/devices/device-stream.browser.ts!",
         "src/features/browser/preview-stream.browser.ts!",

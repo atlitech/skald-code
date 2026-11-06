@@ -4,9 +4,24 @@ const { pathToFileURL } = require("node:url");
 const { getDefaultConfig } = require("expo/metro-config");
 const { withUniwindConfig } = require("uniwind/metro");
 const extraThemes = require("./generated-uniwind-theme-names.json");
+const {
+  androidCiMetroCacheDirectory,
+  androidCiMetroCacheVersion,
+} = require("./scripts/android-ci-metro-cache.cjs");
+
+const ciCacheDirectory = androidCiMetroCacheDirectory();
+if (ciCacheDirectory) {
+  process.env.EXPO_METRO_CACHE_OUTPUT_DIR = ciCacheDirectory;
+  delete process.env.EXPO_METRO_CACHE_RESTORE_DIR;
+}
 
 /** @type {import("expo/metro-config").MetroConfig} */
 const config = getDefaultConfig(__dirname);
+if (ciCacheDirectory) {
+  const { getConfig } = require("expo/config");
+  const { exp } = getConfig(__dirname, { isPublicConfig: true });
+  config.cacheVersion += `:${androidCiMetroCacheVersion(__dirname, exp)}`;
+}
 const workspaceRoot = path.resolve(__dirname, "../..");
 const generatedLicenseModuleRoot = path.join(__dirname, ".generated", "third-party-licenses");
 const licenseGeneratorSource = path.join(

@@ -1,0 +1,32 @@
+if (System.getenv('T3CODE_ANDROID_BUILD_CACHE') != '1') {
+    return
+}
+
+def scriptsDir = initscript.sourceFile.parentFile
+def cmakeHook = new File(scriptsDir, 'android-ci-cache.cmake').absolutePath
+def expoCli = new File(scriptsDir, 'android-ci-expo.cjs')
+
+gradle.beforeProject { project ->
+    ['com.android.application', 'com.android.library'].each { pluginId ->
+        project.pluginManager.withPlugin(pluginId) {
+            project.extensions.getByName('androidComponents').finalizeDsl { android ->
+                def arguments = android.defaultConfig.externalNativeBuild.cmake.arguments
+                def hookArgument = "-DCMAKE_PROJECT_INCLUDE=${cmakeHook}".toString()
+                def existingHook = arguments.find { it ==~ /-DCMAKE_PROJECT_INCLUDE(?::[^=]+)?=.*/ }
+                if (existingHook != null && existingHook != hookArgument) {
+                    throw new GradleException("${project.path} already defines CMAKE_PROJECT_INCLUDE: ${existingHook}")
+                }
+                if (!arguments.contains(hookArgument)) {
+                    arguments.add(hookArgument)
+                }
+
+                if (pluginId == 'com.android.application') {
+                    def react = project.extensions.findByName('react')
+                    if (react != null) {
+                        react.cliFile.set(expoCli)
+                    }
+                }
+            }
+        }
+    }
+}
