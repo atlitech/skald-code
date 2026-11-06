@@ -1,4 +1,6 @@
 #!/usr/bin/env node
+import * as Layer from "effect/Layer";
+import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 // @effect-diagnostics nodeBuiltinImport:off - Effect has no SQLite client; a copied database is read with node:sqlite.
 
 // Independently re-observe the uploaded drilled home, prior runtime and displaced work.
@@ -11,7 +13,7 @@ import * as NodeSqlite from "node:sqlite";
 
 import * as NodeRuntime from "@effect/platform-node/NodeRuntime";
 import * as NodeServices from "@effect/platform-node/NodeServices";
-import * as Crypto from "effect/Crypto";
+import * as Digest from "effect/crypto/Digest";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Option from "effect/Option";
@@ -266,13 +268,13 @@ export const runVerification = Effect.fn("runVerification")(function* (options: 
 }) {
   const fs = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
-  const crypto = yield* Crypto.Crypto;
+  const digestService = yield* Digest.Digest;
   const attempt = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
     effect.pipe(Effect.option, Effect.map(Option.getOrUndefined));
   const sha256 = (file: string) =>
     attempt(
       Effect.map(
-        Effect.flatMap(fs.readFile(file), (bytes) => crypto.digest("SHA-256", bytes)),
+        Effect.flatMap(fs.readFile(file), (bytes) => digestService.digest(Digest.sha256, bytes)),
         toHex,
       ),
     );
@@ -383,7 +385,7 @@ const command = Command.make(
 
 if (import.meta.main) {
   Command.run(command, { version: "0.0.0" }).pipe(
-    Effect.provide(NodeServices.layer),
+    Effect.provide(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer)),
     NodeRuntime.runMain,
   );
 }

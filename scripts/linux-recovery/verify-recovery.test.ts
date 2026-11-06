@@ -1,3 +1,5 @@
+import * as Layer from "effect/Layer";
+import * as NodeCryptoServices from "@effect/platform-node/NodeCrypto";
 // @effect-diagnostics nodeBuiltinImport:off - Builds a drilled home from the committed fixture database.
 import * as NodeCrypto from "node:crypto";
 import * as NodeFS from "node:fs";
@@ -315,7 +317,7 @@ describe("runVerification", () => {
       } finally {
         NodeFS.rmSync(dir, { recursive: true, force: true });
       }
-    }).pipe(Effect.provide(NodeServices.layer)),
+    }).pipe(Effect.provide(Layer.mergeAll(NodeServices.layer, NodeCryptoServices.layer))),
   );
 
   it.effect("writes the failed checks and fails when the live database is not the point's", () =>
@@ -334,7 +336,7 @@ describe("runVerification", () => {
       } finally {
         NodeFS.rmSync(dir, { recursive: true, force: true });
       }
-    }).pipe(Effect.provide(NodeServices.layer)),
+    }).pipe(Effect.provide(Layer.mergeAll(NodeServices.layer, NodeCryptoServices.layer))),
   );
 
   it.effect("fails when an observation did not complete, whatever files it left", () =>
@@ -360,7 +362,7 @@ describe("runVerification", () => {
       } finally {
         NodeFS.rmSync(dir, { recursive: true, force: true });
       }
-    }).pipe(Effect.provide(NodeServices.layer)),
+    }).pipe(Effect.provide(Layer.mergeAll(NodeServices.layer, NodeCryptoServices.layer))),
   );
 
   it.effect("fails a record it cannot read", () =>
@@ -377,6 +379,6 @@ describe("runVerification", () => {
       } finally {
         NodeFS.rmSync(dir, { recursive: true, force: true });
       }
-    }).pipe(Effect.provide(NodeServices.layer)),
+    }).pipe(Effect.provide(Layer.mergeAll(NodeServices.layer, NodeCryptoServices.layer))),
   );
 });

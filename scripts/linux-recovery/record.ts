@@ -1,11 +1,13 @@
 #!/usr/bin/env node
+import * as Layer from "effect/Layer";
+import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 
 // Record the drill only when recovery restored the point and all required evidence exists.
 // verify-recovery.ts independently re-observes the uploaded home.
 
 import * as NodeRuntime from "@effect/platform-node/NodeRuntime";
 import * as NodeServices from "@effect/platform-node/NodeServices";
-import * as Crypto from "effect/Crypto";
+import * as Digest from "effect/crypto/Digest";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Option from "effect/Option";
@@ -298,10 +300,10 @@ export const writeRecoveryRecord = Effect.fn("writeRecoveryRecord")(function* (o
 }) {
   const fs = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
-  const crypto = yield* Crypto.Crypto;
+  const digestService = yield* Digest.Digest;
   const sha256 = (file: string) =>
     Effect.map(
-      Effect.flatMap(fs.readFile(file), (bytes) => crypto.digest("SHA-256", bytes)),
+      Effect.flatMap(fs.readFile(file), (bytes) => digestService.digest(Digest.sha256, bytes)),
       toHex,
     );
   const installed = (version: string) =>
@@ -398,7 +400,7 @@ const command = Command.make(
 
 if (import.meta.main) {
   Command.run(command, { version: "0.0.0" }).pipe(
-    Effect.provide(NodeServices.layer),
+    Effect.provide(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer)),
     NodeRuntime.runMain,
   );
 }

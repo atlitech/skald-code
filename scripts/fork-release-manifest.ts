@@ -1,11 +1,13 @@
 #!/usr/bin/env node
+import * as Layer from "effect/Layer";
+import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 
 // Write release checksums and scope: admitted Linux is runtime-verified; Mac/Android are not.
 // See docs/operations/fork-server.md.
 
 import * as NodeRuntime from "@effect/platform-node/NodeRuntime";
 import * as NodeServices from "@effect/platform-node/NodeServices";
-import * as Crypto from "effect/Crypto";
+import * as Digest from "effect/crypto/Digest";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Path from "effect/Path";
@@ -373,7 +375,7 @@ export const writeReleaseManifest = Effect.fn("writeReleaseManifest")(function* 
 }) {
   const fs = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
-  const crypto = yield* Crypto.Crypto;
+  const digestService = yield* Digest.Digest;
 
   const admission = yield* fs.readFileString(options.admission).pipe(
     Effect.mapError(
@@ -389,7 +391,7 @@ export const writeReleaseManifest = Effect.fn("writeReleaseManifest")(function* 
   const files = yield* Effect.forEach(names, (file) =>
     Effect.gen(function* () {
       const bytes = yield* fs.readFile(path.join(options.dir, file));
-      const digest = yield* crypto.digest("SHA-256", bytes);
+      const digest = yield* digestService.digest(Digest.sha256, bytes);
       return { file, size: bytes.length, sha256: toHex(digest) };
     }),
   );
@@ -423,7 +425,7 @@ const command = Command.make(
 
 if (import.meta.main) {
   Command.run(command, { version: "0.0.0" }).pipe(
-    Effect.provide(NodeServices.layer),
+    Effect.provide(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer)),
     NodeRuntime.runMain,
   );
 }

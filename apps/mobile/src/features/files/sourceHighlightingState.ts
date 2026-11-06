@@ -1,5 +1,5 @@
-import * as Data from "effect/Data";
 import * as Effect from "effect/Effect";
+import * as Schema from "effect/Schema";
 import { Atom } from "effect/reactivity";
 
 import { createBoundedAtomFamily } from "../../state/bounded-atom-family";
@@ -20,9 +20,10 @@ export interface SourceHighlightInput {
 
 type SourceHighlighter = (input: SourceHighlightInput) => HighlightedLines;
 
-class SourceHighlightError extends Data.TaggedError("SourceHighlightError")<{
-  readonly cause: unknown;
-}> {}
+class SourceHighlightError extends Schema.TaggedError<SourceHighlightError>()(
+  "SourceHighlightError",
+  { cause: Schema.Defect() },
+) {}
 
 export function createSourceHighlightAtomFamily(options?: {
   readonly highlight?: SourceHighlighter;

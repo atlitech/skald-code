@@ -66,16 +66,19 @@ const admissionRecord = (version: string, sha256: string) =>
   );
 const releaseHttpClient = (
   order: string[],
+  urls: string[],
+  publishedVersion: string,
   admission: Readonly<Record<string, string>> = {},
   beforeDownload?: Effect.Effect<void>,
 ) =>
   HttpClient.make((request) =>
     Effect.gen(function* () {
+      urls.push(request.url);
       const version = /\/v([^/]+)\/[^/]+$/.exec(request.url)?.[1] ?? "";
       if (request.url.endsWith("/SHA256SUMS")) {
         return HttpClientResponse.fromWeb(
           request,
-          new Response(`${yield* archiveSha256}  t3-${version}-linux-x64.tar.gz\n`),
+          new Response(`${yield* archiveSha256}  t3-${publishedVersion}-linux-x64.tar.gz\n`),
         );
       }
       if (request.url.endsWith("/ADMISSION.json")) {
@@ -112,6 +115,7 @@ const makeHarness = Effect.fn("test.make_self_update_harness")(function* (
               Effect.andThen(fs.rename(from, to)),
             ),
         };
+  const urls: string[] = [];
   const runner = ProcessRunner.ProcessRunner.of({
     run: (input) =>
       Effect.gen(function* () {
@@ -197,7 +201,13 @@ const makeHarness = Effect.fn("test.make_self_update_harness")(function* (
     ),
     Effect.provideService(
       HttpClient.HttpClient,
-      releaseHttpClient(order, options.admission, options.beforeDownload),
+      releaseHttpClient(
+        order,
+        urls,
+        options.version ?? "1.1.0",
+        options.admission,
+        options.beforeDownload,
+      ),
     ),
     Effect.provideService(FileSystem.FileSystem, updateFs),
     Effect.provideService(HostProcess.Platform, "linux"),
@@ -209,7 +219,7 @@ const makeHarness = Effect.fn("test.make_self_update_harness")(function* (
       ),
     ),
   );
-  return { selfUpdate, order, baseDir, dbPath: config.dbPath };
+  return { selfUpdate, order, urls, baseDir, dbPath: config.dbPath };
 });
 
 it.layer(NodeServices.layer)("server self update", (it) => {
@@ -302,11 +312,17 @@ it.layer(NodeServices.layer)("server self update", (it) => {
 
   it.effect("lets a user start an update, but only to stable without nightly", () =>
     Effect.gen(function* () {
-      const { selfUpdate, order } = yield* makeHarness({
+      const { selfUpdate, order, urls } = yield* makeHarness({
         policy: {
           schemaVersion: 1,
           organization: "Example Corp",
-          limits: { updates: { mode: "auto", allowNightly: false } },
+          limits: {
+            updates: {
+              mode: "auto",
+              allowNightly: false,
+              feedUrl: "https://updates.example.com/t3code/",
+            },
+          },
         },
       });
       expect(
@@ -314,7 +330,15 @@ it.layer(NodeServices.layer)("server self update", (it) => {
           .reason,
       ).toBe("Example Corp manages T3 Code updates. Only stable releases can be installed.");
       expect(order).toEqual([]);
+      // The mirror lists only 1.1.0's archive.
+      expect((yield* selfUpdate.update({ targetVersion: "1.2.0" }).pipe(Effect.flip)).reason).toBe(
+        "Example Corp's update mirror has no t3@1.2.0 for this machine.",
+      );
       expect((yield* selfUpdate.update({ targetVersion: "1.1.0" })).updateId).toBe("launcher-id");
+      // The release comes from the policy's mirror, not GitHub.
+      expect(urls.length).toBeGreaterThan(0);
+      for (const url of urls)
+        expect(url).toMatch(/^https:\/\/updates\.example\.com\/t3code\/v1\.[12]\.0\//);
     }),
   );
 
