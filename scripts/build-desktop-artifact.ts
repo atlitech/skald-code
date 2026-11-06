@@ -36,7 +36,7 @@ import {
   type WebAssetBrand,
 } from "./lib/brand-assets.ts";
 import { getDefaultBuildArch } from "./lib/build-target-arch.ts";
-import { DESKTOP_APP_ID } from "./lib/desktop-app-id.ts";
+import { DESKTOP_APP_ID, DESKTOP_PRODUCT_NAME } from "./lib/desktop-app-id.ts";
 import {
   findInlinedExternalPackages,
   selectCliRuntimeExternalDependencies,
@@ -2760,7 +2760,7 @@ export function resolvePackageManagerUserAgent(packageManager: string): string {
 export function resolveDesktopProductName(version: string): string {
   return resolveDesktopUpdateChannel(version) === "nightly"
     ? "T3 Code (Nightly)"
-    : (desktopPackageJson.productName ?? "T3 Code");
+    : DESKTOP_PRODUCT_NAME;
 }
 
 export const createBuildConfig = Effect.fn("createBuildConfig")(function* (

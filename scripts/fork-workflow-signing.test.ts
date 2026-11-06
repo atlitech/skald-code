@@ -3,7 +3,7 @@ import * as NodeFS from "node:fs";
 import * as NodePath from "node:path";
 import { describe, expect, it } from "vite-plus/test";
 
-// The personal Android and iOS signing values live in the personal-*-signing
+// The personal Android, iOS, and macOS signing values live in the personal-*-signing
 // environments, which only fork-server-release.yml reads, from atli. No workflow
 // a pull request triggers may name them, and the one that does writes them under
 // RUNNER_TEMP without printing them.
@@ -15,6 +15,8 @@ const SIGNING_MARKERS = [
   "GOOGLE_SERVICES_JSON_BASE64",
   "personal-ios-signing",
   "T3CODE_IOS_",
+  "personal-macos-signing",
+  "T3CODE_PERSONAL_MACOS",
 ] as const;
 const PULL_REQUEST_TRIGGERS = new Set(["pull_request", "pull_request_target"]);
 
@@ -121,6 +123,9 @@ describe("fork workflow signing isolation", () => {
           "WIDGETS_PROFILE_BASE64",
           "SHARING_PROFILE_BASE64",
           "API_KEY_BASE64",
+          "PROFILE_BASE64",
+          "CSC_LINK",
+          "CSC_KEY_PASSWORD",
         ]),
       );
       for (const line of lines.filter((line) => /secrets\./.test(line))) {
@@ -152,6 +157,8 @@ describe("fork workflow signing isolation", () => {
       for (const name of [
         "T3CODE_PERSONAL_ANDROID_KEYSTORE_FILE",
         "T3CODE_ANDROID_GOOGLE_SERVICES_FILE",
+        "T3CODE_MACOS_PROVISIONING_PROFILE",
+        "APPLE_API_KEY",
       ]) {
         const exports = lines.filter((line) => line.includes(`${name}=`));
         expect(exports, name).toHaveLength(1);

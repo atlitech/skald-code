@@ -1,5 +1,5 @@
-Executable=/Volumes/T3 Code (Alpha) 0.0.46-atli.1-arm64/T3 Code (Alpha).app/Contents/MacOS/T3 Code (Alpha)
-Identifier=com.t3tools.t3code
+Executable=/Volumes/Skald Code 0.0.46-atli.1-arm64/Skald Code.app/Contents/MacOS/Skald Code
+Identifier=tech.atli.skaldcode
 Format=app bundle with Mach-O thin (arm64)
 CodeDirectory v=20400 size=299 flags=0x2(adhoc) hashes=3+3 location=embedded
 Signature=adhoc

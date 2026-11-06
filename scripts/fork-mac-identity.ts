@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 
-// Validate DMG Info.plist and codesign output against app identity and release version.
-// Fork builds have no Developer ID signature; the owner signs locally. See the fork runbook.
+// Validate DMG Info.plist and codesign output against app identity and release version:
+// signed with the owner's Developer ID and notarized, or Gatekeeper blocks the download.
+// See the fork runbook.
 
 import * as NodeRuntime from "@effect/platform-node/NodeRuntime";
 import * as NodeServices from "@effect/platform-node/NodeServices";
@@ -10,7 +11,8 @@ import * as FileSystem from "effect/FileSystem";
 import * as Schema from "effect/Schema";
 import { Command, Flag } from "effect/cli";
 
-import { DESKTOP_APP_ID } from "./lib/desktop-app-id.ts";
+import { PERSONAL_APPLE_TEAM_ID } from "./fork-ios-identity.ts";
+import { DESKTOP_APP_ID, DESKTOP_PRODUCT_NAME } from "./lib/desktop-app-id.ts";
 
 const escapeRegExp = (value: string): string => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
@@ -42,7 +44,7 @@ export class MacIdentityError extends Schema.TaggedError<MacIdentityError>()("Ma
   problems: Schema.Array(Schema.String),
 }) {
   override get message(): string {
-    return `The Mac app is not the release's unsigned app: ${this.problems.join(" ")}`;
+    return `The Mac app is not the release's signed app: ${this.problems.join(" ")}`;
   }
 }
 
@@ -53,27 +55,48 @@ const readOne = (plist: string, key: string, expected: string): string | undefin
   return undefined;
 };
 
+const describeSignature = (signature: MacSignature): string => {
+  switch (signature._tag) {
+    case "Unsigned":
+      return "unsigned";
+    case "AdHoc":
+      return "signed ad hoc";
+    case "Signed":
+      return `signed by '${signature.authority}'`;
+    case "Unrecognized":
+      return "signed in a way codesign output does not name";
+  }
+};
+
 export const checkMacIdentity = Effect.fn("checkMacIdentity")(function* (input: {
   readonly infoPlist: string;
   readonly codesign: string;
   readonly version: string;
 }) {
   const signature = classifyCodesign(input.codesign);
+  const team = /^TeamIdentifier=(.+)$/m.exec(input.codesign)?.[1];
+  const developerId =
+    signature._tag === "Signed" &&
+    signature.authority.startsWith("Developer ID Application: ") &&
+    team === PERSONAL_APPLE_TEAM_ID;
   const problems = [
     readOne(input.infoPlist, "CFBundleIdentifier", DESKTOP_APP_ID),
+    readOne(input.infoPlist, "CFBundleName", DESKTOP_PRODUCT_NAME),
     readOne(input.infoPlist, "CFBundleShortVersionString", input.version),
-    signature._tag === "Signed"
-      ? `the app is signed by '${signature.authority}'; the fork ships it unsigned.`
-      : undefined,
-    signature._tag === "Unrecognized"
-      ? "codesign output names neither an ad hoc signature nor an unsigned app."
-      : undefined,
+    developerId
+      ? undefined
+      : `the app is ${describeSignature(signature)}, not by team ${PERSONAL_APPLE_TEAM_ID}'s Developer ID.`,
+    /^Notarization Ticket=stapled$/m.test(input.codesign)
+      ? undefined
+      : "the app carries no stapled notarization ticket.",
   ].filter((problem): problem is string => problem !== undefined);
-  if (problems.length > 0) return yield* new MacIdentityError({ problems });
+  if (problems.length > 0 || signature._tag !== "Signed") {
+    return yield* new MacIdentityError({ problems });
+  }
   return {
     bundleIdentifier: DESKTOP_APP_ID,
     version: input.version,
-    signature: signature._tag === "AdHoc" ? "ad hoc" : "unsigned",
+    signature: `${signature.authority}, notarized`,
   } as const;
 });
 
