@@ -1,9 +1,6 @@
 import { useAtomValue } from "@effect/atom-react";
 import { CommandId, type ScopedThreadRef, type ThreadId } from "@t3tools/contracts";
-import {
-  buildThreadGrouping,
-  isThreadGroupingParent,
-} from "@t3tools/client-runtime/state/thread-grouping";
+import { getThreadGroupingParents } from "@t3tools/client-runtime/state/thread-grouping";
 import { scopedThreadKey } from "@t3tools/client-runtime/environment";
 import { useState } from "react";
 import { create } from "zustand";
@@ -58,26 +55,8 @@ function ThreadParentDialog({ threadRef }: { threadRef: ScopedThreadRef }) {
   const move = useOrchestrationCommand(threadEnvironment.setParent, "Failed to move thread");
   const [query, setQuery] = useState("");
   const [moving, setMoving] = useState(false);
-  const grouping = buildThreadGrouping(threads, { isParked: () => false });
-  const threadKey = scopedThreadKey(threadRef);
-  const excluded = new Set([threadKey]);
-  const queue = [threadKey];
-  for (let index = 0; index < queue.length; index += 1) {
-    for (const child of grouping.childrenByParent.get(queue[index]!) ?? []) {
-      const childKey = `${child.environmentId}:${child.id}`;
-      if (!excluded.has(childKey)) {
-        excluded.add(childKey);
-        queue.push(childKey);
-      }
-    }
-  }
-  const candidates = threads.filter(
-    (candidate) =>
-      candidate.environmentId === threadRef.environmentId &&
-      candidate.projectId === thread?.projectId &&
-      isThreadGroupingParent(candidate) &&
-      !excluded.has(`${candidate.environmentId}:${candidate.id}`) &&
-      candidate.title.toLocaleLowerCase().includes(query.toLocaleLowerCase()),
+  const candidates = (thread ? getThreadGroupingParents(threads, thread) : []).filter((candidate) =>
+    candidate.title.toLocaleLowerCase().includes(query.toLocaleLowerCase()),
   );
   const close = () => useRequest.setState({ threadRef: null });
   const select = async (groupingParentThreadId: ThreadId) => {

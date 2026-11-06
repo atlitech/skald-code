@@ -1,7 +1,4 @@
-import {
-  buildThreadGrouping,
-  isThreadGroupingParent,
-} from "@t3tools/client-runtime/state/thread-grouping";
+import { getThreadGroupingParents } from "@t3tools/client-runtime/state/thread-grouping";
 import type { EnvironmentThreadShell } from "@t3tools/client-runtime/state/shell";
 import { CommandId, type ThreadId } from "@t3tools/contracts";
 import { useAtomValue } from "@effect/atom-react";
@@ -27,22 +24,9 @@ export function ThreadParentSheet(props: {
     threadEnvironment.setParent.permissionAtom(props.thread.environmentId),
   );
   const setParent = useAtomCommand(threadEnvironment.setParent, { reportFailure: false });
-  const grouping = buildThreadGrouping(threads, { isParked: () => false });
-  const childKey = `${props.thread.environmentId}:${props.thread.id}`;
-  const candidates = threads.filter((thread) => {
-    if (
-      thread.environmentId !== props.thread.environmentId ||
-      thread.projectId !== props.thread.projectId ||
-      !isThreadGroupingParent(thread)
-    )
-      return false;
-    let cursor: string | undefined = `${thread.environmentId}:${thread.id}`;
-    while (cursor !== undefined) {
-      if (cursor === childKey) return false;
-      cursor = grouping.parentByChild.get(cursor);
-    }
-    return thread.title.toLocaleLowerCase().includes(search.trim().toLocaleLowerCase());
-  });
+  const candidates = getThreadGroupingParents(threads, props.thread).filter((thread) =>
+    thread.title.toLocaleLowerCase().includes(search.trim().toLocaleLowerCase()),
+  );
   const move = async (parent: ThreadId | null) => {
     if (pending || !allowed) return;
     setPending(true);

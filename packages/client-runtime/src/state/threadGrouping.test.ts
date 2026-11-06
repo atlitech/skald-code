@@ -1,7 +1,7 @@
 import { EnvironmentId, ThreadId } from "@t3tools/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
-import { buildThreadGrouping } from "./threadGrouping.ts";
+import { buildThreadGrouping, getThreadGroupingParents } from "./threadGrouping.ts";
 
 function thread(id: string, parent?: string | null) {
   return {
@@ -82,4 +82,52 @@ describe("thread grouping", () => {
       parent,
     ]);
   });
+});
+
+it("excludes unsafe parent candidates using persisted ancestry, including unloaded ancestors", () => {
+  const root = thread("root");
+  const archived = { ...thread("archived", "root"), archivedAt: "2026-11-06" };
+  const descendant = thread("descendant", "archived");
+  const other = thread("other");
+  const safeChild = thread("safe-child", "other");
+  const unknown = thread("unknown", "unloaded");
+  const cycleA = thread("cycle-a", "cycle-b");
+  const cycleB = thread("cycle-b", "cycle-a");
+  const remote = { ...thread("other"), environmentId: "remote" };
+  const foreign = { ...thread("foreign"), projectId: "foreign" };
+  const delegated = {
+    ...thread("delegated"),
+    delegatedFrom: {
+      environmentId: EnvironmentId.make("remote"),
+      threadId: ThreadId.make("owner"),
+      title: "Owner",
+    },
+  };
+  for (const ancestors of [[archived], []]) {
+    expect(
+      getThreadGroupingParents(
+        [
+          root,
+          ...ancestors,
+          descendant,
+          other,
+          safeChild,
+          unknown,
+          cycleA,
+          cycleB,
+          remote,
+          foreign,
+          delegated,
+        ],
+        root,
+      ),
+    ).toEqual([other, safeChild]);
+  }
+  const safeArchived = { ...archived, groupingParentThreadId: other.id };
+  expect(getThreadGroupingParents([root, safeArchived, descendant, other], root)).toEqual([
+    descendant,
+    other,
+  ]);
+  const deleted = { ...archived, deletedAt: "2026-11-06" };
+  expect(getThreadGroupingParents([root, deleted, descendant], root)).toEqual([descendant]);
 });
