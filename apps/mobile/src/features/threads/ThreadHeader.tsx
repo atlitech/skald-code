@@ -1,4 +1,5 @@
-import type { ThreadRouteActionMenuItem, ThreadRouteActionId } from "./thread-route-actions-menu";
+import type { MenuAction } from "@react-native-menu/menu";
+import { appBarMenuItemsFromActions } from "../../components/ui/menuActionItems";
 import { AppBar } from "../../components/ui/AppBar";
 import { ScreenHeaderButton } from "../../components/ui/ScreenHeaderButton";
 import type { AppBarAction, AppBarMenu } from "../../components/ui/AppBar.types";
@@ -12,8 +13,8 @@ import {
 } from "./ThreadGitControls";
 
 export function ThreadHeader(props: {
-  readonly threadActions?: ReadonlyArray<ThreadRouteActionMenuItem>;
-  readonly onThreadAction?: (action: ThreadRouteActionId) => void;
+  readonly threadActions?: ReadonlyArray<MenuAction>;
+  readonly onThreadAction?: (action: string) => void;
   readonly title: string;
   readonly subtitle: string;
   readonly gitControls: ThreadGitControlsProps;
@@ -49,10 +50,7 @@ export function ThreadHeader(props: {
     menus.push({
       title: "Thread actions",
       icon: "ellipsis",
-      items: props.threadActions.map((action) => ({
-        ...action,
-        onPress: () => props.onThreadAction?.(action.id),
-      })),
+      items: appBarMenuItemsFromActions(props.threadActions, (id) => props.onThreadAction?.(id)),
     });
   }
 

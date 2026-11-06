@@ -19,6 +19,7 @@ describe("appBarMenuItemsFromActions", () => {
             state: "on",
           },
           { id: "label:docs", title: "docs", subtitle: "3 open", state: "off" },
+          { id: "delete", title: "Delete", attributes: { destructive: true, disabled: true } },
         ],
       },
     ];
@@ -49,6 +50,15 @@ describe("appBarMenuItemsFromActions", () => {
             imageColor: undefined,
             state: undefined,
             attributes: undefined,
+          },
+          {
+            id: "delete",
+            title: "Delete",
+            subtitle: undefined,
+            image: undefined,
+            imageColor: undefined,
+            state: undefined,
+            attributes: { destructive: true, disabled: true },
           },
         ],
       },

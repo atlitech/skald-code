@@ -10,6 +10,7 @@ import { AppBar } from "../../components/ui/AppBar";
 import {
   StackActions,
   useNavigation,
+  useIsFocused,
   useRoute,
   type StaticScreenProps,
 } from "@react-navigation/native";
@@ -56,6 +57,7 @@ import { useThreadShell } from "../../state/entities";
 import { NATIVE_LIQUID_GLASS_SUPPORTED } from "../../native/native-glass";
 import { connectionTone } from "../connection/connectionTone";
 import { useThreadListActions, type ThreadListAction } from "../home/useThreadListActions";
+import { ThreadUndoNotice } from "../home/ThreadUndoNotice";
 import {
   useRemoteConnections,
   useRemoteConnectionStatus,
@@ -107,7 +109,11 @@ import {
   threadRouteOpensDraft,
 } from "./thread-route-hydration";
 import { ThreadHeader } from "./ThreadHeader";
-import { buildThreadRouteActionMenu, type ThreadRouteActionId } from "./thread-route-actions-menu";
+import { useThreadActionMenu } from "./useThreadActionMenu";
+import { useThreadListNow } from "./use-thread-list-now";
+import { useNowAfter } from "../../lib/clock";
+import { resolveThreadListV2SnoozeGateExpiryMs } from "./threadListV2";
+import { canSnooze, effectiveSnoozed } from "@t3tools/client-runtime/state/thread-settled";
 import { resumeThread } from "./resume-thread";
 import {
   useAndroidWorkspaceBack,
@@ -371,7 +377,7 @@ function ThreadRouteContent(
   );
   const selectedThreadDetailState = props.selectedThreadDetailState;
   const selectedThreadDetail = Option.getOrNull(selectedThreadDetailState.data);
-  const { selectedThreadCwd, selectedThreadWorktreePath } = useSelectedThreadWorktree();
+  const { selectedThreadCwd } = useSelectedThreadWorktree();
   const startSideChat = useStartSideChat();
   const composer = useThreadComposerState({ startSideChat });
   const gitState = useSelectedThreadGitState();
@@ -528,51 +534,62 @@ function ThreadRouteContent(
       : null,
   );
   const handleThreadActionCompleted = (action: ThreadListAction) => {
-    if (action === "delete") {
+    if (action === "delete" || action === "archive") {
       navigation.dispatch(StackActions.replace("Home"));
     }
   };
-  const { confirmDeleteThread, settleThread, unsettleThread } = useThreadListActions(
-    handleThreadActionCompleted,
-  );
-  const handleStartNewTaskOnWorktree = () => {
-    if (
-      selectedThread === null ||
-      selectedThreadProject === null ||
-      selectedThreadWorktreePath === null ||
-      selectedThread.branch === null
-    ) {
-      return;
-    }
-
-    navigation.dispatch(
-      selectWorkspaceDetail({
-        name: "Thread",
-        params: {
-          draft: {
-            environmentId: String(selectedThreadProject.environmentId),
-            projectId: String(selectedThreadProject.id),
-            title: selectedThreadProject.title,
-            branch: selectedThread.branch,
-            worktreePath: selectedThreadWorktreePath,
-          },
-        },
-      }),
-    );
-  };
-  const threadRouteActions = buildThreadRouteActionMenu({
-    settlementSupported: serverConfig?.environment.capabilities.threadSettlement === true,
-    settled: selectedThread?.settledOverride === "settled",
-    settleable: selectedThread !== null,
-    worktreeBranch: selectedThreadWorktreePath !== null ? (selectedThread?.branch ?? null) : null,
+  const routeFocused = useIsFocused();
+  const threadActions = useThreadListActions(handleThreadActionCompleted);
+  const threadMenuNow = useThreadListNow(selectedThread ? [selectedThread] : []);
+  const snoozeGateExpiry =
+    selectedThread && serverConfig
+      ? resolveThreadListV2SnoozeGateExpiryMs(selectedThread, {
+          now: selectedThread.latestUserMessageAt ?? "",
+        })
+      : null;
+  const snoozeGateNow = useNowAfter(snoozeGateExpiry === null ? null : snoozeGateExpiry + 1);
+  const {
+    menuActions: threadRouteActions,
+    handleAction: handleThreadRouteAction,
+    customSnoozeSheet,
+  } = useThreadActionMenu({
+    thread: selectedThread,
+    state: {
+      canOperate: canOperateThread,
+      settled:
+        selectedThread?.settledOverride === "settled" && composer.selectedThreadQueueCount === 0,
+      snoozed: selectedThread !== null && effectiveSnoozed(selectedThread, { now: threadMenuNow }),
+      snoozable:
+        selectedThread !== null &&
+        canSnooze(selectedThread, { now: new Date(snoozeGateNow).toISOString() }),
+      settlementSupported: serverConfig !== null,
+      pinningSupported: serverConfig !== null,
+      snoozeSupported: serverConfig !== null,
+      autoSettleOptOutSupported:
+        serverConfig?.environment.capabilities.threadAutoSettleOptOut === true,
+      titleRegenerationSupported: serverConfig !== null,
+    },
+    now: threadMenuNow,
+    snoozePresets: serverConfig?.settings.snoozePresets,
+    actions: {
+      ...threadActions,
+      newThreadOnBranch: (thread) =>
+        navigation.dispatch(
+          selectWorkspaceDetail({
+            name: "Thread",
+            params: {
+              draft: {
+                requestId: uuidv4(),
+                environmentId: String(thread.environmentId),
+                projectId: String(thread.projectId),
+                branch: thread.branch,
+                worktreePath: thread.worktreePath,
+              },
+            },
+          }),
+        ),
+    },
   });
-  const handleThreadRouteAction = (action: ThreadRouteActionId) => {
-    if (selectedThread === null) return;
-    if (action === "new-thread-on-worktree") handleStartNewTaskOnWorktree();
-    if (action === "settle") void settleThread(selectedThread);
-    if (action === "unsettle") void unsettleThread(selectedThread);
-    if (action === "delete") confirmDeleteThread(selectedThread);
-  };
   const { sessions: knownTerminalSessions } = useKnownTerminalSessions({
     environmentId: selectedThread?.environmentId ?? null,
     threadId: selectedThread?.id ?? null,
@@ -998,6 +1015,10 @@ function ThreadRouteContent(
         });
   const renderThreadRouteBody = () => (
     <>
+      {customSnoozeSheet}
+      <ThreadUndoNotice
+        visible={routeFocused && !panes.primarySidebarVisible && !props.inspectorPresentation}
+      />
       <GitActionProgressOverlay
         progress={gitActionProgress}
         onDismiss={dismissGitActionResult}
