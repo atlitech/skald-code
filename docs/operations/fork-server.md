@@ -425,8 +425,9 @@ explicit version update to get this discovery behavior. Checks from the
 updated mobile app also follow the server's fork version. Upstream releases
 are not offered for fork hosts. Explicit mirror/base-URL overrides still win.
 
-Linux updates continue to require `ADMISSION.json`, verify the archive's
-checksum, and use upstream's temporary service-update rollback backup.
+Linux updates continue to require `ADMISSION.json` and verify the archive's
+checksum. Client-triggered server updates use upstream's temporary
+service-update rollback backup; `t3 update` does not create a rollback backup.
 Discovery does not bypass admission. No Linux desktop package is shipped by this workflow.
 
 Older clients can still offer upstream versions. Update those clients, or use
@@ -448,16 +449,20 @@ t3 update 0.0.45 --allow-downgrade --yes
 
 A fork build may already have run database migrations from upstream `main`
 against `~/.t3/userdata`, and an older official build may not run on that
-database. An official build keeps no recovery point, so back up
-`~/.t3/userdata` before the first switch from it to a fork build.
+database. Neither current fork nor official CLI updates keep a recovery point,
+so back up `~/.t3/userdata` before switching between them.
 
 ### Recovering a failed update
 
-Updates use upstream's temporary rollback backup while the background
-service tries the new runtime. The service launcher removes it after a
-successful update or rollback. Updates no longer create or prune retained
-recovery points, so they do not accumulate three additional database copies.
-Preflight still uses a temporary database copy to check migrations.
+Client-triggered server updates use upstream's temporary rollback backup while
+the background service tries the new runtime. The service launcher removes it
+after a successful update or rollback. As in upstream, `t3 update` installs the
+target directly, without a launcher trial or database rollback backup. Back up
+`~/.t3/userdata` before using the CLI if you need to restore the previous database.
+
+Neither path creates or prunes retained recovery points, so updates do not
+accumulate three additional database copies. Preflight still uses a temporary
+database copy to check migrations; that copy is discarded, not kept for recovery.
 
 Older fork builds may have kept a recovery point under
 `~/.t3/recovery/points/`. Existing points and displaced databases are left
