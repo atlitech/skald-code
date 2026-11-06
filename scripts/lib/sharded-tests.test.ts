@@ -48,6 +48,19 @@ it("uses the configured sequencer and discovers every file exactly once", async 
       NodePath.join(root, "included/d.spec.ts"),
     ]);
     expect(new Set([...first, ...second]).size).toBe(4);
+    const selected = ["included/b.test.ts", "included/c.test.ts", "included/d.spec.ts"];
+    const filteredFirst = await shardedTestFiles(root, "1/2", selected);
+    const filteredSecond = await shardedTestFiles(root, "2/2", selected);
+    expect(filteredFirst).toEqual([
+      NodePath.join(root, selected[0]!),
+      NodePath.join(root, selected[2]!),
+    ]);
+    expect(filteredSecond).toEqual([NodePath.join(root, selected[1]!)]);
+    expect(new Set([...filteredFirst, ...filteredSecond]).size).toBe(selected.length);
+    expect(await shardedTestFiles(root, "1/2", [])).toEqual([]);
+    await expect(shardedTestFiles(root, "1/2", ["excluded.test.ts"])).rejects.toThrow(
+      "Selected tests were not discovered",
+    );
     await expect(shardedTestFiles(root, "0/2")).rejects.toThrow("Shard must be");
   } finally {
     await NodeFSP.rm(root, { recursive: true, force: true });

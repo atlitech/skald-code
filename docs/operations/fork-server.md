@@ -552,11 +552,16 @@ currently being run on this fork"). Only a repository admin can lift that, from
 the banner on the Actions tab.
 
 - `fork-ci.yml`'s `Check` runs on pull requests into `atli` and pushes to it.
-  It confirms the upstream commit the branch builds on passed upstream's own
-  `Check`, runs every test file the fork added or changed since that commit
-  (`scripts/fork-check.ts`), then lints and typechecks everything. The `atli`
-  ruleset requires it, and the release guard requires it on the released
-  commit.
+  The test lanes confirm the upstream commit passed upstream's own `Check`
+  and select every test file the fork added or changed since that commit
+  (`scripts/fork-check.ts`). Server shards, other tests, and repository-wide
+  lint and typechecks run in parallel. The final `Check` requires every lane
+  to succeed; a failed, cancelled, or skipped lane cannot satisfy the `atli`
+  ruleset or the release guard on the released commit.
+  For a runner comparison, dispatch the same ref with `runner-profile` set
+  to `github` or `blacksmith`; use `use-cache: false` to bypass task-result
+  reuse. Compare complete runs on the same ref, including setup and cache
+  transfers, then repeat with caching enabled to measure warm behavior.
 - `fork-full-suite.yml` runs every package's tests. A release runs it on the
   commit it publishes, which catches an upstream test that breaks against fork
   code. Dispatch it by hand after a large update:

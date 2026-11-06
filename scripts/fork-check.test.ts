@@ -3,7 +3,12 @@ import { describe, expect, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import { hasPassedCheck } from "./fork-release-guard.ts";
 
-import { ForkCheckError, upstreamCheckRuns, selectForkTests } from "./fork-check.ts";
+import {
+  ForkCheckError,
+  upstreamCheckRuns,
+  selectForkTests,
+  forkTestCommands,
+} from "./fork-check.ts";
 
 const packageDirs = ["", "apps/server", "packages/shared", "scripts"];
 
@@ -19,6 +24,30 @@ describe("selectForkTests", () => {
       ],
       packageDirs,
     );
+    const server = selectForkTests(
+      [
+        "scripts/fork-release-guard.test.ts",
+        "apps/server/src/cloud/releaseAdmission.test.ts",
+        "packages/shared/src/agentAwareness.test.ts",
+        "unowned.test.ts",
+      ],
+      packageDirs,
+      "server",
+    );
+    const other = selectForkTests(
+      [
+        "scripts/fork-release-guard.test.ts",
+        "apps/server/src/cloud/releaseAdmission.test.ts",
+        "packages/shared/src/agentAwareness.test.ts",
+        "unowned.test.ts",
+      ],
+      packageDirs,
+      "other",
+    );
+    expect(server.groups.map((group) => group.packageDir)).toEqual(["apps/server"]);
+    expect(other.groups.map((group) => group.packageDir)).toEqual(["packages/shared", "scripts"]);
+    expect(server.orphans).toEqual(["unowned.test.ts"]);
+    expect(other.orphans).toEqual(server.orphans);
     expect(selection).toEqual({
       groups: [
         {
@@ -139,3 +168,66 @@ it.effect("rejects missing CI and propagates lookup failures", () =>
     );
   }),
 );
+
+describe("forkTestCommands", () => {
+  it("passes selected files to the default mobile run and retains the Android platform check", () => {
+    const files = [
+      "src/features/threads/thread-action-menu.test.ts",
+      "src/lib/threadActivity.test.ts",
+    ];
+    expect(forkTestCommands({ packageDir: "apps/mobile", files })).toEqual([
+      {
+        command: "vp",
+        cwd: "apps/mobile",
+        args: ["test", "run", "--project", "unit", "--project", "react", ...files],
+      },
+      {
+        command: "vp",
+        cwd: "apps/mobile",
+        args: [
+          "test",
+          "run",
+          "--project",
+          "react",
+          "src/components/FilePreviewModal.test.tsx",
+          ...files,
+        ],
+        env: { T3_MOBILE_TEST_PLATFORM: "android" },
+      },
+    ]);
+    expect(forkTestCommands({ packageDir: "apps/mobile", files: [] })).toEqual([]);
+  });
+
+  it("runs only selected server files through the cache with serial execution and hit verification", () => {
+    const files = ["src/cloud/releaseAdmission.test.ts", "src/cli/recover.test.ts"];
+    expect(forkTestCommands({ packageDir: "apps/server", files })).toEqual([
+      { command: "vp", cwd: "apps/server", args: ["run", "test", ...files] },
+    ]);
+    expect(
+      forkTestCommands(
+        { packageDir: "apps/server", files },
+        { cacheServer: true, report: "/tmp/cache-report.json" },
+      ),
+    ).toEqual([
+      {
+        command: "node",
+        cwd: ".",
+        args: [
+          "scripts/test-cached.ts",
+          "--concurrency",
+          "1",
+          "--verify-hits",
+          "1",
+          "--uncached",
+          "apps/server/integration/transferBudgetV2.integration.test.ts",
+          "--report",
+          "/tmp/cache-report.json",
+          ...files.map((file) => `apps/server/${file}`),
+        ],
+      },
+    ]);
+    expect(
+      forkTestCommands({ packageDir: "apps/server", files: [] }, { cacheServer: true }),
+    ).toEqual([]);
+  });
+});
