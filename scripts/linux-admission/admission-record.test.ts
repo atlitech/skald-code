@@ -1,3 +1,5 @@
+import * as Layer from "effect/Layer";
+import * as NodeCryptoServices from "@effect/platform-node/NodeCrypto";
 // @effect-diagnostics nodeBuiltinImport:off - Hashes the stand-in archive the test writes.
 import * as NodeCrypto from "node:crypto";
 import { NodeServices } from "@effect/platform-node";
@@ -109,7 +111,7 @@ const admit = (options: {
     return { exit, written, record };
   }).pipe(Effect.scoped);
 
-it.layer(NodeServices.layer)("admission record", (it) => {
+it.layer(Layer.mergeAll(NodeServices.layer, NodeCryptoServices.layer))("admission record", (it) => {
   it.effect("writes ADMISSION.json with the version, digest, prior, and every check", () =>
     Effect.gen(function* () {
       const result = yield* admit({

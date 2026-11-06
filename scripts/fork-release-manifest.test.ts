@@ -1,3 +1,5 @@
+import * as Layer from "effect/Layer";
+import * as NodeCryptoServices from "@effect/platform-node/NodeCrypto";
 // @effect-diagnostics nodeBuiltinImport:off - Hashes the stand-in assets the test writes.
 import * as NodeCrypto from "node:crypto";
 import { NodeServices } from "@effect/platform-node";
@@ -308,38 +310,41 @@ const writeRelease = (admissionJson: (record: AdmissionRecord) => string | undef
     };
   }).pipe(Effect.scoped);
 
-it.layer(NodeServices.layer)("writing a release directory", (it) => {
-  it.effect("leaves ADMISSION.json out of the assets and SHA256SUMS", () =>
-    Effect.gen(function* () {
-      const result = yield* writeRelease((record) => JSON.stringify(record));
-      assert.strictEqual(result.exit._tag, "Success");
-      assert.include(result.written, MANIFEST_FILE);
-      assert.include(result.written, SHA256SUMS_FILE);
-      assert.notInclude(result.sha256sums!, ADMISSION_FILE);
-      const manifest = JSON.parse(result.manifest!);
-      assert.deepStrictEqual(
-        manifest.assets.map((asset: { file: string }) => asset.file),
-        [linux.file, apk.file, dmg.file],
-      );
-      assert.strictEqual(manifest.verificationScope.entries[0].runtimeVerified, true);
-    }),
-  );
+it.layer(Layer.mergeAll(NodeServices.layer, NodeCryptoServices.layer))(
+  "writing a release directory",
+  (it) => {
+    it.effect("leaves ADMISSION.json out of the assets and SHA256SUMS", () =>
+      Effect.gen(function* () {
+        const result = yield* writeRelease((record) => JSON.stringify(record));
+        assert.strictEqual(result.exit._tag, "Success");
+        assert.include(result.written, MANIFEST_FILE);
+        assert.include(result.written, SHA256SUMS_FILE);
+        assert.notInclude(result.sha256sums!, ADMISSION_FILE);
+        const manifest = JSON.parse(result.manifest!);
+        assert.deepStrictEqual(
+          manifest.assets.map((asset: { file: string }) => asset.file),
+          [linux.file, apk.file, dmg.file],
+        );
+        assert.strictEqual(manifest.verificationScope.entries[0].runtimeVerified, true);
+      }),
+    );
 
-  it.effect("writes neither file without a matching admission", () =>
-    Effect.gen(function* () {
-      const refused: ReadonlyArray<[string, (record: AdmissionRecord) => string | undefined]> = [
-        ["no ADMISSION.json", () => undefined],
-        ["not an admission record", () => "{}"],
-        ["another version", (record) => JSON.stringify({ ...record, version: "0.0.46-atli.2" })],
-        ["another file", (record) => JSON.stringify({ ...record, archive: apk.file })],
-        ["another sha256", (record) => JSON.stringify({ ...record, archiveSha256: dmg.sha256 })],
-      ];
-      for (const [name, admissionJson] of refused) {
-        const result = yield* writeRelease(admissionJson);
-        assert.strictEqual(result.exit._tag, "Failure", name);
-        assert.notInclude(result.written, MANIFEST_FILE, name);
-        assert.notInclude(result.written, SHA256SUMS_FILE, name);
-      }
-    }),
-  );
-});
+    it.effect("writes neither file without a matching admission", () =>
+      Effect.gen(function* () {
+        const refused: ReadonlyArray<[string, (record: AdmissionRecord) => string | undefined]> = [
+          ["no ADMISSION.json", () => undefined],
+          ["not an admission record", () => "{}"],
+          ["another version", (record) => JSON.stringify({ ...record, version: "0.0.46-atli.2" })],
+          ["another file", (record) => JSON.stringify({ ...record, archive: apk.file })],
+          ["another sha256", (record) => JSON.stringify({ ...record, archiveSha256: dmg.sha256 })],
+        ];
+        for (const [name, admissionJson] of refused) {
+          const result = yield* writeRelease(admissionJson);
+          assert.strictEqual(result.exit._tag, "Failure", name);
+          assert.notInclude(result.written, MANIFEST_FILE, name);
+          assert.notInclude(result.written, SHA256SUMS_FILE, name);
+        }
+      }),
+    );
+  },
+);

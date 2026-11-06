@@ -503,16 +503,26 @@ it.layer(NodeServices.layer)("t3 update with a background service", (it) => {
       const runner = ProcessRunner.ProcessRunner.of({
         run: (input) =>
           input.args?.includes("--version") === true
-            ? unrelatedLsof
-                .run(input)
-                .pipe(Effect.map((result) => ({ ...result, stdout: `t3 v${version}\n` })))
-            : unrelatedLsof.run(input),
+            ? Effect.succeed(processOutput(`t3 v${version}\n`))
+            : input.args?.includes("__service-preflight") === true
+              ? Effect.succeed(
+                  processOutput(
+                    JSON.stringify({
+                      status: "ready",
+                      version,
+                      launcherProtocol: SERVICE_LAUNCHER_PROTOCOL,
+                    }),
+                  ),
+                )
+              : unrelatedLsof.run(input),
       });
 
       const output = yield* runUpdate({
         baseDir,
         logsDir: baseDir,
         serverRuntimeStatePath: path.join(baseDir, "server-runtime.json"),
+        dbPath: path.join(baseDir, "statev2.sqlite"),
+        allowUnadmitted: false,
         channel: undefined,
         requestedVersion: version,
         allowDowngrade: false,

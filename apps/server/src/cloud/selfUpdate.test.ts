@@ -67,6 +67,7 @@ const admissionRecord = (version: string, sha256: string) =>
 const releaseHttpClient = (
   order: string[],
   urls: string[],
+  publishedVersion: string,
   admission: Readonly<Record<string, string>> = {},
   beforeDownload?: Effect.Effect<void>,
 ) =>
@@ -77,7 +78,7 @@ const releaseHttpClient = (
       if (request.url.endsWith("/SHA256SUMS")) {
         return HttpClientResponse.fromWeb(
           request,
-          new Response(`${yield* archiveSha256}  t3-${version}-linux-x64.tar.gz\n`),
+          new Response(`${yield* archiveSha256}  t3-${publishedVersion}-linux-x64.tar.gz\n`),
         );
       }
       if (request.url.endsWith("/ADMISSION.json")) {
@@ -200,7 +201,13 @@ const makeHarness = Effect.fn("test.make_self_update_harness")(function* (
     ),
     Effect.provideService(
       HttpClient.HttpClient,
-      releaseHttpClient(order, urls, options.admission, options.beforeDownload),
+      releaseHttpClient(
+        order,
+        urls,
+        options.version ?? "1.1.0",
+        options.admission,
+        options.beforeDownload,
+      ),
     ),
     Effect.provideService(FileSystem.FileSystem, updateFs),
     Effect.provideService(HostProcess.Platform, "linux"),

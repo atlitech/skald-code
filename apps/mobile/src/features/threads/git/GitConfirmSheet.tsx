@@ -12,7 +12,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { SheetHeader } from "../../../components/ui/SheetHeader";
 import { ScreenContent } from "../../../components/ui/ScreenContent";
 import { AppText as Text } from "../../../components/ui/AppText";
-import { selectWorkspaceDetail } from "../../workspace/workspace-detail-selection";
+import { selectWorkspaceDetail } from "../../layout/workspace/workspace-detail-selection";
 import { useSelectedThreadGitActions } from "../../../state/use-selected-thread-git-actions";
 import { useSelectedThreadGitState } from "../../../state/use-selected-thread-git-state";
 import { useThreadSelection } from "../../../state/use-thread-selection";

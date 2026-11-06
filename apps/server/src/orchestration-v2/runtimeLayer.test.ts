@@ -3418,8 +3418,8 @@ it.layer(layerTest)("OrchestrationV2LayerLive lifecycle", (it) => {
           Effect.provide(
             Layer.mergeAll(
               NodeServices.layer,
-              ServerSettings.layerTest({ enablePullRequestWatch: true }),
               NodeCrypto.layer,
+              ServerSettings.layerTest({ enablePullRequestWatch: true }),
               Layer.mock(PullRequestService.PullRequestService)({
                 watchFingerprint: () => Effect.succeed(null),
                 detail: () =>
@@ -3566,6 +3566,7 @@ it.layer(layerTest)("OrchestrationV2LayerLive lifecycle", (it) => {
           Effect.provide(
             Layer.mergeAll(
               NodeServices.layer,
+              NodeCrypto.layer,
               ServerSettings.layerTest({ enablePullRequestWatch: true }),
               Layer.mock(PullRequestService.PullRequestService)({
                 detail: () =>
@@ -3700,6 +3701,7 @@ it.layer(layerTest)("OrchestrationV2LayerLive lifecycle", (it) => {
         Effect.provide(
           Layer.mergeAll(
             NodeServices.layer,
+            NodeCrypto.layer,
             Layer.succeed(ServerSettings.ServerSettingsService, settings),
             Layer.mock(PullRequestService.PullRequestService)({
               detail: () => {
@@ -3776,8 +3778,8 @@ it.layer(layerTest)("OrchestrationV2LayerLive lifecycle", (it) => {
       let headSha = "ad70160aaa";
       const host = Layer.mergeAll(
         NodeServices.layer,
-        ServerSettings.layerTest({ enablePullRequestWatch: true }),
         NodeCrypto.layer,
+        ServerSettings.layerTest({ enablePullRequestWatch: true }),
         Layer.mock(PullRequestService.PullRequestService)({
           detail: () =>
             Effect.sync(() => ({
@@ -3876,8 +3878,8 @@ it.layer(layerTest)("OrchestrationV2LayerLive lifecycle", (it) => {
       let remainingStatus: "pending" | "success" = "pending";
       const host = Layer.mergeAll(
         NodeServices.layer,
-        ServerSettings.layerTest({ enablePullRequestWatch: true }),
         NodeCrypto.layer,
+        ServerSettings.layerTest({ enablePullRequestWatch: true }),
         Layer.mock(PullRequestService.PullRequestService)({
           detail: () =>
             Effect.sync(() => ({
@@ -4022,8 +4024,8 @@ it.layer(layerTest)("OrchestrationV2LayerLive lifecycle", (it) => {
       );
       const host = Layer.mergeAll(
         NodeServices.layer,
-        ServerSettings.layerTest({ enablePullRequestWatch: true }),
         NodeCrypto.layer,
+        ServerSettings.layerTest({ enablePullRequestWatch: true }),
         Layer.mock(PullRequestService.PullRequestService)({
           detail: () =>
             Effect.sync(() => ({
@@ -4122,8 +4124,8 @@ it.layer(layerTest)("OrchestrationV2LayerLive lifecycle", (it) => {
       let checks: PullRequestDetail["checks"] = [];
       const host = Layer.mergeAll(
         NodeServices.layer,
-        ServerSettings.layerTest({ enablePullRequestWatch: true }),
         NodeCrypto.layer,
+        ServerSettings.layerTest({ enablePullRequestWatch: true }),
         Layer.mock(PullRequestService.PullRequestService)({
           detail: () =>
             Effect.sync(() => ({
@@ -4227,8 +4229,8 @@ it.layer(layerTest)("OrchestrationV2LayerLive lifecycle", (it) => {
       let checks: PullRequestDetail["checks"] = [];
       const host = Layer.mergeAll(
         NodeServices.layer,
-        ServerSettings.layerTest({ enablePullRequestWatch: true }),
         NodeCrypto.layer,
+        ServerSettings.layerTest({ enablePullRequestWatch: true }),
         Layer.mock(PullRequestService.PullRequestService)({
           detail: () =>
             Effect.sync(() => ({
@@ -4343,8 +4345,8 @@ it.layer(layerTest)("OrchestrationV2LayerLive lifecycle", (it) => {
         let reads = 0;
         const host = Layer.mergeAll(
           NodeServices.layer,
-          ServerSettings.layerTest({ enablePullRequestWatch: true }),
           NodeCrypto.layer,
+          ServerSettings.layerTest({ enablePullRequestWatch: true }),
           Layer.mock(PullRequestService.PullRequestService)({
             // The host reports the same fingerprint throughout, so only the deadline can prompt a read.
             watchFingerprint: () =>
@@ -4527,6 +4529,7 @@ it.layer(layerTest)("OrchestrationV2LayerLive lifecycle", (it) => {
         Effect.provide(
           Layer.mergeAll(
             NodeServices.layer,
+            NodeCrypto.layer,
             ServerSettings.layerTest({ enablePullRequestWatch: true }),
             Layer.mock(PullRequestService.PullRequestService)({
               detail: () =>
@@ -4626,6 +4629,7 @@ it.layer(layerTest)("OrchestrationV2LayerLive lifecycle", (it) => {
         Effect.provide(
           Layer.mergeAll(
             NodeServices.layer,
+            NodeCrypto.layer,
             ServerSettings.layerTest({ enablePullRequestWatch: true }),
             Layer.mock(PullRequestService.PullRequestService)({
               watchFingerprint: () =>
@@ -4827,8 +4831,8 @@ it.layer(layerTest)("OrchestrationV2LayerLive lifecycle", (it) => {
         Effect.provide(
           Layer.mergeAll(
             NodeServices.layer,
-            ServerSettings.layerTest({ enablePullRequestWatch: true }),
             NodeCrypto.layer,
+            ServerSettings.layerTest({ enablePullRequestWatch: true }),
             Layer.mock(PullRequestService.PullRequestService)({
               detail: () => Effect.succeed(detail),
               activity: () =>
@@ -4980,6 +4984,7 @@ it.layer(layerTest)("OrchestrationV2LayerLive lifecycle", (it) => {
       const host = Layer.mergeAll(
         NodeServices.layer,
         NodeCrypto.layer,
+        ServerSettings.layerTest({ enablePullRequestWatch: true }),
         Layer.mock(PullRequestService.PullRequestService)({
           watchFingerprint: (input) =>
             input.number === 21

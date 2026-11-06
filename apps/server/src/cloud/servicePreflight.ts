@@ -73,13 +73,16 @@ const LEGACY_DATABASE_NAME = "state.sqlite";
  * is still writing and never writes or checkpoints the live files.
  */
 export const snapshotDatabase = (sourcePath: string, destinationPath: string) =>
-  Effect.tryPromise(async () => {
-    const database = new NodeSqlite.DatabaseSync(sourcePath, { readOnly: true });
-    try {
-      await NodeSqlite.backup(database, destinationPath);
-    } finally {
-      database.close();
-    }
+  Effect.tryPromise({
+    try: async () => {
+      const database = new NodeSqlite.DatabaseSync(sourcePath, { readOnly: true });
+      try {
+        await NodeSqlite.backup(database, destinationPath);
+      } finally {
+        database.close();
+      }
+    },
+    catch: (cause) => new PinnedRuntimeInstallError({ step: "snapshotting the database", cause }),
   });
 
 /**

@@ -1,4 +1,6 @@
 #!/usr/bin/env node
+import * as Layer from "effect/Layer";
+import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 
 // Record the drill only when recovery restored the point and all required evidence exists.
 // verify-recovery.ts independently re-observes the uploaded home.
@@ -398,7 +400,7 @@ const command = Command.make(
 
 if (import.meta.main) {
   Command.run(command, { version: "0.0.0" }).pipe(
-    Effect.provide(NodeServices.layer),
+    Effect.provide(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer)),
     NodeRuntime.runMain,
   );
 }

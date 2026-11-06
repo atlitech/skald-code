@@ -1,4 +1,4 @@
-import { selectWorkspaceDetail } from "../workspace/workspace-detail-selection";
+import { selectWorkspaceDetail } from "../layout/workspace/workspace-detail-selection";
 import * as Dialog from "../../components/ui/Dialog";
 import { useRememberThreadProject } from "./useRememberThreadProject";
 import { useOpenPullRequest } from "../../native/useOpenPullRequest";

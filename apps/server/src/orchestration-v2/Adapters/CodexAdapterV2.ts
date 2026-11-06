@@ -86,6 +86,7 @@ import * as CodexSchema from "effect-codex-app-server/schema";
 import * as Cause from "effect/Cause";
 import * as Context from "effect/Context";
 import * as Digest from "effect/crypto/Digest";
+import * as SecureRandom from "effect/crypto/SecureRandom";
 import * as DateTime from "effect/DateTime";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
@@ -1745,6 +1746,7 @@ export interface CodexAdapterV2Options {
 export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
   adapterOptions: CodexAdapterV2Options,
 ) {
+  const random = yield* SecureRandom.SecureRandom;
   const mcpSessions = yield* McpProviderSessions.McpProviderSessions;
   const readMcpSession = (threadId: ThreadId | null) =>
     threadId === null ? Effect.undefined : mcpSessions.read(threadId);
@@ -5580,7 +5582,7 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
             }
 
             if (form !== undefined) {
-              const nativeRequestId = `mcp-elicitation:${payload.serverName}:${yield* crypto.randomUUIDv4()}`;
+              const nativeRequestId = `mcp-elicitation:${payload.serverName}:${yield* random.uuidV4()}`;
               const artifacts = yield* buildUserInputRequestArtifacts({
                 context,
                 nativeItemId: nativeRequestId,

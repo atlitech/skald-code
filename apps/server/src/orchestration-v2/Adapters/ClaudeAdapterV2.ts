@@ -10681,7 +10681,7 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
           const opened = yield* Effect.gen(function* () {
             if (yield* isClosed) return null;
             // SDK request ids can repeat, so each card gets its own native id.
-            const nativeRequestId = `mcp-elicitation:${callbackOptions.requestId}:${yield* crypto.randomUUIDv4()}`;
+            const nativeRequestId = `mcp-elicitation:${callbackOptions.requestId}:${yield* random.uuidV4()}`;
             const artifacts = yield* buildApprovalRequestArtifacts({
               context,
               nativeItemId: nativeRequestId,

@@ -28,7 +28,6 @@ export type AppBarMenuItem =
       readonly iconColor?: ColorValue;
       readonly subtitle?: string;
       readonly disabled?: boolean;
-      readonly destructive?: boolean;
       readonly selected?: boolean;
       readonly destructive?: boolean;
       readonly onPress: () => void;

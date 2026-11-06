@@ -1,4 +1,6 @@
 #!/usr/bin/env node
+import * as Layer from "effect/Layer";
+import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 
 // Writes ADMISSION.json only for the built archive after every admission check passes.
 // The next admission upgrades from this attested release.
@@ -253,7 +255,7 @@ const command = Command.make(
 
 if (import.meta.main) {
   Command.run(command, { version: "0.0.0" }).pipe(
-    Effect.provide(NodeServices.layer),
+    Effect.provide(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer)),
     NodeRuntime.runMain,
   );
 }

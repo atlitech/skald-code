@@ -3157,7 +3157,7 @@ describe("ClaudeAdapterV2 background wake turns", () => {
     readonly settings?: ClaudeSettings;
     readonly modelCatalog?: Effect.Effect<ClaudeModelCatalog>;
     readonly freshQueueOnReopen?: boolean;
-    readonly random?: SecureRandom.SecureRandom;
+    readonly random?: SecureRandom.SecureRandom["Service"];
     readonly forkSession?: ClaudeAdapterV2.ClaudeAgentSdkQueryRunnerShape["forkSession"];
     readonly allocateSessionId?: Effect.Effect<string>;
   }) =>
@@ -3525,7 +3525,12 @@ describe("ClaudeAdapterV2 background wake turns", () => {
           );
         }).pipe(
           Effect.provide(
-            Layer.mergeAll(IdAllocator.layer, McpProviderSessions.layer, NodeServices.layer),
+            Layer.mergeAll(
+              IdAllocator.layer,
+              McpProviderSessions.layer,
+              NodeServices.layer,
+              NodeCrypto.layer,
+            ),
           ),
         ),
       ),
@@ -3564,7 +3569,12 @@ describe("ClaudeAdapterV2 background wake turns", () => {
         assert.deepEqual(yield* Fiber.join(first), { action: "cancel" });
       }).pipe(
         Effect.provide(
-          Layer.mergeAll(IdAllocator.layer, McpProviderSessions.layer, NodeServices.layer),
+          Layer.mergeAll(
+            IdAllocator.layer,
+            McpProviderSessions.layer,
+            NodeServices.layer,
+            NodeCrypto.layer,
+          ),
         ),
       ),
     ),
@@ -3615,7 +3625,12 @@ describe("ClaudeAdapterV2 background wake turns", () => {
           );
         }).pipe(
           Effect.provide(
-            Layer.mergeAll(IdAllocator.layer, McpProviderSessions.layer, NodeServices.layer),
+            Layer.mergeAll(
+              IdAllocator.layer,
+              McpProviderSessions.layer,
+              NodeServices.layer,
+              NodeCrypto.layer,
+            ),
           ),
         ),
       ),
@@ -3639,7 +3654,7 @@ describe("ClaudeAdapterV2 background wake turns", () => {
                   yield* Deferred.await(releaseAllocation);
                 }
                 return yield* random.uuidV4();
-              })) as SecureRandom.SecureRandom["uuidV4"],
+              })) as SecureRandom.SecureRandom["Service"]["uuidV4"],
           },
         });
         yield* startMcpTurn(harness);
@@ -3677,7 +3692,12 @@ describe("ClaudeAdapterV2 background wake turns", () => {
         assert.isFalse(harness.events.some((event) => event.type === "runtime_request.updated"));
       }).pipe(
         Effect.provide(
-          Layer.mergeAll(IdAllocator.layer, McpProviderSessions.layer, NodeServices.layer),
+          Layer.mergeAll(
+            IdAllocator.layer,
+            McpProviderSessions.layer,
+            NodeServices.layer,
+            NodeCrypto.layer,
+          ),
         ),
       ),
     ),
@@ -3736,7 +3756,12 @@ describe("ClaudeAdapterV2 background wake turns", () => {
           assert.isFalse(harness.events.some((event) => event.type === "runtime_request.updated"));
         }).pipe(
           Effect.provide(
-            Layer.mergeAll(IdAllocator.layer, McpProviderSessions.layer, NodeServices.layer),
+            Layer.mergeAll(
+              IdAllocator.layer,
+              McpProviderSessions.layer,
+              NodeServices.layer,
+              NodeCrypto.layer,
+            ),
           ),
         ),
       ),
@@ -12438,7 +12463,12 @@ describe("ClaudeAdapterV2 background wake turns", () => {
         assert.isFalse(yield* harness.hasPendingBackgroundWork);
       }).pipe(
         Effect.provide(
-          Layer.mergeAll(IdAllocator.layer, McpProviderSessions.layer, NodeServices.layer),
+          Layer.mergeAll(
+            IdAllocator.layer,
+            McpProviderSessions.layer,
+            NodeServices.layer,
+            NodeCrypto.layer,
+          ),
         ),
       ),
     ),

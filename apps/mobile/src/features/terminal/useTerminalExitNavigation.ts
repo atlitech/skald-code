@@ -1,6 +1,6 @@
 import { StackActions, useNavigation } from "@react-navigation/native";
 import { useEffect, useEffectEvent, useRef } from "react";
-import { selectWorkspaceDetail } from "../workspace/workspace-detail-selection";
+import { selectWorkspaceDetail } from "../layout/workspace/workspace-detail-selection";
 
 /**
  * Leaves a terminal screen whose shell exited: to another live terminal of the
