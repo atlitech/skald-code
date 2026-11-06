@@ -7,6 +7,7 @@ const extraThemes = require("./generated-uniwind-theme-names.json");
 const {
   androidCiMetroCacheDirectory,
   androidCiMetroCacheVersion,
+  observeAndroidCiMetroCache,
 } = require("./scripts/android-ci-metro-cache.cjs");
 
 const ciCacheDirectory = androidCiMetroCacheDirectory();
@@ -126,10 +127,20 @@ async function prepareStreamScripts() {
 }
 
 module.exports = Promise.all([generateMobileThirdPartyLicenses(), prepareStreamScripts()]).then(
-  () =>
-    withUniwindConfig(config, {
+  () => {
+    const styledConfig = withUniwindConfig(config, {
       cssEntryFile: "./global.css",
       extraThemes,
       polyfills: { rem: 14 },
-    }),
+    });
+    if (ciCacheDirectory) {
+      // Uniwind replaces cacheStores; Expo's store also respects Uniwind's CSS skipCache marker.
+      styledConfig.cacheStores = observeAndroidCiMetroCache(
+        config.cacheStores,
+        ciCacheDirectory,
+        styledConfig.cacheVersion,
+      );
+    }
+    return styledConfig;
+  },
 );

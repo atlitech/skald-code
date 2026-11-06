@@ -1,4 +1,5 @@
 import * as NodeCrypto from "node:crypto";
+import * as NodeChildProcess from "node:child_process";
 import * as NodeFS from "node:fs";
 import * as NodeModule from "node:module";
 import * as NodeOS from "node:os";
@@ -15,6 +16,44 @@ const require = NodeModule.createRequire(import.meta.url);
 const expoRequire = NodeModule.createRequire(require.resolve("expo/metro-config"));
 const { default: Transformer } = expoRequire("@expo/metro/metro/DeltaBundler/Transformer");
 const { FileStore } = expoRequire("@expo/metro/metro-cache");
+
+it("keeps the persistent store after Uniwind config composition and excludes generated CSS transforms", () => {
+  using temporary = NodeFS.mkdtempDisposableSync(NodePath.join(NodeOS.tmpdir(), "t3-metro-store-"));
+  const script = `
+    const fs = require("node:fs");
+    const path = require("node:path");
+    const crypto = require("node:crypto");
+    Promise.resolve(require("./metro.config.js")).then(async (config) => {
+      const store = config.cacheStores[0];
+      const key = crypto.createHash("sha256").update(process.env.T3CODE_METRO_CACHE_DIR).digest();
+      const cssKey = crypto.createHash("sha256").update(key).digest();
+      await store.set(key, { source: "persistent" });
+      await store.set(cssKey, { output: [{ data: { css: { skipCache: true } } }] });
+      const root = path.join(process.env.T3CODE_METRO_CACHE_DIR, "app");
+      const files = fs.existsSync(root) ? fs.readdirSync(root, { recursive: true }).filter(file => fs.statSync(path.join(root, file)).isFile()) : [];
+      console.log("T3_CACHE_RESULT=" + JSON.stringify({ files: files.length, value: await store.get(key), css: await store.get(cssKey) }));
+    });
+  `;
+  const stdout = NodeChildProcess.execFileSync(process.execPath, ["-e", script], {
+    cwd: NodePath.resolve(import.meta.dirname, ".."),
+    env: {
+      ...process.env,
+      NODE_ENV: "production",
+      APP_VARIANT: "personal",
+      MOBILE_VERSION_POLICY: "appVersion",
+      T3CODE_ANDROID_BUILD_CACHE: "1",
+      T3CODE_METRO_CACHE_DIR: temporary.path,
+    },
+    encoding: "utf8",
+  });
+  const result = stdout.split("\n").find((line) => line.startsWith("T3_CACHE_RESULT="));
+  expect(result).toBeDefined();
+  expect(JSON.parse(result.slice("T3_CACHE_RESULT=".length))).toEqual({
+    files: 1,
+    value: { source: "persistent" },
+    css: null,
+  });
+});
 
 it("preserves normal Expo commands and requires a persistent directory before bypassing reset", () => {
   const args = ["export:embed", "--platform", "android", "--reset-cache", "--dev", "false"];

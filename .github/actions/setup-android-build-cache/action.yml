@@ -30,6 +30,7 @@ runs:
         key: android-compile-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('pnpm-lock.yaml', 'apps/mobile/scripts/android-ci*', 'apps/mobile/metro.config.js') }}-${{ github.run_id }}-${{ github.run_attempt }}
         restore-keys: |
           android-compile-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('pnpm-lock.yaml', 'apps/mobile/scripts/android-ci*', 'apps/mobile/metro.config.js') }}-
+          android-compile-v1-${{ runner.os }}-${{ runner.arch }}-
 
     - name: Reset compiler cache statistics
       shell: bash

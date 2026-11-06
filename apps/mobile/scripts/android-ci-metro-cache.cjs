@@ -69,8 +69,31 @@ function androidCiExpoArguments(args, env = process.env) {
   return args.filter((argument) => argument !== "--reset-cache");
 }
 
+function observeAndroidCiMetroCache(stores, directory, version) {
+  const statistics = { hits: 0, misses: 0, clears: 0 };
+  console.log(`[android-ci-metro] ${JSON.stringify({ directory, version })}`);
+  process.once("exit", () => {
+    console.log(`[android-ci-metro] ${JSON.stringify(statistics)}`);
+  });
+  return stores.map((store) => ({
+    name: "AndroidCiMetro",
+    prepare: () => store.prepare?.(),
+    async get(key) {
+      const value = await store.get(key);
+      statistics[value == null ? "misses" : "hits"] += 1;
+      return value;
+    },
+    set: (key, value) => store.set(key, value),
+    clear() {
+      statistics.clears += 1;
+      return store.clear();
+    },
+  }));
+}
+
 module.exports = {
   androidCiMetroCacheDirectory,
   androidCiMetroCacheVersion,
   androidCiExpoArguments,
+  observeAndroidCiMetroCache,
 };
