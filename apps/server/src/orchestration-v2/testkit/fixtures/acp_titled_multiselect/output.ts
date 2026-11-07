@@ -33,7 +33,8 @@ export function assertAcpTitledMultiSelectOutput(
     {
       id: "fixture_areas",
       header: "Areas",
-      question: "Which areas should this fixture cover?",
+      question:
+        "Choose the fixture areas.\n\nWhich areas should this fixture cover?\n\nChoose at least 1 option.",
       options: [
         { label: "Strict schemas", description: "Typed wire shapes", value: "schemas" },
         { label: "UI flexibility", description: "UI flexibility", value: "ui" },
@@ -41,6 +42,8 @@ export function assertAcpTitledMultiSelectOutput(
       ],
       allowCustomAnswer: false,
       multiSelect: true,
+      required: true,
+      constraints: { minItems: 1 },
     },
   ]);
 }
