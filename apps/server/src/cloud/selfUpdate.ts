@@ -28,6 +28,7 @@ import {
 import packageJson from "../../package.json" with { type: "json" };
 import * as ServerConfig from "../config.ts";
 import * as DesktopAppUpdate from "../desktopUpdate/DesktopAppUpdate.ts";
+import { forkParked } from "../serverActivation.ts";
 import { databaseMigrationHead } from "../persistence/databaseMigrationHead.ts";
 import * as ManagedPolicy from "../policy/ManagedPolicy.ts";
 import { managedUpdateMirror, managedUpdateRefusal } from "../policy/managedUpdates.ts";
@@ -39,6 +40,7 @@ import {
   isUnpublishedRelease,
   pinnedRuntimePaths,
   prunePinnedRuntimes,
+  syncPinnedRuntimeLaunchers,
 } from "./pinnedRuntime.ts";
 import { runStagedServicePreflight } from "./servicePreflight.ts";
 import * as ServiceLauncherClient from "./serviceLauncherClient.ts";
@@ -85,6 +87,9 @@ export const pruneRuntimesOnStart = Effect.fn("cloud.server_self_update.prune_on
     const realEntryPath = yield* fs.realPath(entryPath).pipe(Effect.orElseSucceed(() => entryPath));
     if (!input.managed && executablePath !== entryPath && executablePath !== realEntryPath) {
       return [];
+    }
+    if (input.managed) {
+      yield* syncPinnedRuntimeLaunchers({ baseDir: input.baseDir, version: packageJson.version });
     }
     const removed = yield* prunePinnedRuntimes({
       baseDir: input.baseDir,
@@ -135,7 +140,7 @@ export const make = Effect.fn("cloud.server_self_update.make")(function* () {
   const inFlight = yield* Ref.make(false);
 
   yield* pruneRuntimesOnStart({ baseDir: serverConfig.baseDir, managed: launcher.managed }).pipe(
-    Effect.forkScoped,
+    forkParked,
   );
 
   const capability: ServerSelfUpdateCapability | null =

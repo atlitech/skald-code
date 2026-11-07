@@ -557,6 +557,8 @@ it.layer(NodeServices.layer)("pruning runtimes on start", (it) => {
     readonly executable: "own runtime" | "elsewhere";
     readonly managed?: boolean;
     readonly symlinkedHome?: boolean;
+    readonly updateStatus?: "committed" | "pending" | "rolled-back";
+    readonly activeVersion?: string;
   }) {
     const fs = yield* FileSystem.FileSystem;
     const path = yield* Path.Path;
@@ -574,6 +576,32 @@ it.layer(NodeServices.layer)("pruning runtimes on start", (it) => {
       yield* fs.utimes(sentinel, 0, 0);
     }
     if (input.symlinkedHome) yield* fs.symlink(realHome, baseDir);
+    const launcher = path.join(tempDir, "bin", "t3");
+    if (input.updateStatus !== undefined) {
+      yield* fs.makeDirectory(path.dirname(launcher));
+      yield* fs.symlink(path.join(versionsDir, staleVersion, "t3"), launcher);
+      yield* fs.writeFileString(path.join(baseDir, "runtime", "launchers"), `${launcher}\n`);
+      yield* fs.writeFileString(
+        path.join(baseDir, "runtime", "service-state.json"),
+        JSON.stringify({
+          protocol: SERVICE_LAUNCHER_PROTOCOL,
+          activeVersion:
+            input.updateStatus === "pending"
+              ? staleVersion
+              : (input.activeVersion ?? packageJson.version),
+          update: {
+            id: "update-1",
+            fromVersion: input.updateStatus === "rolled-back" ? packageJson.version : staleVersion,
+            targetVersion:
+              input.updateStatus === "rolled-back"
+                ? "99.0.0"
+                : (input.activeVersion ?? packageJson.version),
+            status: input.updateStatus,
+            ...(input.updateStatus === "pending" ? { dbPath: "/unused.sqlite" } : {}),
+          },
+        }),
+      );
+    }
     // Like `process.execPath`, the running runtime is reported by its real path.
     const executablePath =
       input.executable === "own runtime"
@@ -586,9 +614,15 @@ it.layer(NodeServices.layer)("pruning runtimes on start", (it) => {
       Effect.provideService(HostProcess.ExecutablePath, executablePath),
       Effect.provideService(HostProcess.Platform, "darwin"),
       Effect.provideService(HostProcess.Environment, {}),
+      Effect.provideService(HostProcess.HomeDirectory, tempDir),
       Effect.provideService(ProcessRunner.ProcessRunner, otherProcesses),
     );
-    return { removed, remaining: (yield* fs.readDirectory(versionsDir)).toSorted() };
+    return {
+      removed,
+      remaining: (yield* fs.readDirectory(versionsDir)).toSorted(),
+      launcherTarget: yield* fs.readLink(launcher).pipe(Effect.orElseSucceed(() => undefined)),
+      expectedTarget: path.join(versionsDir, packageJson.version, "t3"),
+    };
   });
 
   // The SSH launcher runs `t3 serve` straight from the pinned runtime, with no boot service.
@@ -612,6 +646,36 @@ it.layer(NodeServices.layer)("pruning runtimes on start", (it) => {
       const { removed } = yield* pruneOnStart({ executable: "elsewhere", managed: true });
       expect(removed).toEqual([staleVersion]);
     }),
+  );
+
+  it.effect.each(["committed", "rolled-back"] as const)(
+    "synchronizes recorded shell launchers with the active runtime after %s",
+    (updateStatus) =>
+      Effect.gen(function* () {
+        const { launcherTarget, expectedTarget } = yield* pruneOnStart({
+          executable: "own runtime",
+          managed: true,
+          updateStatus,
+          symlinkedHome: true,
+        });
+        expect(launcherTarget).toBe(expectedTarget);
+      }),
+  );
+
+  it.effect.each([
+    { managed: true, updateStatus: "pending" as const },
+    { managed: false, updateStatus: "committed" as const },
+    { managed: true, updateStatus: "committed" as const, activeVersion: "99.0.0" },
+  ])(
+    "leaves shell launchers alone unless this is the active managed runtime ($managed, $updateStatus, $activeVersion)",
+    (input) =>
+      Effect.gen(function* () {
+        const { launcherTarget, expectedTarget } = yield* pruneOnStart({
+          executable: "own runtime",
+          ...input,
+        });
+        expect(launcherTarget).not.toBe(expectedTarget);
+      }),
   );
 
   it.effect("leaves runtimes alone for an unmanaged server started elsewhere", () =>
