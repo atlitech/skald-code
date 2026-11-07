@@ -163,16 +163,16 @@ export function buildPendingUserInputAnswers(
   questions: ReadonlyArray<PendingUserInputQuestion>,
   draftAnswers: Record<string, PendingUserInputDraftAnswer>,
 ): Record<string, PendingUserInputAnswer> | null {
-  const answers: Record<string, PendingUserInputAnswer> = {};
+  const entries: Array<[string, PendingUserInputAnswer]> = [];
 
   for (const question of questions) {
     const answer = resolvePendingUserInputAnswer(question, draftAnswers[question.id]);
     if (answer !== null) {
-      answers[question.id] = answer;
+      entries.push([question.id, answer]);
     } else if (question.required !== false || draftAnswers[question.id]?.attachmentsBlocked) {
       return null;
     }
   }
 
-  return answers;
+  return Object.fromEntries(entries);
 }

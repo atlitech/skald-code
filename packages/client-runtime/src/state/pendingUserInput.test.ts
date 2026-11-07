@@ -167,6 +167,12 @@ const compatQuestion = {
 
 describe("buildPendingUserInputAnswers", () => {
   it("returns a canonical answer map for complete prompts", () => {
+    expect(buildPendingUserInputAnswers([{ ...compatQuestion, required: false }], {})).toEqual({});
+    expect(
+      buildPendingUserInputAnswers([{ ...compatQuestion, required: false }], {
+        compat: { attachmentsBlocked: true },
+      }),
+    ).toBeNull();
     expect(
       buildPendingUserInputAnswers([singleSelectQuestion, compatQuestion], {
         scope: { selectedOptionValues: ["Orchestration-first"] },
@@ -177,4 +183,31 @@ describe("buildPendingUserInputAnswers", () => {
       compat: "Keep the current envelope for one release window",
     });
   });
+});
+
+it.each([
+  ["single-select", singleSelectQuestion, ["Orchestration-first"], '"Orchestration-first"'],
+  [
+    "multi-select",
+    {
+      ...singleSelectQuestion,
+      multiSelect: true,
+      options: [{ label: "Server" }, { label: "Web" }],
+    },
+    ["Server", "Web"],
+    '["Server","Web"]',
+  ],
+])("sends a %s answer to a question with the id __proto__", (_kind, question, selected, json) => {
+  const answers = buildPendingUserInputAnswers(
+    [
+      { ...question, id: "__proto__" },
+      { ...singleSelectQuestion, id: "name" },
+    ],
+    {
+      ["__proto__"]: { selectedOptionValues: selected },
+      name: { selectedOptionValues: ["Orchestration-first"] },
+    },
+  );
+
+  expect(JSON.stringify(answers)).toBe(`{"__proto__":${json},"name":"Orchestration-first"}`);
 });
