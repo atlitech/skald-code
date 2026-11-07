@@ -12,8 +12,13 @@ it.effect(
   () =>
     Effect.gen(function* () {
       const calls: string[] = [];
-      const doctor = (dryRun: boolean) =>
-        runDoctor("/test/statev2.sqlite", { fix: true, dryRun, interactive: false }).pipe(
+      const doctor = (dryRun: boolean, pruneEventsNow = false) =>
+        runDoctor("/test/statev2.sqlite", {
+          fix: true,
+          dryRun,
+          interactive: false,
+          pruneEventsNow,
+        }).pipe(
           Effect.provide(
             Layer.mergeAll(
               NodeServices.layer,
@@ -24,17 +29,17 @@ it.effect(
                     Effect.ensuring(Effect.sync(() => calls.push("resume"))),
                   ),
               }),
-              Layer.succeed(DatabaseMaintenance, {
+              Layer.mock(DatabaseMaintenance)({
                 inspect: () =>
                   Effect.succeed({
                     databaseBytes: 2000,
-                    reclaimableBytes: 1000,
-                    incrementalVacuumEnabled: false,
+                    reclaimableBytes: pruneEventsNow ? 0 : 1000,
+                    incrementalVacuumEnabled: pruneEventsNow,
                     legacyDatabaseBytes: 4000,
                   }),
-                compact: () =>
+                compact: (_path, options) =>
                   Effect.sync(() => {
-                    calls.push("compact");
+                    calls.push(options?.pruneEventsNow ? "compact now" : "compact");
                     return {
                       beforeBytes: 2000,
                       afterBytes: 1000,
@@ -51,5 +56,81 @@ it.effect(
       assert.deepEqual(calls, []);
       yield* doctor(false);
       assert.deepEqual(calls, ["pause", "compact", "resume"]);
+      calls.length = 0;
+      yield* doctor(true, true);
+      assert.deepEqual(calls, []);
+      yield* doctor(false, true);
+      assert.deepEqual(calls, ["pause", "compact now", "resume"]);
+    }),
+);
+
+it.effect(
+  "explicit pruning skips preview counts only when applying, and never selects full compaction",
+  () =>
+    Effect.gen(function* () {
+      const calls: string[] = [];
+      const layer = Layer.mergeAll(
+        NodeServices.layer,
+        Layer.mock(BootService.BootService)({
+          withStopped: (operation) =>
+            Effect.sync(() => calls.push("pause")).pipe(
+              Effect.andThen(operation),
+              Effect.ensuring(Effect.sync(() => calls.push("resume"))),
+            ),
+        }),
+        Layer.mock(DatabaseMaintenance)({
+          inspect: () =>
+            Effect.succeed({
+              databaseBytes: 2000,
+              reclaimableBytes: 1000,
+              incrementalVacuumEnabled: false,
+              legacyDatabaseBytes: null,
+            }),
+          inspectDeletedThreads: () =>
+            Effect.sync(() => {
+              calls.push("preview");
+              return {
+                cutoff: "2026-10-01",
+                eligibleThreadCount: 1,
+                skippedThreadCount: 0,
+                messageCount: 500,
+                turnItemCount: 0,
+                planCount: 0,
+              };
+            }),
+          pruneDeletedThreads: (_path, days, budget) =>
+            Effect.sync(() => {
+              assert.equal(days, 7);
+              assert.equal(budget, 1);
+              calls.push("prune");
+              return {
+                beforeBytes: 2000,
+                afterBytes: 2000,
+                reclaimableBytes: 1000,
+                deletedThreads: 0,
+                deletedMessages: 250,
+                deletedItems: 0,
+                deletedPlans: 0,
+                deletedPositions: 0,
+                batches: 1,
+                complete: false,
+              };
+            }),
+          compact: () => Effect.die("Transcript pruning must never invoke full compaction"),
+        }),
+      );
+      const options = { fix: true, interactive: false, pruneDeletedDays: 7, pruneMaxBatches: 1 };
+      yield* runDoctor("/test/statev2.sqlite", { ...options, dryRun: true }).pipe(
+        Effect.provide(layer),
+      );
+      assert.deepEqual(calls, ["preview"]);
+      yield* runDoctor("/test/statev2.sqlite", { ...options, fix: false, dryRun: false }).pipe(
+        Effect.provide(layer),
+      );
+      assert.deepEqual(calls, ["preview", "preview"]);
+      yield* runDoctor("/test/statev2.sqlite", { ...options, dryRun: false }).pipe(
+        Effect.provide(layer),
+      );
+      assert.deepEqual(calls, ["preview", "preview", "pause", "prune", "resume"]);
     }),
 );

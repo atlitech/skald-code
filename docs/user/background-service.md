@@ -183,6 +183,47 @@ database's size twice over: once in the system temporary directory (`TMPDIR`
 or `/tmp` on Linux and macOS) and once next to the database for its
 write-ahead log.
 
+Deleted threads retain their transcripts until explicitly pruned. Preview threads
+deleted more than seven days ago with:
+
+```sh
+t3 doctor --prune-deleted-days 7 --dry-run
+```
+
+Apply a bounded pass with `--prune-deleted-days 7 --prune-max-batches 100 --fix`.
+Applied passes skip the detailed preview counts and select candidates once while
+the server is stopped. Use `--dry-run` for counts before the outage; even an empty
+applied pass briefly pauses the service to check eligibility.
+This permanently deletes eligible messages, tool output, and plans. It protects
+retained thread families and unfinished work, keeping execution records and
+deletion markers. The installed background service pauses for the pass and
+restarts afterward. Run this from a host terminal outside T3, since stopping
+the service interrupts connected clients and their agents.
+
+Each transaction removes at most 250 rows, targeting at most 1 MiB of transcript
+payload (a single oversized row is allowed). The default pass budget is 100
+batches. Rerun the command after a budget stop or interruption to continue;
+committed deletions are preserved. The budget limits batches, not wall time.
+
+Info logs announce selection, report committed row counts and elapsed seconds
+after the first batch and about every five seconds between batches, and summarize
+completion or a budget stop. Counts apply to the current pass. Redirect output
+to a file to keep a maintenance log. A slow SQL statement can delay a report.
+
+Pruning does not run full compaction or rebuild search. Freed pages can be reused
+immediately and shrink gradually if incremental auto-vacuum is enabled. Old event
+copies follow normal retention. Full offline compaction remains a separate
+`t3 doctor` repair; `--fix` alone never opts into transcript pruning.
+
+To compact projected event history immediately, without waiting for the normal
+24-hour replay retention, run `t3 doctor --prune-events-now --fix`. Preview the
+operation with `--prune-events-now --dry-run`. This offline repair stops the
+background service and refuses a database still in use. It preserves required
+events and current thread data; reconnecting clients with older cursors reload a
+snapshot. It also rebuilds the database and search index, so the temporary-space
+requirements above apply. This is separate from the deleted-transcript cutoff;
+normal background cleanup keeps its 24-hour retention.
+
 If you upgraded from a version before 0.1.0, its database (`state.sqlite`) is
 still kept next to the current one so you can roll back. `t3 doctor` offers to
 delete it, but never selects that repair for you and `--fix` skips it: once it
