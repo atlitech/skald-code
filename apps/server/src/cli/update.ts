@@ -26,13 +26,11 @@ import {
   ADMITTED_ARCHIVE_MISMATCH_STEP,
   ensurePinnedRuntimeInstalled,
   isPinnedRuntimeInstalled,
-  pinnedRuntimeVersionsDir,
-  launcherOwnsVersionsDir,
   pinnedRuntimeCommand,
   isUnpublishedRelease,
   PinnedRuntimeInstallError,
   prunePinnedRuntimes,
-  recordPinnedRuntimeLauncher,
+  repointPinnedRuntimeLauncher,
   windowsShimTarget,
 } from "../cloud/pinnedRuntime.ts";
 import { PRE_ADMISSION_FORK_VERSIONS, verifyReleaseAdmission } from "../cloud/releaseAdmission.ts";
@@ -155,50 +153,16 @@ export const repointLauncher = Effect.fn("cli.update.repoint_launcher")(function
   readonly baseDir: string;
   readonly targetEntryPath: string;
 }) {
-  const fs = yield* FileSystem.FileSystem;
-  const path = yield* Path.Path;
   const platform = yield* HostProcess.Platform;
   if (input.launchedAs === undefined) return Option.none<string>();
-  const versionsDir = pinnedRuntimeVersionsDir(path, input.baseDir);
-  const ownsTarget = (candidate: string) => launcherOwnsVersionsDir(path, versionsDir, candidate);
-  const remember = (launcher: string) =>
-    recordPinnedRuntimeLauncher({ baseDir: input.baseDir, launcher }).pipe(
-      Effect.mapError(
-        () => new CliUpdateError({ reason: `Could not record the t3 launcher at ${launcher}.` }),
-      ),
-    );
-
-  if (platform === "win32") {
-    const shimPath = yield* findWindowsShim(input.launchedAs);
-    if (shimPath === undefined) return Option.none<string>();
-    const current = yield* fs.readFileString(shimPath).pipe(Effect.option);
-    const quoted = Option.isSome(current) ? windowsShimTarget(current.value) : undefined;
-    if (quoted === undefined || !ownsTarget(quoted)) return Option.none<string>();
-    yield* remember(shimPath);
-    yield* fs
-      .writeFileString(shimPath, `@echo off\r\n"${input.targetEntryPath}" %*`)
-      .pipe(
-        Effect.mapError(
-          () => new CliUpdateError({ reason: `Could not rewrite the t3 launcher at ${shimPath}.` }),
-        ),
-      );
-    return Option.some(shimPath);
-  }
-
-  const linkTarget = yield* fs.readLink(input.launchedAs).pipe(Effect.option);
-  if (Option.isNone(linkTarget)) return Option.none<string>();
-  const resolvedTarget = path.resolve(path.dirname(input.launchedAs), linkTarget.value);
-  if (!ownsTarget(resolvedTarget)) return Option.none<string>();
-  yield* remember(input.launchedAs);
-  const tempLink = `${input.launchedAs}.${process.pid}.tmp`;
-  yield* fs.symlink(input.targetEntryPath, tempLink).pipe(
-    Effect.andThen(fs.rename(tempLink, input.launchedAs)),
+  const launcher =
+    platform === "win32" ? yield* findWindowsShim(input.launchedAs) : input.launchedAs;
+  if (launcher === undefined) return Option.none<string>();
+  return yield* repointPinnedRuntimeLauncher({ ...input, launcher }).pipe(
     Effect.mapError(
-      () =>
-        new CliUpdateError({ reason: `Could not repoint the t3 launcher at ${input.launchedAs}.` }),
+      () => new CliUpdateError({ reason: `Could not update the t3 launcher at ${launcher}.` }),
     ),
   );
-  return Option.some(input.launchedAs);
 });
 
 /** Node preserves argv0's spelling; resolve bare names on PATH to find the launcher symlink. */

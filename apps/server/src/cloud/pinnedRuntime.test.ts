@@ -25,6 +25,7 @@ import {
   PinnedRuntimeInstallError,
   type PinnedRuntimeProgress,
   prunePinnedRuntimes,
+  syncPinnedRuntimeLaunchers,
 } from "./pinnedRuntime.ts";
 import { SERVICE_LAUNCHER_PROTOCOL } from "./serviceProtocol.ts";
 
@@ -1073,6 +1074,89 @@ it.layer(NodeServices.layer)("prunePinnedRuntimes", (it) => {
           Effect.provide(ProcessRunner.layer),
         );
         assert.deepEqual(removed, ["1.1.0"]);
+      }),
+  );
+});
+
+it.layer(NodeServices.layer)("syncPinnedRuntimeLaunchers", (it) => {
+  it.effect.each(["linux", "win32"] as const)(
+    "continues past an unwritable launcher and preserves foreign installs on %s",
+    (platform) =>
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        const root = yield* fs.makeTempDirectoryScoped({ prefix: "t3-launcher-sync-" });
+        const baseDir = path.join(root, "home");
+        const old = pinnedRuntimePaths(path, baseDir, "1.0.0", platform);
+        const current = pinnedRuntimePaths(path, baseDir, version, platform);
+        const foreign = pinnedRuntimePaths(path, path.join(root, "other-home"), "1.0.0", platform);
+        for (const paths of [old, current, foreign]) {
+          yield* fs.makeDirectory(paths.versionDir, { recursive: true });
+          yield* fs.writeFileString(paths.entryPath, "executable");
+        }
+        const name = platform === "win32" ? "t3.cmd" : "t3";
+        const blocked = path.join(root, "blocked", name);
+        const discovered = path.join(root, "custom-bin", name);
+        const foreignLauncher = path.join(root, "foreign-bin", name);
+        const copy = path.join(root, "copy", name);
+        const registered = path.join(root, "registered", name);
+        for (const [launcher, target] of [
+          [blocked, old.entryPath],
+          [discovered, old.entryPath],
+          [registered, old.entryPath],
+          [foreignLauncher, foreign.entryPath],
+        ] as const) {
+          yield* fs.makeDirectory(path.dirname(launcher));
+          yield* platform === "win32"
+            ? fs.writeFileString(launcher, `@echo off\r\n"${target}" %*`)
+            : fs.symlink(target, launcher);
+        }
+        yield* fs.makeDirectory(path.dirname(copy));
+        yield* fs.writeFileString(copy, "a standalone executable");
+        const registry = path.join(baseDir, "runtime", "launchers");
+        yield* fs.writeFileString(
+          registry,
+          [blocked, registered, foreignLauncher, copy].join("\n"),
+        );
+        yield* fs.writeFileString(
+          path.join(baseDir, "runtime", "service-state.json"),
+          JSON.stringify({
+            protocol: SERVICE_LAUNCHER_PROTOCOL,
+            activeVersion: version,
+          }),
+        );
+        const renames: Array<readonly [string, string]> = [];
+        const sync = syncPinnedRuntimeLaunchers({ baseDir, version }).pipe(
+          Effect.provideService(HostProcess.Platform, platform),
+          Effect.provideService(HostProcess.HomeDirectory, root),
+          Effect.provideService(HostProcess.Environment, { PATH: path.dirname(discovered) }),
+          Effect.provideService(
+            FileSystem.FileSystem,
+            renameHookedFs(fs, renames, (from, to) =>
+              to === blocked ? renameRefused(from) : Effect.void,
+            ),
+          ),
+        );
+        yield* sync;
+        const targetOf = (launcher: string) =>
+          platform === "win32"
+            ? fs
+                .readFileString(launcher)
+                .pipe(Effect.map((contents) => /^"([^"]+)"/m.exec(contents)?.[1]))
+            : fs.readLink(launcher);
+        assert.equal(yield* targetOf(blocked), old.entryPath);
+        assert.equal(yield* targetOf(registered), current.entryPath);
+        assert.equal(yield* targetOf(discovered), current.entryPath);
+        assert.equal(yield* targetOf(foreignLauncher), foreign.entryPath);
+        assert.equal(yield* fs.readFileString(copy), "a standalone executable");
+        assert.deepEqual(yield* fs.readDirectory(path.dirname(blocked)), [name]);
+        assert.include(yield* fs.readFileString(registry), discovered);
+        renames.length = 0;
+        yield* sync;
+        assert.deepEqual(
+          renames.map(([, to]) => to),
+          [blocked],
+        );
       }),
   );
 });
