@@ -77,6 +77,9 @@ export const snapshotDatabase = (sourcePath: string, destinationPath: string) =>
     try: async () => {
       const database = new NodeSqlite.DatabaseSync(sourcePath, { readOnly: true });
       try {
+        // Pin one WAL snapshot so commits from the server cannot restart backup progress.
+        database.exec("BEGIN");
+        database.prepare("SELECT name FROM sqlite_schema LIMIT 1").get();
         await NodeSqlite.backup(database, destinationPath);
       } finally {
         database.close();
