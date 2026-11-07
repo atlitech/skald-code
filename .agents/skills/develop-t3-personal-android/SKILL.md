@@ -1,6 +1,6 @@
 ---
 name: develop-t3-personal-android
-description: Build and maintain a fork-safe, standalone T3 Code Android app that coexists with the official and development variants, embeds JavaScript so Metro and Expo credentials are unnecessary, uses stable signing, avoids upstream Expo updates, installs through wired or wireless ADB, and connects to a reachable T3 environment. Use when adding the personal app variant, testing fork changes on Android, producing or reinstalling a personal release APK, diagnosing development-client versus standalone behavior, or preparing Galaxy foldable daily-use builds.
+description: Build and maintain a fork-safe, standalone T3 Code Android app that coexists with the official and development variants, embeds JavaScript so Metro is unnecessary, uses EAS managed credentials and remote build numbers, uses stable signing, avoids upstream Expo updates, installs through wired or wireless ADB, and connects to a reachable T3 environment. Use when adding the personal app variant, testing fork changes on Android, producing or reinstalling a personal release APK, diagnosing development-client versus standalone behavior, or preparing Galaxy foldable daily-use builds.
 ---
 
 # Develop T3 Personal Android
@@ -12,7 +12,7 @@ Maintain two deliberately different apps:
 | `T3 Code Dev` / `com.t3tools.t3code.dev` | Fast iteration and live reload | Required       |
 | `Skald Code` / `tech.atli.skaldcode`     | Stable daily-use fork          | Never required |
 
-Treat the personal app as a locally distributed release product. Keep its identity and signing key stable so reinstalling an update preserves app data and environment credentials.
+Treat the personal app as a release product distributed through the fork release workflow. Keep its identity and signing key stable so reinstalling an update preserves app data and environment credentials.
 
 ## Preserve the architecture boundary
 
@@ -23,7 +23,7 @@ Distinguish the two servers:
 
 Use T3 Connect, Tailscale, or another explicitly configured remote path for away-from-home access. Never bake a LAN origin into the app.
 
-## Enable T3 Connect without Expo updates
+## Keep T3 Connect and fork updates independent
 
 A fresh clone intentionally omits cloud configuration. Create the ignored repository-root `.env` from `.env.example` when the development or personal app must use the production T3 Connect deployment. The Clerk publishable key, JWT template name, CLI OAuth client ID, and relay URL in that example are public identifiers, not server secrets.
 
@@ -32,7 +32,7 @@ Verify the resolved mobile config contains the relay URL, Clerk publishable key,
 Keep these concepts separate:
 
 - Preserve the T3 Connect public configuration in the personal build so account sign-in and relay discovery work.
-- Disable `expo-updates` and omit maintainer EAS ownership in the personal build so upstream JavaScript cannot replace the fork.
+- Personal builds use `@atlitech/skald-code` for Expo updates. Preserve that fork-owned project and never use the maintainers' EAS project.
 - Never place Clerk secret keys, relay deployment secrets, or observability write tokens into a client `.env`.
 
 ## Inspect before changing anything
@@ -63,9 +63,9 @@ Do not use `com.t3tools.t3code`: it is the official Play Store identity and a lo
 
 Make the personal variant independent of maintainer infrastructure:
 
-- Set `updates.enabled` to `false` for `personal` so the embedded fork cannot be replaced by an update from `u.expo.dev`.
-- Omit the maintainer `owner` and `extra.eas.projectId` from the resolved personal config.
-- Do not require EAS or Expo login for local personal builds.
+- Keep personal updates on project `4dfd2e15-bc73-461a-a26f-ba1c7d559172`, owner `atlitech`, slug `skald-code`, channel `personal-production`.
+- Set `T3CODE_MOBILE_UPDATES_ENABLED=0` before prebuild and bundling only when an offline build is requested.
+- Production builds, including local workers, use EAS credentials and remote build numbers. Only the separate development identity can build without Expo.
 - Preserve the existing update configuration for development, preview, and production.
 
 Verify the resolved config from `apps/mobile` before generating native files:
@@ -75,7 +75,7 @@ cd apps/mobile
 APP_VARIANT=personal vp exec expo config --type public
 ```
 
-Confirm the app name, scheme, Android package, and disabled update behavior. Treat any `pingdotgg` owner, maintainer EAS project ID, or enabled upstream update URL in the personal config as a blocker.
+Confirm the app name, scheme, Android package, fork update URL and fingerprint runtime policy. Treat any `pingdotgg` owner, maintainer EAS project ID, or enabled upstream update URL in the personal config as a blocker.
 
 ## Keep signing durable and private
 
@@ -101,7 +101,7 @@ SHA-1: A2:D5:2B:3C:01:6E:3C:CF:4E:AB:88:24:31:E8:D8:FC:1F:00:DF:91
 SHA-256: 8B:E8:CE:45:32:95:85:4E:A7:D2:5A:CE:67:08:1D:D5:9A:92:4E:C1:AE:8A:E1:11:72:1E:8C:24:46:B3:7E:8E
 ```
 
-The fingerprints are public certificate identifiers and are safe to record. The passwords are not. Use [`scripts/build-personal-apk.sh`](scripts/build-personal-apk.sh) to read them from Keychain and build without placing them in shell history.
+The fingerprints are public certificate identifiers. Import the existing key into the fork's EAS project from its secure backup; never generate a replacement during migration. [`scripts/build-personal-apk.sh`](scripts/build-personal-apk.sh) uses the managed key through EAS and does not read or expose local passwords.
 
 ## Respect the hosted identity boundary
 
@@ -130,55 +130,27 @@ Do not interpret successful Gmail email verification as fixing native Google OAu
 
 ## Release APKs and the versionCode
 
-The fork's release workflow builds the signed personal APK: `fork-server-release.yml`'s `build-android` job signs it with this key and checks its package, versionCode, and certificate against the SHA-256 recorded above (`scripts/fork-android-identity.ts`) before uploading it. Prefer that artifact for daily use.
+The manual fork release workflow decides between EAS native builds and compatible OTA delivery. A native Android release verifies the APK identity and signing certificate before GitHub publication. An OTA-only release links the original compatible APK with its original filename and checksum. Installing that baseline initially runs its embedded JavaScript; network access and applying the update bring it to the new release.
 
-Android installs an update only when its versionCode is not lower than the installed one. `apps/mobile/app.config.ts` derives the personal versionCode from `T3CODE_RELEASE_VERSION` (`X.Y.Z-atli.N`) through `scripts/lib/android-version-code.ts`, so each release grows it. A personal build without a release version carries versionCode 1, the floor, and is not an update path over a CI-built APK: Android refuses the downgrade, and getting past it means uninstalling, which destroys app data. Build locally with `--release-version` set to the release the installed APK came from, or a later one, when the result must install over it.
+EAS owns the remote Android versionCode counter. It must be initialized above the highest distributed versionCode before the first migration build. Every native build reserves a new number, including local builds and pilots. The fork release version is independent; do not derive or manually override a production versionCode from it. Never uninstall to bypass a downgrade or signature error.
 
 ## Build a standalone APK locally
 
-On this Mac, prefer the skill helper from the repository root. It verifies the key exists, retrieves its passwords from Keychain, regenerates the personal Android project, and builds an ARM64 release APK:
+The cloud-worker fallback uses the same remote credentials and counters as CI:
 
 ```bash
 .agents/skills/develop-t3-personal-android/scripts/build-personal-apk.sh
 ```
 
-Pass `--release-version <X.Y.Z-atli.N>`, or set `T3CODE_RELEASE_VERSION`, to give the build that release's versionCode. Prebuild writes the versionCode, so the script refuses a release version together with `--no-prebuild`.
+It runs the pinned EAS CLI with `--platform android --profile personal --local`, producing an ARM64 release APK. EAS connectivity and permission to use the fork's managed credentials are required. It is not an offline disaster-recovery builder. `--release-version`, `--no-prebuild`, and `--universal` are retired; use the separate development identity for native iteration.
 
-Pass `--no-prebuild` only when the generated Android project is already personal and no native/config input changed. Pass `--universal` when the APK must support architectures beyond the Galaxy Fold's ARM64 processor.
+Before a local worker runs, use a clean complete checkout, install the repository-pinned toolchain and dependencies, and load the same public configuration from EAS's `production` environment. Root `.env` files are excluded from the source upload. EAS reads plain-text and sensitive values from the profile-selected environment when evaluating config. Required public configuration must use one of these readable visibilities, not secret visibility. The profile carries the variant/channel and explicitly selects the remote environment.
 
-The equivalent manual workflow follows for diagnosing individual phases.
-
-Install dependencies from the repository root, then inspect the app config from `apps/mobile`:
-
-```bash
-vp install --frozen-lockfile
-cd apps/mobile
-APP_VARIANT=personal vp exec expo config --type public
-```
-
-Use the existing generated Android project only when its `applicationId` is `tech.atli.skaldcode` and no native/config inputs changed. Otherwise regenerate it:
-
-```bash
-cd apps/mobile
-APP_VARIANT=personal T3CODE_RELEASE_VERSION=<X.Y.Z-atli.N> EXPO_NO_GIT_STATUS=1 \
-  vp exec expo prebuild --clean --platform android --no-install
-```
-
-Omit `T3CODE_RELEASE_VERSION` only for a build that will not install over a release APK.
-
-Build a release APK with the personal variant present during JavaScript export. Limit native compilation to the Fold's ARM64 architecture for a phone-only artifact; omit the property when a universal APK is required.
-
-```bash
-cd android
-APP_VARIANT=personal ./gradlew :app:assembleRelease \
-  -PreactNativeArchitectures=arm64-v8a
-```
-
-Do not call a debug Gradle task for the daily-use artifact. A debug APK launches the Expo development client and depends on Metro; a release APK embeds the production JavaScript bundle.
+Use `personal-pilot` and the `preview` EAS environment only for the isolated migration pilot. Its embedded update channel is `personal-pilot`; a production baseline must use `personal-production`. See the [release runbook](../../../docs/operations/fork-server.md#personal-mobile-ota-updates) for readiness, exact-ID retries, and rollback.
 
 ## Verify before installing
 
-Locate the actual output under `apps/mobile/android/app/build/outputs/apk/release/`; do not assume a successful command produced the expected identity. Use the project-compatible Android SDK tools to verify:
+Locate the APK path returned by EAS; do not assume a successful command produced the expected identity. Use the project-compatible Android SDK tools to verify:
 
 ```bash
 "$ANDROID_HOME/cmdline-tools/latest/bin/apkanalyzer" \
@@ -225,7 +197,7 @@ Use this loop:
 5. Install with `adb install -r` so the stable package and signing key preserve data.
 6. Confirm the standalone app launches without Metro and reconnects to the intended T3 environment.
 
-Because personal Expo updates are disabled, JavaScript-only changes also require rebuilding and reinstalling the personal APK. Configure a separate owner-controlled Expo project later only if the user explicitly wants OTA updates.
+Compatible JavaScript and asset changes ship only through an approved manual fork release or a retry of that published release; native changes still need a new APK. See [Personal mobile OTA updates](../../../docs/operations/fork-server.md#personal-mobile-ota-updates) for publishing and rollback. A locally built APK receives CI updates only when its native fingerprint matches the CI runtime.
 
 ## Guardrails
 

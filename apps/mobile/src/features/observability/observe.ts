@@ -2,12 +2,13 @@ import Constants from "expo-constants";
 
 // Android initializes Observe on import and throws when the manifest has no EAS project ID.
 const projectId: unknown = Constants.expoConfig?.extra?.eas?.projectId;
+const appVariant: unknown = Constants.expoConfig?.extra?.appVariant;
+// Personal Android builds exclude the native Observe module, including when OTA is configured.
 const Observe =
-  typeof projectId === "string" && projectId.trim() !== ""
+  appVariant !== "personal" && typeof projectId === "string" && projectId.trim() !== ""
     ? (require("expo-observe") as typeof import("expo-observe")).Observe
     : undefined;
 const relayUrl: unknown = Constants.expoConfig?.extra?.relay?.url;
-const appVariant: unknown = Constants.expoConfig?.extra?.appVariant;
 
 export const crashReportingAvailable =
   Observe !== undefined && typeof relayUrl === "string" && relayUrl.trim() !== "";

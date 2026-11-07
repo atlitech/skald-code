@@ -1,0 +1,145 @@
+name: Fork mobile delivery
+
+on:
+  workflow_call:
+    inputs:
+      tag:
+        type: string
+        required: true
+
+# The dispatching workflow holds skald-production-publication for this entire call.
+permissions:
+  contents: read
+  deployments: write
+
+jobs:
+  resolve:
+    if: github.repository_id == '1406026313' && github.ref == 'refs/heads/atli' && github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    outputs:
+      sha: ${{ steps.resolve.outputs.sha }}
+    env:
+      GH_TOKEN: ${{ github.token }}
+      TAG: ${{ inputs.tag }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.sha }}
+      - uses: voidzero-dev/setup-vp@250f29ce396baf5e8f24498e17c0dfdebabc26eb # v1
+        with:
+          node-version-file: package.json
+          cache: false
+          run-install: |
+            args:
+              - --filter=@t3tools/scripts...
+      - name: Resolve the published manifest and tag
+        id: resolve
+        run: node scripts/fork-mobile-release.ts resolve --tag "$TAG"
+
+  deliver:
+    needs: resolve
+    if: github.repository_id == '1406026313' && github.ref == 'refs/heads/atli' && github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-24.04
+    environment: ${{ matrix.platform == 'android' && 'personal-android-signing' || 'personal-ios-signing' }}
+    timeout-minutes: 150
+    strategy:
+      fail-fast: false
+      max-parallel: 1
+      matrix:
+        platform: [android, ios]
+    env:
+      APP_VARIANT: personal
+      T3CODE_MOBILE_CHANNEL: personal-production
+      SKALD_EAS_READY: ${{ vars.SKALD_EAS_READY }}
+      GH_TOKEN: ${{ github.token }}
+      TAG: ${{ inputs.tag }}
+    steps:
+      - name: Checkout complete source
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.resolve.outputs.sha }}
+          fetch-depth: 0
+
+      - name: Setup Vite+
+        uses: voidzero-dev/setup-vp@250f29ce396baf5e8f24498e17c0dfdebabc26eb # v1
+        with:
+          node-version-file: package.json
+          cache: false
+          run-install: false
+
+      - name: Install dependencies
+        run: vp install --frozen-lockfile --filter=@t3tools/mobile... --filter=@t3tools/scripts...
+
+      - name: Expose pnpm
+        run: |
+          pnpm_version="$(node --print "require('./package.json').packageManager.split('@').pop()")"
+          echo "$HOME/.vite-plus/package_manager/pnpm/$pnpm_version/pnpm/bin" >> "$GITHUB_PATH"
+
+      - name: Setup EAS
+        uses: expo/expo-github-action@v8
+        with:
+          eas-version: 27.5.0
+          token: ${{ secrets.EXPO_OTA_TOKEN }}
+          packager: npm
+
+      - name: Reconcile exact mobile delivery
+        env:
+          PLATFORM: ${{ matrix.platform }}
+          SKALD_ASC_APP_ID: ${{ vars.SKALD_ASC_APP_ID }}
+          ASC_KEY_ID: ${{ vars.T3CODE_IOS_APP_STORE_CONNECT_KEY_ID }}
+          ASC_ISSUER_ID: ${{ vars.T3CODE_IOS_APP_STORE_CONNECT_ISSUER_ID }}
+          ASC_KEY_BASE64: ${{ secrets.T3CODE_IOS_APP_STORE_CONNECT_KEY_BASE64 }}
+        run: node scripts/fork-mobile-release.ts deliver --tag "$TAG" --platform "$PLATFORM"
+
+  testflight:
+    name: Verify IPA before exact-build submission
+    needs: [resolve, deliver]
+    if: github.repository_id == '1406026313' && github.ref == 'refs/heads/atli' && github.event_name == 'workflow_dispatch'
+    runs-on: macos-15
+    environment: personal-ios-signing
+    timeout-minutes: 60
+    env:
+      APP_VARIANT: personal
+      T3CODE_MOBILE_CHANNEL: personal-production
+      SKALD_EAS_READY: ${{ vars.SKALD_EAS_READY }}
+      GH_TOKEN: ${{ github.token }}
+      TAG: ${{ inputs.tag }}
+    steps:
+      - name: Checkout complete source
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.resolve.outputs.sha }}
+          fetch-depth: 0
+
+      - name: Setup Vite+
+        uses: voidzero-dev/setup-vp@250f29ce396baf5e8f24498e17c0dfdebabc26eb # v1
+        with:
+          node-version-file: package.json
+          cache: false
+          run-install: false
+
+      - name: Install dependencies
+        run: vp install --frozen-lockfile --filter=@t3tools/mobile... --filter=@t3tools/scripts...
+
+      - name: Expose pnpm
+        run: |
+          pnpm_version="$(node --print "require('./package.json').packageManager.split('@').pop()")"
+          echo "$HOME/.vite-plus/package_manager/pnpm/$pnpm_version/pnpm/bin" >> "$GITHUB_PATH"
+
+      - name: Setup EAS
+        uses: expo/expo-github-action@v8
+        with:
+          eas-version: 27.5.0
+          token: ${{ secrets.EXPO_OTA_TOKEN }}
+          packager: npm
+
+      - name: Verify IPA and reconcile TestFlight availability
+        env:
+          SKALD_ASC_APP_ID: ${{ vars.SKALD_ASC_APP_ID }}
+          ASC_KEY_ID: ${{ vars.T3CODE_IOS_APP_STORE_CONNECT_KEY_ID }}
+          ASC_ISSUER_ID: ${{ vars.T3CODE_IOS_APP_STORE_CONNECT_ISSUER_ID }}
+          ASC_KEY_BASE64: ${{ secrets.T3CODE_IOS_APP_STORE_CONNECT_KEY_BASE64 }}
+        run: node scripts/fork-mobile-release.ts ios-verify --tag "$TAG"

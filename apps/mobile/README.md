@@ -139,7 +139,7 @@ needs a running T3 server: pair it using the server's connection URL or QR code 
 Tailscale. `localhost` on the phone refers to the phone, not your Mac. T3 Connect is optional and
 requires separate configuration; it is not required for direct connections.
 
-Personal builds omit push notifications, widgets/Live Activities, the incoming share extension,
+Free Personal Team builds omit push notifications, widgets/Live Activities, the incoming share extension,
 and native Sign in with Apple. They use a separate app identity and do not receive official OTA
 updates. Install source updates by pulling the repository, running `vp i`, and rerunning the command.
 
@@ -156,9 +156,28 @@ choose another identifier for the first installation. See [Apple's Personal Team
 
 ## EAS Builds
 
-Preview and production variants use Expo fingerprinting so OTA updates only reach binaries with matching native dependencies, config plugins, and patches. CI uses the `preview:dev` profile to reuse a compatible native build when possible.
+Personal, preview and production variants use Expo fingerprinting so OTA updates only reach binaries with matching native dependencies, config plugins, and patches. CI uses the `preview:dev` profile to reuse a compatible native build when possible.
 
-The development variant uses `appVersion` to avoid recalculating the native fingerprint for each Metro launch manifest. `MOBILE_VERSION_POLICY` can override either default. If you distribute a custom Release build with the development identity and publish OTA updates to it, set `MOBILE_VERSION_POLICY=fingerprint` for both its build and updates. Changing the runtime policy requires a native rebuild for OTA matching; an existing dev client can still load local Metro bundles.
+The personal Skald Code variant uses the `personal` EAS profile, managed credentials, remote
+native build counters, and the `production` EAS environment. It receives updates from
+`@atlitech/skald-code` on `personal-production`, only after a manual fork release is published.
+An OTA-only Android release links the original compatible APK. Native build numbers are
+independent of the fork release version. Free Personal Team builds remain offline from Expo Updates.
+
+`personal-pilot` uses the isolated `personal-pilot` channel and `preview` EAS environment. Both
+profiles pin the repository's Node/pnpm toolchain. Cloud workers receive EAS environment values;
+GitHub process variables and root `.env` files are not forwarded. Configure the public Clerk,
+relay, and optional Google OAuth values in EAS before building or publishing updates. These
+values must be readable by fingerprinting and OTA jobs as well as remote builders.
+
+For a local production worker, use `APP_VARIANT=personal pnpm dlx eas-cli@27.5.0 build
+--profile personal --platform android --local` (or `ios`) from this directory. This still
+requires EAS connectivity and uses the same signing credentials and counters. The direct
+`ios:personal` installer supports a separate free Personal Team identity only; production
+IPAs follow the verified TestFlight submission path.
+See [publishing personal mobile updates](../../docs/operations/fork-server.md#personal-mobile-ota-updates).
+
+The development variant uses `appVersion` to avoid recalculating the native fingerprint for each Metro launch manifest. `MOBILE_VERSION_POLICY` can override the upstream variants; personal distribution always uses fingerprinting. If you distribute a custom Release build with the development identity and publish OTA updates to it, set `MOBILE_VERSION_POLICY=fingerprint` for both its build and updates. Changing the runtime policy requires a native rebuild for OTA matching; an existing dev client can still load local Metro bundles.
 
 For preview or production EAS environments, set `T3CODE_CLERK_PUBLISHABLE_KEY`,
 `T3CODE_CLERK_JWT_TEMPLATE`, and `T3CODE_RELAY_URL`

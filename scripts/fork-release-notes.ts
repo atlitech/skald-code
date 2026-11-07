@@ -16,6 +16,7 @@ import {
   type ReleaseManifest,
   type VerificationScopeEntry,
 } from "./fork-release-manifest.ts";
+import { validateMobileIntent } from "./lib/fork-mobile-release-model.ts";
 
 export class ReleaseNotesError extends Schema.TaggedError<ReleaseNotesError>()(
   "ReleaseNotesError",
@@ -47,6 +48,10 @@ export const buildReleaseNotes = Effect.fn("buildReleaseNotes")(function* (
 ) {
   const refuse = (detail: string) => Effect.fail(new ReleaseNotesError({ detail }));
   const { decision, entries } = manifest.verificationScope;
+  if (manifest.mobile) {
+    const mismatch = validateMobileIntent(manifest.mobile, manifest);
+    if (mismatch) return yield* refuse(mismatch);
+  }
   for (const entry of entries) {
     if (!PLATFORMS.some((p) => p.platform === entry.platform && p.arch === entry.arch)) {
       return yield* refuse(`${entry.platform} ${entry.arch} is not a fork release platform.`);
@@ -54,6 +59,14 @@ export const buildReleaseNotes = Effect.fn("buildReleaseNotes")(function* (
   }
   const lines: Array<string> = [];
   for (const platform of PLATFORMS) {
+    if (platform.platform === "android" && manifest.mobile?.android.mode === "ota") {
+      const baseline = manifest.mobile.android.baseline!;
+      const artifact = baseline.artifact!;
+      lines.push(
+        `- ${platform.label}: [${artifact.file}](${artifact.url}) from ${baseline.releaseTag}, built from ${baseline.sourceSha} (sha256 \`${artifact.sha256}\`). This release reuses the original compatible APK; it did not build or run it. A fresh install starts with its older embedded JavaScript and needs network access to receive the OTA.`,
+      );
+      continue;
+    }
     const matching = entries.filter(
       (entry) => entry.platform === platform.platform && entry.arch === platform.arch,
     );
@@ -90,8 +103,16 @@ export const buildReleaseNotes = Effect.fn("buildReleaseNotes")(function* (
     "",
     ...lines,
     "",
-    `Mac and Android are build-checked but runtime-unverified by the ${decision.by} decision of ${decision.date}: ${decision.text} See ${decision.runbook}.`,
+    manifest.mobile?.android.mode === "ota"
+      ? `Mac is build-checked but runtime-unverified. The Android baseline retains its original release's verification scope. See ${decision.runbook}.`
+      : `Mac and Android are build-checked but runtime-unverified by the ${decision.by} decision of ${decision.date}: ${decision.text} See ${decision.runbook}.`,
     "",
+    ...(manifest.mobile
+      ? [
+          `Mobile delivery intent: Android ${manifest.mobile.android.mode}, iOS ${manifest.mobile.ios.mode}, channel \`${manifest.mobile.channel}\`. Delivery runs after this release is published; this manifest does not claim delivery succeeded. See GitHub deployments and EAS history for update IDs and current delivery status.`,
+          "",
+        ]
+      : []),
     "Install them with docs/operations/fork-server.md.",
     "",
   ].join("\n");

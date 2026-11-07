@@ -125,3 +125,41 @@ it.effect("fails when Linux is not runtime-verified by an admission", () =>
     assert.strictEqual(error._tag, "ReleaseNotesError");
   }),
 );
+
+it.effect("links the original APK and states mobile delivery is intent, not completion", () =>
+  Effect.gen(function* () {
+    const file = "T3-Code-0.0.46-atli.3-android-arm64-v8a.apk";
+    const url = `https://github.com/atlitech/skald-code/releases/download/v0.0.46-atli.3/${file}`;
+    const release = yield* buildReleaseManifest({
+      commit,
+      version,
+      files: [linux, dmg],
+      admission,
+      mobile: {
+        channel: "personal-production",
+        android: {
+          mode: "ota",
+          appVersion: "1.0.0",
+          runtimeVersion: "runtime-a",
+          baseline: {
+            buildId: "build-1",
+            profile: "personal",
+            sourceSha: "a".repeat(40),
+            appBuildVersion: "4600001",
+            appVersion: "1.0.0",
+            runtimeVersion: "runtime-a",
+            releaseTag: "v0.0.46-atli.3",
+            artifact: { ...apk, file, url },
+          },
+        },
+        ios: { mode: "native", appVersion: "1.0.0", runtimeVersion: "runtime-b" },
+      },
+    });
+    const notes = yield* buildReleaseNotes(release.manifest);
+    assert.include(notes, `[${file}](${url})`);
+    assert.include(notes, "needs network access to receive the OTA");
+    assert.include(notes, "does not claim delivery succeeded");
+    assert.notInclude(lineFor(notes, "Android arm64-v8a APK"), "build-checked");
+    assert.notInclude(notes, apk.file);
+  }),
+);

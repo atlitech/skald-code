@@ -22,6 +22,7 @@ import {
   type VerificationScopeEntry,
 } from "./fork-release-manifest.ts";
 import { ADMISSION_FILE } from "./linux-admission/prior-release.ts";
+import { validateMobileIntent } from "./lib/fork-mobile-release-model.ts";
 
 export class ReleaseScopeError extends Schema.TaggedError<ReleaseScopeError>()(
   "ReleaseScopeError",
@@ -67,6 +68,10 @@ export const readReleaseScope = Effect.fn("readReleaseScope")(function* (input: 
     Effect.mapError((error) => new ReleaseScopeError({ detail: error.detail })),
   );
   const { decision, entries } = manifest.verificationScope;
+  if (manifest.mobile) {
+    const mismatch = validateMobileIntent(manifest.mobile, manifest);
+    if (mismatch) return yield* refuse(mismatch);
+  }
 
   // The file name, not the manifest's labels, says what platform an asset is.
   for (const asset of manifest.assets) {
@@ -88,6 +93,7 @@ export const readReleaseScope = Effect.fn("readReleaseScope")(function* (input: 
     }
   }
   for (const scope of FORK_VERIFICATION_SCOPE) {
+    if (scope.platform === "android" && manifest.mobile?.android.mode === "ota") continue;
     const count = manifest.assets.filter(
       (asset) => asset.platform === scope.platform && asset.arch === scope.arch,
     ).length;
@@ -173,6 +179,12 @@ export const readReleaseScope = Effect.fn("readReleaseScope")(function* (input: 
     }
     lines.push(
       `${label}: runtime-verified by ${ADMISSION_FILE} (version ${admission.version}, sha256 ${admission.archiveSha256}); checks: ${describeChecks(entry)}`,
+    );
+  }
+  if (manifest.mobile?.android.mode === "ota") {
+    const baseline = manifest.mobile.android.baseline!;
+    lines.push(
+      `android arm64-v8a: references ${baseline.artifact!.url} (sha256 ${baseline.artifact!.sha256}); built from ${baseline.sourceSha}, not built or runtime-verified by this release.`,
     );
   }
   return lines;

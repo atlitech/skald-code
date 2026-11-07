@@ -11,8 +11,6 @@ import * as FileSystem from "effect/FileSystem";
 import * as Schema from "effect/Schema";
 import { Command, Flag } from "effect/cli";
 
-import { androidVersionCode } from "./lib/android-version-code.ts";
-
 export const PERSONAL_IOS_BUNDLE_ID = "tech.atli.skaldcode";
 export const PERSONAL_APPLE_TEAM_ID = "H6L3F33KRM";
 const APP_GROUP = `group.${PERSONAL_IOS_BUNDLE_ID}`;
@@ -45,31 +43,55 @@ const checkBundle = (name: string, bundleId: string, entitlements: Plist) => {
   return problems;
 };
 
-const expectedBuildNumber = (version: string) => {
-  try {
-    return { buildNumber: String(androidVersionCode(version)), problem: undefined };
-  } catch (error) {
-    return { buildNumber: undefined, problem: (error as Error).message };
-  }
-};
-
 export const checkIosIdentity = Effect.fn("checkIosIdentity")(function* (input: {
   readonly infoPlist: Plist;
   readonly app: Plist;
   readonly widgets: Plist;
   readonly sharing: Plist;
   readonly version: string;
+  readonly appBuildVersion: string;
+  readonly appVersion: string;
+  readonly runtimeVersion: string;
+  readonly embeddedFingerprint: string;
+  readonly channel: string;
+  readonly expoPlist: Plist;
 }) {
   const problems: Array<string> = [];
   const bundleId = input.infoPlist.CFBundleIdentifier;
   if (bundleId !== PERSONAL_IOS_BUNDLE_ID) {
     problems.push(`the bundle ID is '${String(bundleId)}', not '${PERSONAL_IOS_BUNDLE_ID}'.`);
   }
-  const { buildNumber, problem } = expectedBuildNumber(input.version);
-  if (problem) problems.push(problem);
-  if (buildNumber !== undefined && input.infoPlist.CFBundleVersion !== buildNumber) {
+  const buildNumber = input.appBuildVersion;
+  if (!/^[1-9]\d*(?:\.\d+){0,2}$/.test(buildNumber))
+    problems.push("the selected EAS iOS build number is invalid.");
+  if (input.infoPlist.CFBundleShortVersionString !== input.appVersion) {
+    problems.push("the app version differs from the selected EAS build.");
+  }
+  const expo = input.expoPlist;
+  if (expo.EXUpdatesEnabled !== true) problems.push("embedded Expo updates are not enabled.");
+  if (expo.EXUpdatesURL !== "https://u.expo.dev/4dfd2e15-bc73-461a-a26f-ba1c7d559172") {
+    problems.push("the embedded update URL is not the fork project.");
+  }
+  const runtime =
+    expo.EXUpdatesRuntimeVersion === "file:fingerprint"
+      ? input.embeddedFingerprint
+      : expo.EXUpdatesRuntimeVersion;
+  if (!input.runtimeVersion || runtime !== input.runtimeVersion) {
+    problems.push("the embedded runtime differs from the selected EAS runtime.");
+  }
+  const headers = expo.EXUpdatesRequestHeaders;
+  if (
+    !input.channel ||
+    headers === null ||
+    typeof headers !== "object" ||
+    !("expo-channel-name" in headers) ||
+    headers["expo-channel-name"] !== input.channel
+  ) {
+    problems.push("the embedded update channel differs from the selected EAS channel.");
+  }
+  if (input.infoPlist.CFBundleVersion !== buildNumber) {
     problems.push(
-      `the build number is '${String(input.infoPlist.CFBundleVersion)}', not '${buildNumber}' for ${input.version}.`,
+      `the build number is '${String(input.infoPlist.CFBundleVersion)}', not the selected EAS build's '${buildNumber}'.`,
     );
   }
   problems.push(...checkBundle("the app", PERSONAL_IOS_BUNDLE_ID, input.app));
@@ -84,7 +106,7 @@ export const checkIosIdentity = Effect.fn("checkIosIdentity")(function* (input: 
       `the app's push environment is '${String(input.app["aps-environment"])}', not 'production'.`,
     );
   }
-  if (problems.length > 0 || buildNumber === undefined) {
+  if (problems.length > 0) {
     return yield* new IosIdentityError({ problems });
   }
   return { bundleId: PERSONAL_IOS_BUNDLE_ID, buildNumber, version: input.version } as const;
@@ -120,6 +142,14 @@ const command = Command.make(
       "sharing-entitlements",
       "The share extension's signed entitlements, as JSON.",
     ),
+    appBuildVersion: Flag.String("app-build-version"),
+    appVersion: Flag.String("app-version"),
+    runtimeVersion: Flag.String("runtime-version"),
+    embeddedFingerprint: Flag.String("embedded-fingerprint").pipe(
+      Flag.withDescription("The app's EXUpdates.bundle/fingerprint file."),
+    ),
+    channel: Flag.String("channel"),
+    expoPlist: plistFlag("expo-plist", "The app's Expo.plist, as JSON."),
     // `--version` is the runner's own flag.
     version: Flag.String("release-version").pipe(
       Flag.withDescription("Fork version, for example 0.0.46-atli.1."),
@@ -127,12 +157,19 @@ const command = Command.make(
   },
   (options) =>
     Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
       const identity = yield* checkIosIdentity({
         infoPlist: yield* readPlistJson(options.infoPlist),
         app: yield* readPlistJson(options.app),
         widgets: yield* readPlistJson(options.widgets),
         sharing: yield* readPlistJson(options.sharing),
         version: options.version,
+        appBuildVersion: options.appBuildVersion,
+        appVersion: options.appVersion,
+        runtimeVersion: options.runtimeVersion,
+        embeddedFingerprint: yield* fs.readFileString(options.embeddedFingerprint),
+        channel: options.channel,
+        expoPlist: yield* readPlistJson(options.expoPlist),
       });
       yield* Effect.log(
         `${identity.bundleId} ${identity.version} (build ${identity.buildNumber}), App Store-signed by ${PERSONAL_APPLE_TEAM_ID} with its App Group: the release's iOS app.`,

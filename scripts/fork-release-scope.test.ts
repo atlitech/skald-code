@@ -282,3 +282,59 @@ it.effect("fails when one check's step embeds quotes to read like the two commit
     assert.include(error.detail, "not the committed");
   }),
 );
+
+it.effect("checks an OTA reference without inventing an Android verification entry", () =>
+  Effect.gen(function* () {
+    const baseline = {
+      buildId: "build-1",
+      sourceSha: "a".repeat(40),
+      profile: "personal" as const,
+      appBuildVersion: "4600001",
+      appVersion: "1.0.0",
+      runtimeVersion: "runtime-a",
+      releaseTag: "v0.0.46-atli.3",
+      artifact: {
+        ...apk,
+        file: "T3-Code-0.0.46-atli.3-android-arm64-v8a.apk",
+        url: "https://github.com/atlitech/skald-code/releases/download/v0.0.46-atli.3/T3-Code-0.0.46-atli.3-android-arm64-v8a.apk",
+      },
+    };
+    const release = yield* buildReleaseManifest({
+      commit,
+      version,
+      files: [linux, dmg],
+      admission,
+      mobile: {
+        channel: "personal-production",
+        android: { mode: "ota", runtimeVersion: "runtime-a", appVersion: "1.0.0", baseline },
+        ios: { mode: "native", runtimeVersion: "runtime-b", appVersion: "1.0.0" },
+      },
+    });
+    const lines = yield* read(release.manifest);
+    assert.include(lines.at(-1)!, baseline.artifact.url);
+    assert.include(lines.at(-1)!, "not built or runtime-verified by this release");
+    for (const edited of [
+      {
+        ...release.manifest,
+        mobile: {
+          ...release.manifest.mobile!,
+          android: { ...release.manifest.mobile!.android, baseline: undefined },
+        },
+      },
+      {
+        ...release.manifest,
+        assets: [...release.manifest.assets, { ...apk, platform: "android", arch: "arm64-v8a" }],
+      },
+      {
+        ...release.manifest,
+        mobile: {
+          ...release.manifest.mobile!,
+          android: { ...release.manifest.mobile!.android, runtimeVersion: "wrong-runtime" },
+        },
+      },
+    ]) {
+      const failure = yield* Effect.flip(read(edited));
+      assert.equal(failure._tag, "ReleaseScopeError");
+    }
+  }),
+);

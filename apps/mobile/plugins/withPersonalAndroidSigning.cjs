@@ -30,6 +30,9 @@ function insertBefore(contents, anchor, insertion, description) {
 
 module.exports = function withPersonalAndroidSigning(config, { unsigned = false } = {}) {
   return withAppBuildGradle(config, (nextConfig) => {
+    // EAS injects its managed keystore after prebuild, including for `eas build --local`.
+    if (process.env.EAS_BUILD === "true") return nextConfig;
+
     if (nextConfig.modResults.language !== "groovy") {
       throw new Error("withPersonalAndroidSigning: app/build.gradle must use Groovy.");
     }

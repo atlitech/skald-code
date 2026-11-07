@@ -5,8 +5,9 @@ Fork-only runbook. `atli` is upstream `main` plus our commits.
 publishes the same self-contained Linux x64 server archive an official release
 ships, so a VM that already runs the official background service can switch to
 our build and keep its T3 Connect link. Each release also carries the signed
-and notarized Mac arm64 desktop app and the personal Android arm64-v8a APK,
-built from the same commit.
+and notarized Mac arm64 desktop app. Mobile delivery uses EAS: native Android
+releases attach an APK from the same commit; compatible OTA releases link the
+original APK. iOS delivery follows GitHub publication.
 
 ## Versions
 
@@ -39,44 +40,29 @@ and restart `<n>` at 1.
   | `T3CODE_CLERK_CLI_OAUTH_CLIENT_ID` | `hzxSgY2cH10sDU2r`             |
   | `T3CODE_RELAY_URL`                 | `https://relay.t3.codes`       |
 
-- **Settings → Environments**: create `personal-android-signing` and, under
-  **Deployment branches and tags**, allow only the `atli` branch. Only the
-  Android build job uses it, and it runs only from `atli`. Add:
+- **Settings → Environments**: retain `personal-android-signing` and
+  `personal-ios-signing`, restricted to the `atli` branch with the existing owner
+  approval controls. EAS credentials can sign production apps, so place
+  `EXPO_OTA_TOKEN` in **both protected environments**, then remove the repository
+  copy before making managed signing available. Ordinary PR checks must not receive
+  it. The existing `atlitech` robot token must have access to builds, updates, and
+  submission credentials; confirm any Expo protected-resource restrictions too.
 
-  | Kind             | Name                                        | Value                                                   |
-  | ---------------- | ------------------------------------------- | ------------------------------------------------------- |
-  | Secret           | `T3CODE_PERSONAL_ANDROID_KEYSTORE_BASE64`   | the personal keystore, `base64 < keystore.jks`          |
-  | Secret           | `T3CODE_PERSONAL_ANDROID_KEYSTORE_PASSWORD` | the keystore password                                   |
-  | Secret           | `T3CODE_PERSONAL_ANDROID_KEY_PASSWORD`      | the key password                                        |
-  | Variable         | `T3CODE_PERSONAL_ANDROID_KEY_ALIAS`         | the key alias                                           |
-  | Secret, optional | `GOOGLE_SERVICES_JSON_BASE64`               | `base64 < google-services.json`, for push notifications |
+- In `personal-ios-signing`, configure:
 
-  Use the key the installed personal app is signed with, or `adb install -r`
-  refuses the CI APK. Without `GOOGLE_SERVICES_JSON_BASE64` the APK builds
-  without push notifications.
+  | Kind     | Name                                      | Value                                         |
+  | -------- | ----------------------------------------- | --------------------------------------------- |
+  | Variable | `SKALD_ASC_APP_ID`                        | Skald Code's numeric App Store Connect app ID |
+  | Variable | `T3CODE_IOS_APP_STORE_CONNECT_KEY_ID`     | App Store Connect team API key ID             |
+  | Variable | `T3CODE_IOS_APP_STORE_CONNECT_ISSUER_ID`  | That key's issuer ID                          |
+  | Secret   | `T3CODE_IOS_APP_STORE_CONNECT_KEY_BASE64` | Base64-encoded API private key                |
 
-- **Settings → Environments**: create `personal-ios-signing`, allowed only on
-  `atli` like the Android one. Only the TestFlight job uses it. Every value is
-  for the Atli LLC team (`H6L3F33KRM`):
-
-  | Kind     | Name                                           | Value                                                       |
-  | -------- | ---------------------------------------------- | ----------------------------------------------------------- |
-  | Secret   | `T3CODE_IOS_DISTRIBUTION_CERTIFICATE_BASE64`   | the Apple Distribution certificate, `base64 -i cert.p12`    |
-  | Secret   | `T3CODE_IOS_DISTRIBUTION_CERTIFICATE_PASSWORD` | the password the `.p12` was exported with                   |
-  | Secret   | `T3CODE_IOS_APP_PROFILE_BASE64`                | App Store profile for `tech.atli.skaldcode`, base64         |
-  | Secret   | `T3CODE_IOS_WIDGETS_PROFILE_BASE64`            | App Store profile for `tech.atli.skaldcode.widgets`, base64 |
-  | Secret   | `T3CODE_IOS_SHARING_PROFILE_BASE64`            | App Store profile for `tech.atli.skaldcode.sharing`, base64 |
-  | Secret   | `T3CODE_IOS_APP_STORE_CONNECT_KEY_BASE64`      | the App Store Connect API key, `base64 -i AuthKey_<id>.p8`  |
-  | Variable | `T3CODE_IOS_APP_STORE_CONNECT_KEY_ID`          | that key's ID                                               |
-  | Variable | `T3CODE_IOS_APP_STORE_CONNECT_ISSUER_ID`       | the issuer ID shown above the key list                      |
-
-  Create the certificate in Xcode (**Settings → Accounts → Manage
-  Certificates → + → Apple Distribution**) and export it from the same list
-  with a password; Xcode's cloud-managed certificate cannot be exported. Make
-  each profile under **Profiles → + → App Store Connect** with that
-  certificate, and remake all three when the certificate is renewed or an
-  App ID gains a capability. The API key is a team key with the App Manager
-  role, from App Store Connect's **Users and Access → Integrations**.
+  The controller verifies that the ASC app belongs to `tech.atli.skaldcode` and
+  rejects upstream's app ID `6787819824`. Use an API key with the App Manager role.
+  Configure EAS managed submission credentials for that same app and team; the
+  fork's `personal` submit profile never inherits upstream's submission identity.
+  Existing distribution certificates and profiles move to EAS as described below;
+  GitHub's mobile jobs no longer import them into runner keychains.
 
 - **Settings → Environments**: create `personal-macos-signing`, allowed only on
   `atli`. Only the Mac build job uses it, and a release does not publish
@@ -98,17 +84,11 @@ and restart `<n>` at 1.
   macOS refuses them unless the App ID has Associated Domains. Passkeys
   themselves do not work there, since that domain trusts only T3 Tools' apps.
 
-- Optional, under **Variables**: `T3CODE_CLERK_GOOGLE_ANDROID_CLIENT_ID`, the
-  Google Android OAuth client ID. Only when it is set does the APK offer native
-  Google sign-in.
-
 - Enable the [Blacksmith GitHub integration](https://docs.blacksmith.sh/introduction/quickstart)
-  for `atlitech/skald-code` before dispatching a release. The Android job and the
-  full test suite request `blacksmith-8vcpu-ubuntu-2404`, as upstream's tests do;
-  upstream's browser tests time out on a standard GitHub runner. Blacksmith
-  provisions the runner, so no custom GitHub-hosted runner is needed. Without repository access, the job stays queued.
-  Gradle caches are saved from `atli`; the first build populates them for
-  subsequent releases.
+  for `atlitech/skald-code` before dispatching a release. The full test suite
+  uses Blacksmith, as upstream's tests do; upstream's browser tests time out on a
+  standard GitHub runner. Without repository access, those jobs stay queued.
+  EAS supplies mobile compilation workers; GitHub still builds Linux and macOS.
 
 - Disable every upstream workflow; the fork runs only its own `fork-*.yml`
   (see [Continuous integration](#continuous-integration)). This lists the
@@ -123,6 +103,63 @@ and restart `<n>` at 1.
   A workflow stays disabled when an update changes its file, but a workflow
   upstream adds arrives active, so run this after every update.
 
+## EAS migration readiness
+
+The migration code is not evidence of a successful rollout. Leave the repository
+variable `SKALD_EAS_READY` unset until all of these prerequisites have been verified:
+
+1. Use [@atlitech/skald-code](https://expo.dev/accounts/atlitech/projects/skald-code),
+   project `4dfd2e15-bc73-461a-a26f-ba1c7d559172`. Import the installed Android app's
+   existing keystore into EAS managed credentials; its SHA-256 certificate is
+   `8be8ce453295854ea7d25ace67081dd59a924ec1ae8ae111721e8c2446b37e8e`.
+   Import valid Apple Distribution credentials for team `H6L3F33KRM` and App Store
+   profiles for `tech.atli.skaldcode`, `tech.atli.skaldcode.widgets`, and
+   `tech.atli.skaldcode.sharing`, preserving `group.tech.atli.skaldcode` and the
+   existing entitlements. Check certificate/profile expiry. Never generate
+   replacement identities during migration; retain secure backups. Use owner-held
+   signing files or an explicitly protected one-time import job: GitHub's API
+   cannot return stored secret values.
+2. Confirm the actual Android installation/distribution maximum versionCode and
+   the applicable iOS App Store Connect build-number maximum. Initialize the
+   remote EAS counters at least at those maxima, so `autoIncrement` reserves a
+   strictly later number. From `apps/mobile`, the interactive
+   `APP_VARIANT=personal pnpm dlx eas-cli@27.5.0 build:version:set --platform android
+   --profile personal` command sets the Android counter; repeat with `ios` for
+   the confirmed iOS counter. Do not seed from app config's default or derive
+   native numbers from the fork release version. Pilot and local-worker builds
+   consume the same remote counters.
+3. Configure EAS's `production` environment with the public Clerk publishable key,
+   JWT template, relay URL, and any Google OAuth identifiers required by the app.
+   Use readable plain-text or sensitive visibility so fingerprint and update jobs
+   see the same values as cloud builders. GitHub job variables and local `.env`
+   files are not forwarded to EAS. If push requires a Google services file, make
+   the identical `T3CODE_ANDROID_GOOGLE_SERVICES_FILE` available to fingerprinting,
+   builds, and updates. Mirror public configuration into `preview` for pilots.
+4. Create the `personal-production` EAS channel and branch before delivery. The
+   channel must be unpaused and point 100% to the branch of the same name; split
+   rollouts or another branch mapping fail the publication check. Set up the
+   separate `personal-pilot` channel/branch for pilot builds.
+5. Confirm the organization's EAS plan, credits, worker concurrency, and approved
+   pilot budget. Inspect the EAS source archive from a clean full checkout:
+   workspace packages, patches, dependency tarballs, native headers, and the
+   terminal XCFramework must be present; secrets, `.env`, local state, `.repos`,
+   and generated native projects must be absent. The root `.easignore` owns these
+   exclusions. Do not use sparse checkout for EAS uploads.
+6. Build an Android APK and iOS IPA with `personal-pilot`, verify their native
+   identity/signature/entitlements, native numbers, embedded update URL/channel,
+   and runtime against EAS metadata and the calculated fingerprint. Install over
+   the existing Android app and through TestFlight for iOS; verify retained
+   settings/pairings, standalone launch, remote connections, terminal, widgets,
+   and sharing using `test-t3-mobile`. Test a compatible OTA, rollback, and rejection
+   of an incompatible native runtime. Record the evidence and measured build cost.
+
+After these checks and the protected-token move, set `SKALD_EAS_READY=true`.
+The first manual production release establishes production-channel baselines;
+pilot builds do not establish production distribution. Verify both production
+installs, a later OTA-only release linking the original APK, and a deliberate
+native refresh before declaring cutover complete. No cloud or device pilot is
+implied by merging this migration.
+
 ## Cutting a release
 
 Dispatch the workflow from `atli`; nothing else starts a release:
@@ -133,30 +170,53 @@ gh workflow run fork-server-release.yml -R atlitech/skald-code --ref atli -f ver
 
 A guard job runs before any build. It refuses a dispatch from any other ref, a
 version whose tag or release already exists, and an `atli` tip without a
-passing `Check` run (Fork CI runs on every push to `atli`). Every build checks out
-the commit the guard approved. The publish job uploads every asset to a draft,
-then publishes it so update clients only see complete releases. A release publishes only when the
-Linux server, the signed and notarized Mac desktop app, and the Android APK all build, and every
-package's tests pass on that commit (`fork-full-suite.yml`). The Android
-job checks the app's public config before it builds, and the APK's package,
-signing certificate, and versionCode before it uploads. After the release
-publishes, the iOS app goes to TestFlight
-([Installing the personal iOS app](#installing-the-personal-ios-app)).
+passing `Check` run. Every build checks out the exact commit the guard approved.
+Linux admission, the signed/notarized Mac build, and the full test suite remain
+required release gates.
 
-The result is the prerelease `v0.0.46-atli.1` with
-`t3-0.0.46-atli.1-linux-x64.tar.gz`, `T3-Code-0.0.46-atli.1-arm64.dmg`,
-`T3-Code-0.0.46-atli.1-android-arm64-v8a.apk`, `SHA256SUMS`, `ADMISSION.json`,
-and `manifest.json`, which names the source commit, the version, each asset's
-platform, arch, size, and sha256, and each asset's
-[verification scope](#verification-scope). Each of those files has a build
-provenance attestation:
+Mobile planning compares each platform's fingerprint and app version with its
+last **distributed** baseline. A compatible baseline receives OTA; a native
+change, app-version change, absent baseline, or explicit refresh needs a native
+build. iOS also refreshes when the actual Apple expiration is within 14 days.
+A new fork release number alone does not require a native build. Select
+`force-native` as `none` (default), `android`, `ios`, or `all`; for example:
+
+```sh
+gh workflow run fork-server-release.yml -R atlitech/skald-code --ref atli \
+  -f version=0.0.46-atli.2 -f force-native=android
+```
+
+A required native APK must pass identity, certificate, ABI, embedded runtime,
+channel, and exact EAS native-number checks before GitHub publication. For OTA,
+the original published APK's checksum is checked instead. The publish job uploads
+the complete assets and immutable mobile delivery intent to a draft, then publishes
+it. Only afterward may OTA delivery or iOS verification/submission run.
+
+The prerelease contains the Linux archive, Mac desktop assets, `SHA256SUMS`,
+`ADMISSION.json`, and `manifest.json`. A native Android release also attaches its
+new APK. An OTA-only release's manifest and release notes point to the original
+APK's release, filename, URL, digest, source SHA, EAS build ID, and runtime.
+Referenced bytes are never renamed or attached as a new build. The manifest records
+[verification scope](#verification-scope) for artifacts actually checked in this
+release, and intended mobile delivery rather than speculative success.
+
+Linux/Mac artifacts retain their build provenance attestations:
 
 ```sh
 gh attestation verify t3-0.0.46-atli.1-linux-x64.tar.gz -R atlitech/skald-code
 ```
 
-A published release never changes. Do not re-run a failed release: dispatch
-again, and once a version has a tag or release, use the next atli number.
+EAS compiles mobile binaries. GitHub verification and publication evidence does
+not claim that GitHub compiled them. Actual EAS build/update/submission IDs and
+delivery states are recorded in EAS history and GitHub deployments
+`skald-mobile-android` and `skald-mobile-ios`.
+
+A published release never changes. Before publication, resolve a failure and
+start a fresh dispatch; once a tag/release exists, use a new version for another
+release. For mobile failures **after publication**, retry the named published
+release as described below; do not publish another server release merely to retry
+delivery. Release and retry entrypoints share one production concurrency group
+with cancellation disabled, so they cannot overtake one another.
 
 Owner action, once: enable immutable releases on atlitech/skald-code
 (**Settings → General → Releases**), so GitHub also refuses to change a
@@ -171,10 +231,11 @@ to measure a warm build. Dispatch with `optimized=false` to compare against
 Gradle caching alone. The artifacts include an unsigned APK, Gradle profiles,
 build logs, and compiler-cache statistics; the APK is not an installable release.
 
-The release and benchmark share compiler-cache setup. Only compiler objects and
-Metro transforms are persisted; generated `app/build` outputs are not safe to
-restore because some tasks omit inputs. Keep signing and APK identity checks
-enabled when changing the release build.
+This unsigned diagnostic workflow retains the GitHub compiler-cache setup;
+production compilation uses EAS workers. Only compiler objects and Metro
+transforms are persisted in the benchmark; generated `app/build` outputs are not
+safe to restore because some tasks omit inputs. Keep the release's artifact
+identity checks enabled when changing EAS build settings.
 
 ## Verification scope
 
@@ -188,7 +249,9 @@ of 2026-10-06:
 - **Mac arm64 desktop app** and **Android arm64-v8a APK**: build-checked but
   runtime-unverified. Their jobs check the built package's identity (the Mac
   app's bundle identifier, version, and signature; the APK's public config,
-  package, certificate, and versionCode) and never run it.
+  package, certificate, native number, and embedded update metadata) and never run it.
+  An OTA-only Android release references a previously verified APK; it adds no new
+  APK verification-scope entry and makes no claim to have rebuilt or run that APK.
 
 `manifest.json` records this as `verificationScope`: the decision, and one
 entry per asset with its status, `runtimeVerified`, and the job and step of
@@ -353,61 +416,112 @@ codesign --force --deep --sign - "Skald Code.app"
 
 ## Installing the personal Android app
 
-Every release carries the personal app (`tech.atli.skaldcode`) as an arm64-v8a
-APK signed with the personal key. Download it, check it, and install it over
-the existing app:
+Use the Android link in the release notes. For native delivery it points to the
+new `tech.atli.skaldcode` ARM64 APK; for OTA-only delivery it points to the
+original compatible APK in its original release. The manifest's
+`mobile.android.baseline` gives its release tag, filename, SHA-256, and native
+build number. Download that original asset and its original `SHA256SUMS`, then:
 
 ```sh
-gh release download v0.0.46-atli.2 -R atlitech/skald-code -p 'T3-Code-*-android-arm64-v8a.apk' -p SHA256SUMS
 shasum -a 256 -c --ignore-missing SHA256SUMS
-gh attestation verify T3-Code-0.0.46-atli.2-android-arm64-v8a.apk -R atlitech/skald-code
 adb devices -l
-adb -s <device-serial> install -r T3-Code-0.0.46-atli.2-android-arm64-v8a.apk
+adb -s <device-serial> install -r <original-apk-filename>
 ```
 
-The APK's versionCode is derived from the release version, so each release
-installs over the one before it, and Android refuses to install an older
-release over a newer one.
+EAS allocates a higher versionCode for every native build. OTA does not change
+that number. Reusing the original APK installs its older embedded JavaScript;
+network access and applying the OTA are required to reach the new release.
+Force a native Android release when an up-to-date offline installer is required.
+Never uninstall to work around a signing mismatch or downgrade: that destroys
+settings and pairings.
 
-Earlier releases shipped the app as `com.elvis.t3code` (T3 Code Personal).
-Android treats a new application ID as a different app, so the first
-`tech.atli.skaldcode` APK installs beside it with empty data, even with the
-same key and `install -r`. Sign in and pair it, then uninstall the old app.
+Earlier releases used `com.elvis.t3code`. Android treats `tech.atli.skaldcode` as
+a separate app even with the same key; data cannot transfer through `install -r`.
 
 ### Building it locally
 
-When a release cannot be used, use the `develop-t3-personal-android` skill. Its
-script reads the signing passwords from the macOS Keychain and builds a
-standalone release APK:
+Use the `develop-t3-personal-android` skill and its EAS local-worker helper:
 
 ```sh
 .agents/skills/develop-t3-personal-android/scripts/build-personal-apk.sh
-adb devices -l
-adb -s <device-serial> install -r apps/mobile/android/app/build/outputs/apk/release/app-release.apk
 ```
 
-After an upstream update, run it without `--no-prebuild` when dependencies or
-native config changed. `install -r` keeps the app's data only when the APK is signed
-with the same key as the installed app; the skill describes how to check. A local
-build without `--release-version` carries versionCode 1, so it cannot update
-over an APK from a release; uninstall the app first, which deletes its data.
+Install the APK path returned by EAS with `adb install -r` after the same identity
+checks. The helper uses the `personal` profile, managed credentials, and remote
+counters. It still requires Expo connectivity; it is a cloud-worker fallback,
+not offline disaster recovery. The old `--release-version` and direct production
+Gradle path are retired. During a complete Expo outage, pause publication until
+an explicit recovery procedure reestablishes a single numbering authority.
 
 ## Installing the personal iOS app
 
-Once a release publishes, the `testflight` job uploads Skald Code
-(`tech.atli.skaldcode`) to TestFlight, built from the same commit. Its build
-number is derived from the release version, like the Android versionCode. When
-Apple has processed it, internal testers install it from the TestFlight app.
-Testers must be users of the Atli LLC App Store Connect team, in an internal
-testing group of the app. Each build expires after 90 days.
+Native iOS delivery builds the exact published release SHA with EAS, verifies the
+IPA's app/widget/share identities, entitlements, signature, native build number,
+and embedded update settings, then submits that exact EAS build ID to TestFlight.
+Compatible releases use OTA instead. Neither EAS build `FINISHED` nor a successful
+submission proves tester availability: Apple must process the build and make it
+available to a testing group with testers before the deployment is marked
+`distributed`.
 
-The app signs in to T3 Connect through the maintainers' deployment, which
-trusts only their own apps for Google sign-in, Sign in with Apple, passkeys, and
-push notifications. Sign in with the email code instead. Keep it to internal
-testers while it depends on that deployment.
+Install Skald Code (`tech.atli.skaldcode`) through TestFlight. Internal testers
+must be users of the Atli LLC App Store Connect team assigned to an internal
+app testing group. OTA does not extend a build's TestFlight expiration. The next
+manual release requests a native refresh within 14 days of the expiration Apple
+reports; if no release is triggered, the installed build can still expire.
 
-A failed upload does not affect the release: re-run the `testflight` job. A
-build number App Store Connect already accepted cannot be uploaded again.
+The app signs in to T3 Connect through the maintainers' deployment, which trusts
+only their own apps for native Google sign-in, Sign in with Apple, passkeys, and
+push. Use the email-code flow and keep distribution internal while relying on it.
+Free Personal Team installations use a separate identity and remain available
+through `vp run ios:personal --bundle-id <your-identifier>`; they have no OTA.
+
+## Personal mobile OTA updates
+
+Production updates use [@atlitech/skald-code](https://expo.dev/accounts/atlitech/projects/skald-code)
+and `personal-production`. Mobile publication starts only with a manual fork
+release, never with an `atli` merge. Old personal binaries with updates disabled
+need the first OTA-enabled native production baseline. Native fingerprints route
+updates to compatible installations; they do not guarantee client/server protocol
+compatibility with older or remotely connected servers.
+
+`manifest.json` is immutable delivery intent. Inspect EAS history and the GitHub
+`skald-mobile-android` / `skald-mobile-ios` deployment payloads and statuses for
+actual build IDs, update group IDs, submission IDs, checksums, and delivery
+outcomes. A failed mobile delivery does not mutate or invalidate the server
+release. Pending Apple processing or tester-group assignment is still pending
+mobile delivery.
+
+Retry mobile delivery with the already published tag:
+
+```sh
+gh workflow run fork-mobile-update.yml -R atlitech/skald-code --ref atli \
+  -f tag=v0.0.46-atli.2
+```
+
+The retry resolves and checks the published manifest/tag SHA, checks out that
+exact commit, and resumes its recorded build/submission IDs. It cannot publish
+arbitrary current `atli` code. Older releases cannot overtake newer delivery.
+An unavailable/expired intended TestFlight baseline requires a new manual release
+with native refresh; a retry cannot rewrite the old release's intent.
+
+If a runner loses a submission response, first reconcile its exact EAS build's
+submission history. Do not upload the same App Store Connect build number again
+or use `--latest`. Failed native build IDs are not silently replaced on retry;
+resolve the failure and trigger a new release when a new build is required.
+
+For emergency JavaScript rollback, suspend manual release/retry dispatches and
+wait for the current production publication to finish. Select the known-good
+update group for the same platform/runtime in EAS Update and use its explicit
+rollback/republish operation. Record the resulting update ID and source in the
+deployment history before normal releases resume. The retry
+workflow intentionally does not treat an old release as a rollback request.
+A native recovery needs the original signing identity and a later EAS-allocated
+number; never uninstall or downgrade to recover.
+
+Local production workers use the same channel, but differing public config or
+native inputs can produce a different runtime. Prefer release artifacts for daily
+use. `personal-pilot` isolates migration testing on its own update channel; it does
+not replace the required production baseline or prove production delivery.
 
 ## Pull request watcher
 

@@ -16,6 +16,7 @@ import { Command, Flag } from "effect/cli";
 
 import { REQUIRED_CHECKS, type AdmissionRecord } from "./linux-admission/admission-record.ts";
 import { ADMISSION_FILE } from "./linux-admission/prior-release.ts";
+import { MobileReleaseIntent, validateMobileIntent } from "./lib/fork-mobile-release-model.ts";
 
 export const SHA256SUMS_FILE = "SHA256SUMS";
 export const MANIFEST_FILE = "manifest.json";
@@ -125,6 +126,7 @@ const ReleaseManifest = Schema.Struct({
   assets: Schema.Array(ReleaseManifestAsset),
   updaterAssets: Schema.optionalKey(Schema.Array(UpdaterAsset)),
   verificationScope: VerificationScope,
+  mobile: Schema.optionalKey(MobileReleaseIntent),
 });
 export type ReleaseManifest = typeof ReleaseManifest.Type;
 
@@ -244,6 +246,7 @@ export const buildReleaseManifest = Effect.fn("buildReleaseManifest")(function* 
   readonly files: ReadonlyArray<ReleaseAssetFile>;
   readonly admission: AdmissionRecord | undefined;
   readonly scope?: ReadonlyArray<PlatformScope>;
+  readonly mobile?: MobileReleaseIntent;
 }) {
   if (!COMMIT_PATTERN.test(input.commit)) {
     return yield* new ReleaseManifestError({
@@ -304,11 +307,17 @@ export const buildReleaseManifest = Effect.fn("buildReleaseManifest")(function* 
       detail: "the Mac updater needs its ZIP, blockmap, and atli-mac.yml.",
     });
   }
+  if (input.mobile) {
+    const mismatch = validateMobileIntent(input.mobile, { ...input, assets });
+    if (mismatch) return yield* new ReleaseManifestError({ detail: mismatch });
+  }
   const verificationScope = yield* buildVerificationScope({
     version: input.version,
     assets,
     admission: input.admission,
-    scope: input.scope ?? FORK_VERIFICATION_SCOPE,
+    scope: (input.scope ?? FORK_VERIFICATION_SCOPE).filter(
+      (scope) => !(scope.platform === "android" && input.mobile?.android.mode === "ota"),
+    ),
   });
   const manifest: ReleaseManifest = {
     commit: input.commit,
@@ -316,6 +325,7 @@ export const buildReleaseManifest = Effect.fn("buildReleaseManifest")(function* 
     assets,
     ...(updaterAssets.length > 0 ? { updaterAssets } : {}),
     verificationScope,
+    ...(input.mobile ? { mobile: input.mobile } : {}),
   };
   const manifestJson = yield* encodeManifestJson(manifest).pipe(
     Effect.mapError(() => new ReleaseManifestError({ detail: "the manifest does not encode." })),
@@ -406,6 +416,7 @@ export const writeReleaseManifest = Effect.fn("writeReleaseManifest")(function* 
   readonly commit: string;
   readonly version: string;
   readonly admission: string;
+  readonly mobileIntent?: string;
 }) {
   const fs = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
@@ -430,7 +441,16 @@ export const writeReleaseManifest = Effect.fn("writeReleaseManifest")(function* 
     }),
   );
 
+  const mobile = options.mobileIntent
+    ? yield* fs.readFileString(options.mobileIntent).pipe(
+        Effect.flatMap(Schema.decodeEffect(Schema.fromJsonString(MobileReleaseIntent))),
+        Effect.mapError(
+          () => new ReleaseManifestError({ detail: "cannot decode mobile release intent." }),
+        ),
+      )
+    : undefined;
   const release = yield* buildReleaseManifest({
+    ...(mobile ? { mobile } : {}),
     commit: options.commit,
     version: options.version,
     files,
@@ -449,6 +469,10 @@ const command = Command.make(
     // `--version` is the runner's own flag.
     version: Flag.String("release-version").pipe(
       Flag.withDescription("Fork version, for example 0.0.46-atli.1."),
+    ),
+    mobileIntent: Flag.String("mobile-intent").pipe(
+      Flag.withDefault(""),
+      Flag.withDescription("Mobile delivery intent JSON, outside the release asset directory."),
     ),
     admission: Flag.String("admission").pipe(
       Flag.withDescription("The ADMISSION.json that admitted the Linux x64 archive."),

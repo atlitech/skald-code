@@ -12,7 +12,8 @@ module.exports = function withAndroidGradleHeap(config) {
     properties.push({
       type: "property",
       key: "org.gradle.jvmargs",
-      value: JVM_ARGS,
+      value:
+        config.extra?.appVariant === "personal" ? "-Xmx8192m -XX:MaxMetaspaceSize=2048m" : JVM_ARGS,
     });
 
     nextConfig.modResults = properties;

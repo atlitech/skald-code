@@ -1,6 +1,6 @@
 {
   "cli": {
-    "version": ">= 18.4.0",
+    "version": "27.5.0",
     "appVersionSource": "remote",
     "promptToConfigurePushNotifications": false
   },
@@ -75,6 +75,40 @@
       "ios": {
         "image": "macos-tahoe-26.6-xcode-27.1"
       }
+    },
+    "personal": {
+      "node": "26.12.1",
+      "pnpm": "12.14.0",
+      "corepack": true,
+      "credentialsSource": "remote",
+      "autoIncrement": true,
+      "distribution": "store",
+      "channel": "personal-production",
+      "environment": "production",
+      "env": {
+        "APP_VARIANT": "personal",
+        "T3CODE_MOBILE_CHANNEL": "personal-production",
+        "MOBILE_VERSION_POLICY": "fingerprint",
+        "EXPO_NO_DOTENV": "1",
+        "NODE_OPTIONS": "--max-old-space-size=8192"
+      },
+      "android": {
+        "buildType": "apk",
+        "gradleCommand": ":app:assembleRelease -PreactNativeArchitectures=arm64-v8a",
+        "resourceClass": "large",
+        "image": "ubuntu-26.04-jdk-17-ndk-r27b-sdk-58"
+      },
+      "ios": {
+        "image": "macos-tahoe-26.6-xcode-27.1"
+      }
+    },
+    "personal-pilot": {
+      "extends": "personal",
+      "channel": "personal-pilot",
+      "environment": "preview",
+      "env": {
+        "T3CODE_MOBILE_CHANNEL": "personal-pilot"
+      }
     }
   },
   "submit": {
@@ -87,6 +121,11 @@
       },
       "android": {
         "track": "internal"
+      }
+    },
+    "personal": {
+      "ios": {
+        "appleTeamId": "H6L3F33KRM"
       }
     }
   }

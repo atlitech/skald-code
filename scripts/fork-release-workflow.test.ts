@@ -7,15 +7,23 @@ import { FORK_VERIFICATION_SCOPE } from "./fork-release-manifest.ts";
 
 // A fork release is dispatched from atli, guarded before any build, admitted
 // by upgrading over the prior release's data, and published once: the tag and
-// an immutable release with every asset, each asset carrying a build
-// provenance attestation.
+// an immutable release. GitHub attests its own builds; EAS mobile provenance
+// is recorded in the manifest and delivery history.
 const workflow = NodeFS.readFileSync(
   NodePath.join(import.meta.dirname, "..", ".github", "workflows", "fork-server-release.yml"),
   "utf8",
 );
-const lines = workflow.split("\n");
+const mobileDelivery = NodeFS.readFileSync(
+  NodePath.join(import.meta.dirname, "..", ".github", "workflows", "fork-mobile-delivery.yml"),
+  "utf8",
+);
+const mobileRetry = NodeFS.readFileSync(
+  NodePath.join(import.meta.dirname, "..", ".github", "workflows", "fork-mobile-update.yml"),
+  "utf8",
+);
 
-const topLevelBlock = (key: string): ReadonlyArray<string> => {
+const topLevelBlock = (key: string, text = workflow): ReadonlyArray<string> => {
+  const lines = text.split("\n");
   const start = lines.indexOf(`${key}:`);
   expect(start, key).toBeGreaterThan(-1);
   const block: Array<string> = [];
@@ -26,10 +34,10 @@ const topLevelBlock = (key: string): ReadonlyArray<string> => {
   return block;
 };
 
-const jobs = (): ReadonlyMap<string, ReadonlyArray<string>> => {
+const jobs = (text = workflow): ReadonlyMap<string, ReadonlyArray<string>> => {
   const result = new Map<string, Array<string>>();
   let current: Array<string> | undefined;
-  for (const line of topLevelBlock("jobs")) {
+  for (const line of topLevelBlock("jobs", text)) {
     const job = /^ {2}([A-Za-z0-9_-]+):\s*$/.exec(line);
     if (job) {
       current = [];
@@ -41,8 +49,8 @@ const jobs = (): ReadonlyMap<string, ReadonlyArray<string>> => {
   return result;
 };
 
-const job = (name: string): ReadonlyArray<string> => {
-  const body = jobs().get(name);
+const job = (name: string, text = workflow): ReadonlyArray<string> => {
+  const body = jobs(text).get(name);
   expect(body, name).toBeDefined();
   return body!;
 };
@@ -99,18 +107,9 @@ const stepIndex = (steps: ReadonlyArray<string>, pattern: RegExp): number => {
   return index;
 };
 
-const PUBLIC_CONFIG = [
-  "T3CODE_CLERK_PUBLISHABLE_KEY",
-  "T3CODE_CLERK_JWT_TEMPLATE",
-  "T3CODE_CLERK_CLI_OAUTH_CLIENT_ID",
-  "T3CODE_RELAY_URL",
-] as const;
-const APK = "release/T3-Code-${{ needs.guard.outputs.version }}-android-arm64-v8a.apk";
 const CONFIG_CHECK =
   /node scripts\/fork-android-config\.ts --config "\$RUNNER_TEMP\/expo-config\.json"/;
-const PREBUILD = /vp exec expo prebuild --clean --platform android --no-install/;
-const GRADLE = /\.\/gradlew :app:assembleRelease -PreactNativeArchitectures=arm64-v8a/;
-const IDENTITY = /node scripts\/fork-android-identity\.ts/;
+const ANDROID_DELIVERY = /node scripts\/fork-mobile-release\.ts android /;
 const UPLOAD = /uses: actions\/upload-artifact@/;
 
 describe("fork server release workflow", () => {
@@ -279,15 +278,16 @@ describe("fork server release workflow", () => {
     );
   });
 
-  it("attests every published file under job-level OIDC and attestation permissions", () => {
-    for (const name of [...buildJobs(), "publish"]) {
+  it("attests GitHub-built artifacts and the manifest under job-level OIDC permissions", () => {
+    const githubBuilds = buildJobs().filter((name) => name !== "build-android");
+    for (const name of [...githubBuilds, "publish"]) {
       const body = job(name);
       const permissions = jobMap(body, "permissions");
       expect(permissions.get("id-token"), name).toBe("write");
       expect(permissions.get("attestations"), name).toBe("write");
       expect(body.join("\n"), name).toMatch(ATTEST);
     }
-    for (const name of buildJobs()) {
+    for (const name of githubBuilds) {
       const steps = stepsOf(job(name));
       const attest = steps.findIndex((step) => ATTEST.test(step));
       const upload = steps.findIndex((step) => /uses: actions\/upload-artifact@/.test(step));
@@ -376,7 +376,7 @@ describe("fork server release workflow", () => {
     // The manifest step checks the Linux archive against it and leaves it out
     // of SHA256SUMS and the assets.
     expect(steps[manifest]).toMatch(
-      /node scripts\/fork-release-manifest\.ts --dir release --commit "\$SHA" --release-version "\$VERSION" --admission release\/ADMISSION\.json\n/,
+      /node scripts\/fork-release-manifest\.ts --dir release --commit "\$SHA" --release-version "\$VERSION" --admission release\/ADMISSION\.json --mobile-intent "\$RUNNER_TEMP\/mobile-intent\.json"\n/,
     );
   });
 
@@ -432,187 +432,103 @@ describe("fork server release workflow", () => {
     expect(create).toBeGreaterThan(attest);
   });
 
-  it("builds the personal APK only from atli, in the signing environment", () => {
+  it("admits the Android build or original baseline only from protected atli source", () => {
     const body = job("build-android");
-    expect(needsOf(body)).toContain("guard");
+    expect(needsOf(body)).toEqual(["guard", "mobile-plan"]);
     expect(ifOf(body)).toContain("github.ref == 'refs/heads/atli'");
     expect(ifOf(body)).toContain("github.repository_id == '1406026313'");
     expect(body).toContain("    environment: personal-android-signing");
-    expect(runsOn(body)).toBe("blacksmith-8vcpu-ubuntu-2404");
-    expect(body.join("\n")).toMatch(/ref: \$\{\{ needs\.guard\.outputs\.sha \}\}/);
-  });
-
-  it("publishes nothing unless the Android APK built", () => {
     expect(needsOf(job("publish"))).toContain("build-android");
-  });
-
-  it("builds the APK with the Linux job's public config, as the personal variant", () => {
-    const env = jobMap(job("build-android"), "env");
-    for (const name of PUBLIC_CONFIG) {
-      expect(env.get(name), name).toBe(`\${{ vars.${name} }}`);
-      expect(jobMap(job("build-linux"), "env").get(name), name).toBe(env.get(name));
+    expect(job("guard").join("\n")).toContain('if [ "$SKALD_EAS_READY" != true ]; then');
+    for (const name of ["mobile-plan", "build-android"]) {
+      const text = job(name).join("\n");
+      expect(text).toContain("ref: ${{ needs.guard.outputs.sha }}");
+      expect(text).toContain("fetch-depth: 0");
+      expect(text).not.toMatch(/sparse-checkout|filter: blob:none/);
+      expect(text).not.toMatch(/gradlew|expo prebuild|xcodebuild/);
+      const env = jobMap(job(name), "env");
+      expect(env.get("APP_VARIANT")).toBe("personal");
+      expect(env.get("T3CODE_MOBILE_CHANNEL")).toBe("personal-production");
+      expect(env.has("T3CODE_RELEASE_VERSION")).toBe(false);
+      for (const [key, value] of env) expect(value, key).not.toMatch(/secrets\./);
     }
-    expect(env.get("APP_VARIANT")).toBe("personal");
-    expect(env.get("T3CODE_RELEASE_VERSION")).toBe("${{ needs.guard.outputs.version }}");
-    expect(env.get("VERSION")).toBe("${{ needs.guard.outputs.version }}");
-    for (const [name, value] of env) expect(value, name).not.toMatch(/secrets\./);
   });
 
-  it("checks the resolved public config before generating and building the app", () => {
+  it("checks remote public config and APK identity before uploading only a newly built APK", () => {
     const steps = stepsOf(job("build-android"));
     const config = stepIndex(steps, CONFIG_CHECK);
-    const prebuild = stepIndex(steps, PREBUILD);
-    const gradle = stepIndex(steps, GRADLE);
+    const identity = stepIndex(steps, ANDROID_DELIVERY);
     const upload = stepIndex(steps, UPLOAD);
-    expect(prebuild).toBeGreaterThan(config);
-    expect(gradle).toBeGreaterThan(prebuild);
-    expect(upload).toBeGreaterThan(gradle);
-    expect(steps[config]).toMatch(
-      /\(cd apps\/mobile && vp exec expo config --type public --json\) > "\$RUNNER_TEMP\/expo-config\.json"/,
+    expect(identity).toBeGreaterThan(config);
+    expect(upload).toBeGreaterThan(identity);
+    expect(steps[config]).toContain("eas env:exec production");
+    expect(steps[identity]).toContain(
+      '--sha "$SHA" --tag "$TAG" --intent "$RUNNER_TEMP/mobile-intent.json"',
     );
-    // The optional Google values are in place before the config resolves.
-    expect(stepIndex(steps, /EXPO_PUBLIC_CLERK_GOOGLE_ANDROID_CLIENT_ID=/)).toBeLessThan(config);
-    expect(stepIndex(steps, /T3CODE_ANDROID_GOOGLE_SERVICES_FILE=/)).toBeLessThan(config);
-    expect(stepIndex(steps, /T3CODE_PERSONAL_ANDROID_KEYSTORE_FILE=/)).toBeLessThan(gradle);
-  });
-
-  it("checks the APK's identity, then attests and uploads it", () => {
-    const steps = stepsOf(job("build-android"));
-    const gradle = stepIndex(steps, GRADLE);
-    const identity = stepIndex(steps, IDENTITY);
-    const attest = stepIndex(steps, ATTEST);
-    const upload = stepIndex(steps, UPLOAD);
-    expect(identity).toBeGreaterThan(gradle);
-    expect(attest).toBeGreaterThan(identity);
-    expect(upload).toBeGreaterThan(attest);
-
-    const check = steps[identity]!;
-    expect(check).toMatch(/aapt" dump badging "\$apk" > "\$RUNNER_TEMP\/badging\.txt"/);
-    expect(check).toMatch(/apksigner" verify --print-certs "\$apk" > "\$RUNNER_TEMP\/certs\.txt"/);
-    expect(check).toMatch(/--badging "\$RUNNER_TEMP\/badging\.txt"/);
-    expect(check).toMatch(/--certs "\$RUNNER_TEMP\/certs\.txt"/);
-    expect(check).toMatch(/--release-version "\$VERSION"/);
-    expect(check).toContain('apk="release/T3-Code-$VERSION-android-arm64-v8a.apk"');
-
-    expect(steps[attest]).toContain(`subject-path: ${APK}`);
-    expect(steps[upload]).toMatch(/name: release-android-arm64-v8a\n/);
-    expect(steps[upload]).toContain(`path: ${APK}`);
-    expect(steps[upload]).toMatch(/if-no-files-found: error/);
-  });
-
-  it("turns native Google sign-in on only for a set client id variable", () => {
-    const steps = stepsOf(job("build-android"));
-    const google = steps[stepIndex(steps, /EXPO_PUBLIC_CLERK_GOOGLE_ANDROID_CLIENT_ID=/)]!;
-    expect(google).toMatch(/^ {8}if: vars\.T3CODE_CLERK_GOOGLE_ANDROID_CLIENT_ID != ''$/m);
-    expect(google).toMatch(
-      /GOOGLE_ANDROID_CLIENT_ID: \$\{\{ vars\.T3CODE_CLERK_GOOGLE_ANDROID_CLIENT_ID \}\}/,
-    );
-    expect(google).toMatch(/>> "\$GITHUB_ENV"/);
-  });
-
-  it("writes google-services.json only for a set secret, under RUNNER_TEMP", () => {
-    const steps = stepsOf(job("build-android"));
-    const services = steps[stepIndex(steps, /T3CODE_ANDROID_GOOGLE_SERVICES_FILE=/)]!;
-    expect(services).toMatch(
-      /GOOGLE_SERVICES_JSON_BASE64: \$\{\{ secrets\.GOOGLE_SERVICES_JSON_BASE64 \}\}/,
-    );
-    // The secrets context is unavailable to `if:`: the shell gates the value.
-    expect(services).not.toMatch(/^ {8}if:/m);
-    const gated = /if \[ -n "\$GOOGLE_SERVICES_JSON_BASE64" \]; then\n((?:.*\n)*?)\s+fi\n/.exec(
-      `${services}\n`,
-    )?.[1];
-    expect(gated).toBeDefined();
-    expect(gated).toMatch(
-      /printf '%s' "\$GOOGLE_SERVICES_JSON_BASE64" \| base64 -d > "\$RUNNER_TEMP\/google-services\.json"/,
-    );
-    expect(gated).toMatch(
-      /echo "T3CODE_ANDROID_GOOGLE_SERVICES_FILE=\$RUNNER_TEMP\/google-services\.json" >> "\$GITHUB_ENV"/,
-    );
-  });
-
-  it("writes the keystore under RUNNER_TEMP, and hands its passwords only to Gradle", () => {
-    const steps = stepsOf(job("build-android"));
-    const keystore = steps[stepIndex(steps, /T3CODE_PERSONAL_ANDROID_KEYSTORE_FILE=/)]!;
-    expect(keystore).toMatch(
-      /KEYSTORE_BASE64: \$\{\{ secrets\.T3CODE_PERSONAL_ANDROID_KEYSTORE_BASE64 \}\}/,
-    );
-    expect(keystore).toMatch(/if \[ -z "\$KEYSTORE_BASE64" \]; then\n[^\n]*\n\s+exit 1\n/);
-    expect(keystore).toMatch(
-      /printf '%s' "\$KEYSTORE_BASE64" \| base64 -d > "\$RUNNER_TEMP\/t3-code-personal\.jks"/,
-    );
-    expect(keystore).toMatch(
-      /echo "T3CODE_PERSONAL_ANDROID_KEYSTORE_FILE=\$RUNNER_TEMP\/t3-code-personal\.jks" >> "\$GITHUB_ENV"/,
-    );
-
-    const gradle = stepIndex(steps, GRADLE);
-    for (const [name, source] of [
-      ["T3CODE_PERSONAL_ANDROID_KEYSTORE_PASSWORD", "secrets"],
-      ["T3CODE_PERSONAL_ANDROID_KEY_PASSWORD", "secrets"],
-      ["T3CODE_PERSONAL_ANDROID_KEY_ALIAS", "vars"],
-    ] as const) {
-      const holders = steps.flatMap((step, index) => (step.includes(name) ? [index] : []));
-      expect(holders, name).toEqual([gradle]);
-      expect(steps[gradle]).toContain(`${name}: \${{ ${source}.${name} }}`);
-    }
+    expect(steps[upload]).toContain("if: needs.mobile-plan.outputs.android-mode == 'native'");
+    expect(steps[upload]).toContain("name: release-android-arm64-v8a");
+    expect(steps[upload]).toContain("if-no-files-found: error");
+    expect(job("build-android").join("\n")).not.toMatch(ATTEST);
+    const publish = stepsOf(job("publish"));
+    const intent = stepIndex(publish, /name: mobile-intent-verified/);
+    expect(publish[intent]).toContain("path: ${{ runner.temp }}");
+    expect(intent).toBeLessThan(stepIndex(publish, /node scripts\/fork-release-manifest\.ts/));
   });
 });
 
-describe("fork release TestFlight upload", () => {
-  const body = job("testflight");
-  const text = body.join("\n");
-  const steps = stepsOf(body);
-
-  it("uploads only from atli, after the release published, from the guarded commit", () => {
+describe("fork mobile delivery and retry", () => {
+  it("starts iOS and OTA delivery only after immutable release publication", () => {
+    const body = job("mobile-delivery");
     expect(needsOf(body)).toEqual(["guard", "publish"]);
-    expect(ifOf(body)).toBe(
-      "github.repository_id == '1406026313' && github.ref == 'refs/heads/atli'",
+    expect(body.join("\n")).toContain("uses: ./.github/workflows/fork-mobile-delivery.yml");
+    expect(body.join("\n")).toContain("tag: ${{ needs.guard.outputs.tag }}");
+    expect(needsOf(job("publish"))).not.toContain("mobile-delivery");
+    expect(job("resolve", mobileDelivery).join("\n")).toContain(
+      'node scripts/fork-mobile-release.ts resolve --tag "$TAG"',
     );
-    expect(text).toMatch(/ref: \$\{\{ needs\.guard\.outputs\.sha \}\}/);
-    expect(text).toMatch(/^ {4}environment: personal-ios-signing$/m);
-    expect(runsOn(body)).toBe("xcode-27");
-    expect([...jobMap(body, "permissions")]).toEqual([["contents", "read"]]);
-  });
-
-  it("is never a release asset, so it cannot hold back or change a release", () => {
-    expect(buildJobs()).not.toContain("testflight");
-    expect(needsOf(job("publish"))).not.toContain("testflight");
-    expect(text).not.toMatch(/uses: actions\/(?:upload-artifact|attest-build-provenance)@/);
-  });
-
-  it("builds the personal variant with the release's build number and public config", () => {
-    const env = jobMap(body, "env");
-    expect(env.get("APP_VARIANT")).toBe("personal");
-    expect(env.get("T3CODE_RELEASE_VERSION")).toBe("${{ needs.guard.outputs.version }}");
-    for (const name of PUBLIC_CONFIG) expect(env.get(name), name).toBe(`\${{ vars.${name} }}`);
-    for (const [name, value] of env) expect(value, name).not.toMatch(/secrets\./);
-  });
-
-  it("signs, checks the signed archive, and only then uploads", () => {
-    const certificate = stepIndex(steps, /security import "\$RUNNER_TEMP\/distribution\.p12"/);
-    const profiles = stepIndex(
-      steps,
-      /T3CODE_IOS_PROVISIONING_PROFILES=\$profiles" >> "\$GITHUB_ENV"/,
+    for (const name of ["deliver", "testflight"]) {
+      const body = job(name, mobileDelivery);
+      const text = body.join("\n");
+      expect(needsOf(body)).toContain("resolve");
+      expect(text).toContain("ref: ${{ needs.resolve.outputs.sha }}");
+      expect(text).toContain("fetch-depth: 0");
+      expect(text).not.toMatch(/sparse-checkout|filter: blob:none/);
+      expect(text).not.toMatch(
+        /uses: actions\/(?:upload-artifact|attest-build-provenance)@|--latest|xcodebuild/,
+      );
+    }
+    expect(needsOf(job("testflight", mobileDelivery))).toContain("deliver");
+    expect(job("testflight", mobileDelivery).join("\n")).toContain(
+      'node scripts/fork-mobile-release.ts ios-verify --tag "$TAG"',
     );
-    const config = stepIndex(steps, CONFIG_CHECK);
-    const prebuild = stepIndex(steps, /vp exec expo prebuild --clean --platform ios --no-install/);
-    const archive = stepIndex(steps, /-archivePath "\$RUNNER_TEMP\/SkaldCode\.xcarchive" archive/);
-    const identity = stepIndex(steps, /node scripts\/fork-ios-identity\.ts/);
-    const upload = stepIndex(steps, /xcodebuild -exportArchive/);
-    expect(profiles).toBeGreaterThan(certificate);
-    expect(config).toBeGreaterThan(profiles);
-    expect(prebuild).toBeGreaterThan(config);
-    expect(archive).toBeGreaterThan(prebuild);
-    expect(identity).toBeGreaterThan(archive);
-    expect(upload).toBeGreaterThan(identity);
-    expect(steps[identity]).toMatch(/--release-version "\$VERSION"/);
+    expect(runsOn(job("testflight", mobileDelivery))).toMatch(/^macos-\d+$/);
   });
 
-  it("uploads with manual App Store signing and keeps the release's build number", () => {
-    const upload = steps[stepIndex(steps, /xcodebuild -exportArchive/)]!;
-    expect(upload).toMatch(/plutil -insert method -string app-store-connect /);
-    expect(upload).toMatch(/plutil -insert destination -string upload /);
-    expect(upload).toMatch(/plutil -insert signingStyle -string manual /);
-    expect(upload).toMatch(/plutil -insert manageAppVersionAndBuildNumber -bool NO /);
-    expect(upload).toMatch(/-authenticationKeyPath "\$RUNNER_TEMP\/AuthKey\.p8"/);
+  it("retries only a named published tag through the same guarded delivery workflow", () => {
+    expect(topLevelBlock("on", mobileRetry).filter((line) => /^ {2}\S/.test(line))).toEqual([
+      "  workflow_dispatch:",
+    ]);
+    expect(mobileRetry).toMatch(/^ {6}tag:\n(?: {8}.*\n)*? {8}required: true/m);
+    const body = job("retry", mobileRetry);
+    expect(ifOf(body)).toContain("github.repository_id == '1406026313'");
+    expect(ifOf(body)).toContain("github.ref == 'refs/heads/atli'");
+    expect(body.join("\n")).toContain("uses: ./.github/workflows/fork-mobile-delivery.yml");
+    expect(body.join("\n")).toContain("tag: ${{ inputs.tag }}");
+    expect(mobileRetry).not.toMatch(
+      /eas update|actions\/checkout|ref: atli|inputs\.(?:ref|sha|runtime)/,
+    );
+  });
+
+  it("holds one non-cancelling production lock across release and retry without nested acquisition", () => {
+    for (const text of [workflow, mobileRetry]) {
+      expect(topLevelBlock("concurrency", text).filter((line) => line.trim())).toEqual([
+        "  group: skald-production-publication",
+        "  cancel-in-progress: false",
+      ]);
+    }
+    expect(mobileDelivery).not.toMatch(/^\s*concurrency:/m);
+    expect(topLevelBlock("on", mobileDelivery).filter((line) => /^ {2}\S/.test(line))).toEqual([
+      "  workflow_call:",
+    ]);
   });
 });
