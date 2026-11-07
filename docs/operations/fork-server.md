@@ -5,7 +5,7 @@ Fork-only runbook. `atli` is upstream `main` plus our commits.
 publishes the same self-contained Linux x64 server archive an official release
 ships, so a VM that already runs the official background service can switch to
 our build and keep its T3 Connect link. Each release also carries the signed
-and notarized Mac arm64 desktop app. Mobile delivery uses EAS: native Android
+and notarized Mac arm64 desktop app. Mobile delivery uses EAS local builds on CI runners: native Android
 releases attach an APK from the same commit; compatible OTA releases link the
 original APK. iOS delivery follows GitHub publication.
 
@@ -59,10 +59,10 @@ and restart `<n>` at 1.
 
   The controller verifies that the ASC app belongs to `tech.atli.skaldcode` and
   rejects upstream's app ID `6787819824`. Use an API key with the App Manager role.
-  Configure EAS managed submission credentials for that same app and team; the
-  fork's `personal` submit profile never inherits upstream's submission identity.
-  Existing distribution certificates and profiles move to EAS as described below;
-  GitHub's mobile jobs no longer import them into runner keychains.
+  CI uploads the verified IPA directly with Apple's `altool` and that API key.
+  EAS supplies the managed distribution certificate and profiles to its local
+  worker, which manages the temporary signing keychain. No EAS cloud submission
+  record is required; Apple's app/version/build lookup is authoritative.
 
 - **Settings → Environments**: create `personal-macos-signing`, allowed only on
   `atli`. Only the Mac build job uses it, and a release does not publish
@@ -88,7 +88,12 @@ and restart `<n>` at 1.
   for `atlitech/skald-code` before dispatching a release. The full test suite
   uses Blacksmith, as upstream's tests do; upstream's browser tests time out on a
   standard GitHub runner. Without repository access, those jobs stay queued.
-  EAS supplies mobile compilation workers; GitHub still builds Linux and macOS.
+  Mobile compilation runs on `blacksmith-8vcpu-ubuntu-2404` for Android and
+  `blacksmith-12vcpu-macos-26` for iOS. Confirm the Mac image has Xcode 27.1,
+  CocoaPods and Fastlane; setup selects and verifies that Xcode version. Planning, native compilation, and OTA use the same
+  per-platform toolchain. EAS image settings do not install local tools; CI
+  installs Java 17, Android SDK/build tools 36 and NDK 27.1, plus the repository's
+  Node/pnpm pins. Confirm runner access and billing before pilots.
 
 - Disable every upstream workflow; the fork runs only its own `fork-*.yml`
   (see [Continuous integration](#continuous-integration)). This lists the
@@ -131,7 +136,7 @@ variable `SKALD_EAS_READY` unset until all of these prerequisites have been veri
 3. Configure EAS's `production` environment with the public Clerk publishable key,
    JWT template, relay URL, and any Google OAuth identifiers required by the app.
    Use readable plain-text or sensitive visibility so fingerprint and update jobs
-   see the same values as cloud builders. GitHub job variables and local `.env`
+   see the same values as local native workers. GitHub job variables and local `.env`
    files are not forwarded to EAS. If push requires a Google services file, make
    the identical `T3CODE_ANDROID_GOOGLE_SERVICES_FILE` available to fingerprinting,
    builds, and updates. Mirror public configuration into `preview` for pilots.
@@ -139,13 +144,16 @@ variable `SKALD_EAS_READY` unset until all of these prerequisites have been veri
    channel must be unpaused and point 100% to the branch of the same name; split
    rollouts or another branch mapping fail the publication check. Set up the
    separate `personal-pilot` channel/branch for pilot builds.
-5. Confirm the organization's EAS plan, credits, worker concurrency, and approved
-   pilot budget. Inspect the EAS source archive from a clean full checkout:
+5. Confirm CI runner availability, billing, artifact retention, EAS service limits,
+   and the approved pilot budget (currently up to $25). Local builds do not use
+   paid EAS cloud workers; CI compute and EAS services still have their own limits.
+   Inspect the EAS source archive from a clean full checkout:
    workspace packages, patches, dependency tarballs, native headers, and the
    terminal XCFramework must be present; secrets, `.env`, local state, `.repos`,
    and generated native projects must be absent. The root `.easignore` owns these
    exclusions. Do not use sparse checkout for EAS uploads.
-6. Build an Android APK and iOS IPA with `personal-pilot`, verify their native
+6. Build an Android APK and iOS IPA with `eas build --local --freeze-credentials`
+   using `personal-pilot` on the same toolchains as CI. Verify their native
    identity/signature/entitlements, native numbers, embedded update URL/channel,
    and runtime against EAS metadata and the calculated fingerprint. Install over
    the existing Android app and through TestFlight for iOS; verify retained
@@ -157,7 +165,7 @@ After these checks and the protected-token move, set `SKALD_EAS_READY=true`.
 The first manual production release establishes production-channel baselines;
 pilot builds do not establish production distribution. Verify both production
 installs, a later OTA-only release linking the original APK, and a deliberate
-native refresh before declaring cutover complete. No cloud or device pilot is
+native refresh before declaring cutover complete. No native or device pilot is
 implied by merging this migration.
 
 ## Cutting a release
@@ -195,7 +203,7 @@ it. Only afterward may OTA delivery or iOS verification/submission run.
 The prerelease contains the Linux archive, Mac desktop assets, `SHA256SUMS`,
 `ADMISSION.json`, and `manifest.json`. A native Android release also attaches its
 new APK. An OTA-only release's manifest and release notes point to the original
-APK's release, filename, URL, digest, source SHA, EAS build ID, and runtime.
+APK's release, filename, URL, digest, source SHA, native build reference, and runtime.
 Referenced bytes are never renamed or attached as a new build. The manifest records
 [verification scope](#verification-scope) for artifacts actually checked in this
 release, and intended mobile delivery rather than speculative success.
@@ -206,10 +214,16 @@ Linux/Mac artifacts retain their build provenance attestations:
 gh attestation verify t3-0.0.46-atli.1-linux-x64.tar.gz -R atlitech/skald-code
 ```
 
-EAS compiles mobile binaries. GitHub verification and publication evidence does
-not claim that GitHub compiled them. Actual EAS build/update/submission IDs and
-delivery states are recorded in EAS history and GitHub deployments
-`skald-mobile-android` and `skald-mobile-ios`.
+CI runs the pinned EAS CLI/local-worker plugin with managed credentials and
+remote native counters. Each verified binary and its baseline metadata are saved
+in one immutable Actions artifact for 90 days. The native identity is
+`github:<runId>:<runAttempt>:<platform>`; deployments record the exact artifact ID,
+workflow SHA, checked-out release SHA, digest, runtime, and allocated native
+number. The controller captures that number from the worker's allowlisted job
+metadata, never from a later read of the shared remote counter. Android's original
+release APK remains the permanent download. EAS history owns OTA update IDs;
+GitHub deployments `skald-mobile-android` and `skald-mobile-ios` record actual
+delivery outcomes. Existing manifests with EAS build IDs remain readable.
 
 A published release never changes. Before publication, resolve a failure and
 start a fresh dispatch; once a tag/release exists, use a new version for another
@@ -232,7 +246,7 @@ Gradle caching alone. The artifacts include an unsigned APK, Gradle profiles,
 build logs, and compiler-cache statistics; the APK is not an installable release.
 
 This unsigned diagnostic workflow retains the GitHub compiler-cache setup;
-production compilation uses EAS workers. Only compiler objects and Metro
+production compilation uses EAS local workers on CI. Only compiler objects and Metro
 transforms are persisted in the benchmark; generated `app/build` outputs are not
 safe to restore because some tasks omit inputs. Keep the release's artifact
 identity checks enabled when changing EAS build settings.
@@ -448,18 +462,18 @@ Use the `develop-t3-personal-android` skill and its EAS local-worker helper:
 
 Install the APK path returned by EAS with `adb install -r` after the same identity
 checks. The helper uses the `personal` profile, managed credentials, and remote
-counters. It still requires Expo connectivity; it is a cloud-worker fallback,
-not offline disaster recovery. The old `--release-version` and direct production
+counters, using the same local-worker mechanism as CI. It requires Expo
+connectivity and is not offline disaster recovery. The old `--release-version` and direct production
 Gradle path are retired. During a complete Expo outage, pause publication until
 an explicit recovery procedure reestablishes a single numbering authority.
 
 ## Installing the personal iOS app
 
-Native iOS delivery builds the exact published release SHA with EAS, verifies the
+Native iOS delivery compiles the exact published release SHA on the Mac runner, verifies the
 IPA's app/widget/share identities, entitlements, signature, native build number,
-and embedded update settings, then submits that exact EAS build ID to TestFlight.
-Compatible releases use OTA instead. Neither EAS build `FINISHED` nor a successful
-submission proves tester availability: Apple must process the build and make it
+and embedded update settings, retains the IPA, then uploads those exact bytes to
+TestFlight. Compatible releases use OTA instead. Neither a successful local build
+nor an accepted upload proves tester availability: Apple must process the build and make it
 available to a testing group with testers before the deployment is marked
 `distributed`.
 
@@ -486,7 +500,7 @@ compatibility with older or remotely connected servers.
 
 `manifest.json` is immutable delivery intent. Inspect EAS history and the GitHub
 `skald-mobile-android` / `skald-mobile-ios` deployment payloads and statuses for
-actual build IDs, update group IDs, submission IDs, checksums, and delivery
+actual native references, artifact IDs, update group IDs, Apple build IDs, checksums, and delivery
 outcomes. A failed mobile delivery does not mutate or invalidate the server
 release. Pending Apple processing or tester-group assignment is still pending
 mobile delivery.
@@ -499,15 +513,24 @@ gh workflow run fork-mobile-update.yml -R atlitech/skald-code --ref atli \
 ```
 
 The retry resolves and checks the published manifest/tag SHA, checks out that
-exact commit, and resumes its recorded build/submission IDs. It cannot publish
+exact commit, and resumes its recorded native artifact and Apple build. It cannot publish
 arbitrary current `atli` code. Older releases cannot overtake newer delivery.
 An unavailable/expired intended TestFlight baseline requires a new manual release
 with native refresh; a retry cannot rewrite the old release's intent.
 
-If a runner loses a submission response, first reconcile its exact EAS build's
-submission history. Do not upload the same App Store Connect build number again
-or use `--latest`. Failed native build IDs are not silently replaced on retry;
-resolve the failure and trigger a new release when a new build is required.
+Retries recover the original binary by run, artifact ID/name, source SHA, runtime,
+and checksum; they do not allocate another number while retained bytes exist.
+If a build died before saving its artifact, or the 90-day retention expired,
+`-f rebuild-native=true` explicitly permits a new iOS build with a higher remote
+number. It does not replace an already published Android APK. Before publication,
+use a fresh release version if an Android attempt has no recoverable artifact.
+
+An upload is checkpointed before contacting Apple. If its response is lost, retry
+only reconciles the exact app/version/build in App Store Connect and never uploads
+it twice. Missing visibility after an ambiguous upload requires operator
+investigation; `rebuild-native` does not bypass that guard. Failed Apple processing
+requires a new native refresh release. Pending processing or tester assignment
+can be retried once Apple has made the existing build available.
 
 For emergency JavaScript rollback, suspend manual release/retry dispatches and
 wait for the current production publication to finish. Select the known-good

@@ -53,7 +53,7 @@ jobs:
           SKALD_EAS_READY: ${{ vars.SKALD_EAS_READY }}
         run: |
           if [ "$SKALD_EAS_READY" != true ]; then
-            echo "::error::Complete managed signing, remote counter seeding, protected token setup, and the cloud/device pilot in the runbook before enabling EAS releases."
+            echo "::error::Complete managed signing, remote counter seeding, protected token setup, and the native/device pilot in the runbook before enabling EAS releases."
             exit 1
           fi
 
@@ -350,14 +350,17 @@ jobs:
     name: Plan mobile delivery from distributed baselines
     needs: guard
     if: github.repository_id == '1406026313' && github.ref == 'refs/heads/atli'
-    runs-on: ubuntu-24.04
-    environment: personal-ios-signing
+    runs-on: ${{ matrix.platform == 'android' && 'blacksmith-8vcpu-ubuntu-2404' || 'blacksmith-12vcpu-macos-26' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        platform: [android, ios]
+    environment: ${{ matrix.platform == 'android' && 'personal-android-signing' || 'personal-ios-signing' }}
     timeout-minutes: 30
     permissions:
       contents: read
       deployments: write
-    outputs:
-      android-mode: ${{ steps.plan.outputs.android-mode }}
+      actions: read
     env:
       APP_VARIANT: personal
       T3CODE_MOBILE_CHANNEL: personal-production
@@ -386,6 +389,10 @@ jobs:
         run: |
           pnpm_version="$(node --print "require('./package.json').packageManager.split('@').pop()")"
           echo "$HOME/.vite-plus/package_manager/pnpm/$pnpm_version/pnpm/bin" >> "$GITHUB_PATH"
+
+      - uses: ./.github/actions/setup-mobile-worker
+        with:
+          platform: ${{ matrix.platform }}
 
       - name: Setup EAS
         uses: expo/expo-github-action@v8
@@ -397,32 +404,33 @@ jobs:
       - name: Resolve native compatibility and Apple availability
         id: plan
         env:
+          PLATFORM: ${{ matrix.platform }}
           FORCE_NATIVE: ${{ inputs.force-native }}
           SKALD_ASC_APP_ID: ${{ vars.SKALD_ASC_APP_ID }}
           ASC_KEY_ID: ${{ vars.T3CODE_IOS_APP_STORE_CONNECT_KEY_ID }}
           ASC_ISSUER_ID: ${{ vars.T3CODE_IOS_APP_STORE_CONNECT_ISSUER_ID }}
           ASC_KEY_BASE64: ${{ secrets.T3CODE_IOS_APP_STORE_CONNECT_KEY_BASE64 }}
         run: |
-          node scripts/fork-mobile-release.ts prepare --sha "$SHA" --tag "$TAG" --force "$FORCE_NATIVE" --out "$RUNNER_TEMP/mobile-intent.json"
-          echo "android-mode=$(jq -r .android.mode "$RUNNER_TEMP/mobile-intent.json")" >> "$GITHUB_OUTPUT"
+          node scripts/fork-mobile-release.ts prepare --platform "$PLATFORM" --sha "$SHA" --tag "$TAG" --force "$FORCE_NATIVE" --out "$RUNNER_TEMP/$PLATFORM-intent.json"
 
       - name: Save immutable delivery intent
         uses: actions/upload-artifact@v7
         with:
-          name: mobile-intent
-          path: ${{ runner.temp }}/mobile-intent.json
+          name: mobile-intent-${{ matrix.platform }}
+          path: ${{ runner.temp }}/${{ matrix.platform }}-intent.json
           if-no-files-found: error
 
   build-android:
     name: Build or reference personal Android APK
     needs: [guard, mobile-plan]
     if: github.repository_id == '1406026313' && github.ref == 'refs/heads/atli'
-    runs-on: ubuntu-24.04
+    runs-on: blacksmith-8vcpu-ubuntu-2404
     environment: personal-android-signing
     timeout-minutes: 150
     permissions:
       contents: read
       deployments: write
+      actions: read
     env:
       APP_VARIANT: personal
       T3CODE_MOBILE_CHANNEL: personal-production
@@ -452,6 +460,10 @@ jobs:
           pnpm_version="$(node --print "require('./package.json').packageManager.split('@').pop()")"
           echo "$HOME/.vite-plus/package_manager/pnpm/$pnpm_version/pnpm/bin" >> "$GITHUB_PATH"
 
+      - uses: ./.github/actions/setup-mobile-worker
+        with:
+          platform: android
+
       - name: Setup EAS
         uses: expo/expo-github-action@v8
         with:
@@ -462,8 +474,12 @@ jobs:
       - name: Download delivery intent
         uses: actions/download-artifact@v8
         with:
-          name: mobile-intent
+          pattern: mobile-intent-*
+          merge-multiple: true
           path: ${{ runner.temp }}
+
+      - name: Assemble platform intents
+        run: node scripts/fork-mobile-release.ts assemble --tag "$TAG" --dir "$RUNNER_TEMP" --out "$RUNNER_TEMP/mobile-intent.json"
 
       - name: Check public config
         run: |
@@ -471,11 +487,26 @@ jobs:
           node scripts/fork-android-config.ts --config "$RUNNER_TEMP/expo-config.json"
 
       - name: Check APK identity
+        id: native
         run: node scripts/fork-mobile-release.ts android --sha "$SHA" --tag "$TAG" --intent "$RUNNER_TEMP/mobile-intent.json" --dir "$RUNNER_TEMP/release-android"
 
-      # EAS is the compiler. The manifest attests what GitHub verified, with the EAS build ID.
+      - name: Retain verified native bytes
+        if: steps.native.outputs.upload-native == 'true'
+        uses: actions/upload-artifact@v7
+        with:
+          name: ${{ steps.native.outputs.artifact-name }}
+          path: |
+            ${{ runner.temp }}/release-android/*.apk
+            ${{ runner.temp }}/release-android/baseline.json
+          if-no-files-found: error
+          retention-days: 90
+
+      - name: Record durable native provenance
+        if: steps.native.outputs.native == 'true'
+        run: node scripts/fork-mobile-release.ts register-native --platform android --sha "$SHA" --tag "$TAG" --dir "$RUNNER_TEMP/release-android" --intent "$RUNNER_TEMP/mobile-intent.json"
+
       - name: Upload newly verified APK
-        if: needs.mobile-plan.outputs.android-mode == 'native'
+        if: steps.native.outputs.native == 'true'
         uses: actions/upload-artifact@v7
         with:
           name: release-android-arm64-v8a
@@ -680,6 +711,7 @@ jobs:
     permissions:
       contents: read
       deployments: write
+      actions: read
     uses: ./.github/workflows/fork-mobile-delivery.yml
     with:
       tag: ${{ needs.guard.outputs.tag }}

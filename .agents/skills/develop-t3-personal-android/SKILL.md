@@ -130,13 +130,13 @@ Do not interpret successful Gmail email verification as fixing native Google OAu
 
 ## Release APKs and the versionCode
 
-The manual fork release workflow decides between EAS native builds and compatible OTA delivery. A native Android release verifies the APK identity and signing certificate before GitHub publication. An OTA-only release links the original compatible APK with its original filename and checksum. Installing that baseline initially runs its embedded JavaScript; network access and applying the update bring it to the new release.
+The manual fork release workflow decides between EAS local builds on CI runners and compatible OTA delivery. A native Android release verifies the APK identity and signing certificate before GitHub publication. An OTA-only release links the original compatible APK with its original filename and checksum. Installing that baseline initially runs its embedded JavaScript; network access and applying the update bring it to the new release.
 
 EAS owns the remote Android versionCode counter. It must be initialized above the highest distributed versionCode before the first migration build. Every native build reserves a new number, including local builds and pilots. The fork release version is independent; do not derive or manually override a production versionCode from it. Never uninstall to bypass a downgrade or signature error.
 
 ## Build a standalone APK locally
 
-The cloud-worker fallback uses the same remote credentials and counters as CI:
+The local helper uses the same worker, remote credentials and counters as CI:
 
 ```bash
 .agents/skills/develop-t3-personal-android/scripts/build-personal-apk.sh
