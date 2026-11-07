@@ -10,6 +10,7 @@ import * as NodeUtil from "node:util";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 import { decodeReleaseManifestJson } from "./fork-release-manifest.ts";
+import { hasTestFlightTesters } from "./lib/fork-mobile-apple.ts";
 import {
   chooseMobileDelivery,
   GitHubNativeBuild,
@@ -254,9 +255,6 @@ const decodeBetaDetail = Schema.decodeUnknownSync(
     }),
   }),
 );
-const decodeAppleIds = Schema.decodeUnknownSync(
-  Schema.Struct({ data: Schema.Array(Schema.Struct({ id: Schema.String })) }),
-);
 const decodeFingerprint = Schema.decodeUnknownSync(
   Schema.Struct({
     hash: Schema.String,
@@ -346,12 +344,7 @@ async function appleAvailability(baseline: NativeBaseline) {
     state.externalBuildState !== "IN_BETA_TESTING"
   )
     return { id: build.id, expiresAt, available: false };
-  const groups = decodeAppleIds(await apple(`builds/${build.id}/betaGroups?limit=200`));
-  for (const group of groups.data) {
-    const testers = decodeAppleIds(await apple(`betaGroups/${group.id}/betaTesters?limit=1`));
-    if (testers.data.length) return { id: build.id, expiresAt, available: true };
-  }
-  return { id: build.id, expiresAt, available: false };
+  return { id: build.id, expiresAt, available: await hasTestFlightTesters(apple, build.id) };
 }
 
 async function fingerprint(platform: Platform, profile = true) {
