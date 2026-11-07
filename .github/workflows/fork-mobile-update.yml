@@ -7,6 +7,10 @@ on:
         description: "Published fork release tag to resume (exact manifest SHA)"
         type: string
         required: true
+      rebuild-native:
+        description: "Reserve a new iOS number if retained bytes were lost (never after an ambiguous upload)"
+        type: boolean
+        default: false
 
 concurrency:
   group: skald-production-publication
@@ -15,6 +19,7 @@ concurrency:
 permissions:
   contents: read
   deployments: write
+  actions: read
 
 jobs:
   retry:
@@ -22,4 +27,5 @@ jobs:
     uses: ./.github/workflows/fork-mobile-delivery.yml
     with:
       tag: ${{ inputs.tag }}
+      rebuild-native: ${{ inputs.rebuild-native }}
     secrets: inherit

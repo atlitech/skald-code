@@ -7,8 +7,8 @@ import { FORK_VERIFICATION_SCOPE } from "./fork-release-manifest.ts";
 
 // A fork release is dispatched from atli, guarded before any build, admitted
 // by upgrading over the prior release's data, and published once: the tag and
-// an immutable release. GitHub attests its own builds; EAS mobile provenance
-// is recorded in the manifest and delivery history.
+// an immutable release. Mobile binary provenance is retained in Actions artifacts
+// and recorded in the manifest and delivery history.
 const workflow = NodeFS.readFileSync(
   NodePath.join(import.meta.dirname, "..", ".github", "workflows", "fork-server-release.yml"),
   "utf8",
@@ -110,7 +110,6 @@ const stepIndex = (steps: ReadonlyArray<string>, pattern: RegExp): number => {
 const CONFIG_CHECK =
   /node scripts\/fork-android-config\.ts --config "\$RUNNER_TEMP\/expo-config\.json"/;
 const ANDROID_DELIVERY = /node scripts\/fork-mobile-release\.ts android /;
-const UPLOAD = /uses: actions\/upload-artifact@/;
 
 describe("fork server release workflow", () => {
   it("runs only on a dispatch, never on a pushed tag", () => {
@@ -458,14 +457,14 @@ describe("fork server release workflow", () => {
     const steps = stepsOf(job("build-android"));
     const config = stepIndex(steps, CONFIG_CHECK);
     const identity = stepIndex(steps, ANDROID_DELIVERY);
-    const upload = stepIndex(steps, UPLOAD);
+    const upload = stepIndex(steps, /name: Upload newly verified APK/);
     expect(identity).toBeGreaterThan(config);
     expect(upload).toBeGreaterThan(identity);
     expect(steps[config]).toContain("eas env:exec production");
     expect(steps[identity]).toContain(
       '--sha "$SHA" --tag "$TAG" --intent "$RUNNER_TEMP/mobile-intent.json"',
     );
-    expect(steps[upload]).toContain("if: needs.mobile-plan.outputs.android-mode == 'native'");
+    expect(steps[upload]).toContain("if: steps.native.outputs.native == 'true'");
     expect(steps[upload]).toContain("name: release-android-arm64-v8a");
     expect(steps[upload]).toContain("if-no-files-found: error");
     expect(job("build-android").join("\n")).not.toMatch(ATTEST);
@@ -486,22 +485,29 @@ describe("fork mobile delivery and retry", () => {
     expect(job("resolve", mobileDelivery).join("\n")).toContain(
       'node scripts/fork-mobile-release.ts resolve --tag "$TAG"',
     );
-    for (const name of ["deliver", "testflight"]) {
+    for (const name of ["deliver"]) {
       const body = job(name, mobileDelivery);
       const text = body.join("\n");
       expect(needsOf(body)).toContain("resolve");
       expect(text).toContain("ref: ${{ needs.resolve.outputs.sha }}");
       expect(text).toContain("fetch-depth: 0");
       expect(text).not.toMatch(/sparse-checkout|filter: blob:none/);
-      expect(text).not.toMatch(
-        /uses: actions\/(?:upload-artifact|attest-build-provenance)@|--latest|xcodebuild/,
-      );
+      expect(text).not.toMatch(/--latest|xcodebuild/);
     }
-    expect(needsOf(job("testflight", mobileDelivery))).toContain("deliver");
-    expect(job("testflight", mobileDelivery).join("\n")).toContain(
-      'node scripts/fork-mobile-release.ts ios-verify --tag "$TAG"',
+    const delivery = job("deliver", mobileDelivery).join("\n");
+    const steps = stepsOf(job("deliver", mobileDelivery));
+    expect(stepIndex(steps, /ios-submit/)).toBeGreaterThan(stepIndex(steps, /register-native/));
+    expect(stepIndex(steps, /register-native/)).toBeGreaterThan(
+      stepIndex(steps, /uses: actions\/upload-artifact@/),
     );
-    expect(runsOn(job("testflight", mobileDelivery))).toMatch(/^macos-\d+$/);
+    expect(delivery).toContain("retention-days: 90");
+    expect(delivery).toContain("steps.native.outputs.upload-native == 'true'");
+    expect(runsOn(job("deliver", mobileDelivery))).toBe(runsOn(job("mobile-plan")));
+    expect(runsOn(job("mobile-plan"))).toContain("'blacksmith-12vcpu-macos-26'");
+    expect(runsOn(job("mobile-plan"))).toContain("'blacksmith-8vcpu-ubuntu-2404'");
+    expect(job("mobile-plan").join("\n")).toContain('prepare --platform "$PLATFORM"');
+    expect(job("build-android").join("\n")).toContain("register-native --platform android");
+    expect(jobMap(job("build-android"), "permissions").get("actions")).toBe("read");
   });
 
   it("retries only a named published tag through the same guarded delivery workflow", () => {
@@ -514,6 +520,7 @@ describe("fork mobile delivery and retry", () => {
     expect(ifOf(body)).toContain("github.ref == 'refs/heads/atli'");
     expect(body.join("\n")).toContain("uses: ./.github/workflows/fork-mobile-delivery.yml");
     expect(body.join("\n")).toContain("tag: ${{ inputs.tag }}");
+    expect(body.join("\n")).toContain("rebuild-native: ${{ inputs.rebuild-native }}");
     expect(mobileRetry).not.toMatch(
       /eas update|actions\/checkout|ref: atli|inputs\.(?:ref|sha|runtime)/,
     );

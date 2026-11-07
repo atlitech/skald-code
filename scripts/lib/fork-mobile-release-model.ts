@@ -9,8 +9,18 @@ const Sha = Schema.String.check(Schema.isPattern(/^[0-9a-f]{40}$/));
 const Digest = Schema.String.check(Schema.isPattern(/^[0-9a-f]{64}$/));
 const Nonempty = Schema.String.check(Schema.isPattern(/\S/));
 
+export const GitHubNativeBuild = Schema.Struct({
+  workflowSha: Sha,
+  runId: Schema.String.check(Schema.isPattern(/^[1-9]\d*$/)),
+  runAttempt: Schema.String.check(Schema.isPattern(/^[1-9]\d*$/)),
+  artifactName: Nonempty,
+  artifactId: Schema.optionalKey(Schema.String.check(Schema.isPattern(/^[1-9]\d*$/))),
+});
+export type GitHubNativeBuild = typeof GitHubNativeBuild.Type;
+
 export const NativeBaseline = Schema.Struct({
   buildId: Nonempty,
+  github: Schema.optionalKey(GitHubNativeBuild),
   sourceSha: Sha,
   profile: Schema.Literal(MOBILE_PROFILE),
   appBuildVersion: Schema.String.check(Schema.isPattern(/^[1-9][0-9]*$/)),
@@ -29,7 +39,7 @@ export const NativeBaseline = Schema.Struct({
 });
 export type NativeBaseline = typeof NativeBaseline.Type;
 
-const PlatformDelivery = Schema.Struct({
+export const PlatformDelivery = Schema.Struct({
   mode: Schema.Literals(["native", "ota"]),
   runtimeVersion: Nonempty,
   appVersion: Nonempty,
@@ -88,6 +98,14 @@ export const validateMobileIntent = (
   for (const platform of ["android", "ios"] as const) {
     const delivery = intent[platform];
     const baseline = delivery.baseline;
+    if (
+      baseline?.github &&
+      (!baseline.github.artifactId ||
+        baseline.buildId !==
+          `github:${baseline.github.runId}:${baseline.github.runAttempt}:${platform}`)
+    ) {
+      return `${platform} GitHub native provenance is incomplete or inconsistent.`;
+    }
     if (delivery.mode === "ota" && !baseline)
       return `${platform} OTA needs a distributed baseline.`;
     if (
@@ -102,7 +120,7 @@ export const validateMobileIntent = (
   const baseline = android.baseline;
   const artifact = baseline?.artifact;
   if (!baseline || !artifact)
-    return "Android delivery needs its original APK and EAS build reference.";
+    return "Android delivery needs its original APK and native build reference.";
   const version = baseline.releaseTag.replace(/^v/, "");
   if (artifact.file !== `T3-Code-${version}-android-arm64-v8a.apk`) {
     return "Android baseline filename must retain its original release version.";

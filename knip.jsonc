@@ -28,6 +28,8 @@
         // These fixture scripts are injected into a browser page by path.
         "fixtures/*/*.js",
         "knip-schemas.ts",
+        // EAS invokes this executable through EAS_LOCAL_BUILD_PLUGIN_PATH.
+        "fork-mobile-local-worker.ts",
         "linux-after-pack.ts",
         "mobile-behavior/run.ts",
         "mobile-native-client.ts",

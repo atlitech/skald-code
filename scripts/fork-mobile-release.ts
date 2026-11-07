@@ -6,33 +6,38 @@ import * as NodeFSP from "node:fs/promises";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 import * as NodeProcess from "node:process";
-import * as NodeTimersPromises from "node:timers/promises";
 import * as NodeUtil from "node:util";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 import { decodeReleaseManifestJson } from "./fork-release-manifest.ts";
 import {
   chooseMobileDelivery,
+  GitHubNativeBuild,
+  PlatformDelivery,
   MobileReleaseIntent,
   NativeBaseline,
   validateMobileIntent,
 } from "./lib/fork-mobile-release-model.ts";
 import {
-  assertBuild,
   assertNotSuperseded,
   assertUpdate,
   easJsonArgs,
-  EASBuild,
-  EASSubmission,
   EASUpdate,
-  selectSubmission,
   selectUpdate,
   EAS_PROJECT_ID,
   MOBILE_CHANNEL,
   MOBILE_PROFILE,
   MOBILE_REPO,
-  selectBuild,
 } from "./lib/fork-mobile-eas.ts";
+
+import {
+  ActionsArtifact,
+  LocalBuildMetadata,
+  assertLocalBuild,
+  assertRetainedNative,
+  selectNativeArtifact,
+  shouldUploadToApple,
+} from "./lib/fork-mobile-local.ts";
 
 const root = NodePath.resolve(import.meta.dirname, "..");
 const mobile = NodePath.join(root, "apps/mobile");
@@ -56,6 +61,8 @@ const DeliveryRecord = Schema.Struct({
   ]),
   publishedAt: Schema.optionalKey(Schema.String),
   intent: Schema.optionalKey(MobileReleaseIntent),
+  platformIntent: Schema.optionalKey(PlatformDelivery),
+  nativeRun: Schema.optionalKey(GitHubNativeBuild),
   buildId: Schema.optionalKey(Schema.String),
   baseline: Schema.optionalKey(NativeBaseline),
   updateGroupId: Schema.optionalKey(Schema.String),
@@ -208,7 +215,7 @@ const AppleBuilds = Schema.Struct({
       id: Schema.String,
       attributes: Schema.Struct({
         version: Schema.String,
-        expirationDate: Schema.String,
+        expirationDate: Schema.NullOr(Schema.String),
         expired: Schema.Boolean,
         processingState: Schema.String,
       }),
@@ -249,19 +256,6 @@ const decodeBetaDetail = Schema.decodeUnknownSync(
 const decodeAppleIds = Schema.decodeUnknownSync(
   Schema.Struct({ data: Schema.Array(Schema.Struct({ id: Schema.String })) }),
 );
-const decodeSubmissions = Schema.decodeUnknownSync(
-  Schema.Struct({
-    data: Schema.Struct({
-      builds: Schema.Struct({
-        byId: Schema.Struct({
-          id: Schema.String,
-          app: Schema.Struct({ id: Schema.String }),
-          submissions: Schema.Array(EASSubmission),
-        }),
-      }),
-    }),
-  }),
-);
 const decodeFingerprint = Schema.decodeUnknownSync(
   Schema.Struct({
     hash: Schema.String,
@@ -278,8 +272,6 @@ const decodeExpoConfig = Schema.decodeUnknownSync(
     extra: Schema.Struct({ eas: Schema.Struct({ projectId: Schema.String }) }),
   }),
 );
-const decodeBuild = Schema.decodeUnknownSync(EASBuild);
-const decodeBuilds = Schema.decodeUnknownSync(Schema.Array(EASBuild));
 const decodeRelease = Schema.decodeUnknownSync(
   Schema.Struct({
     draft: Schema.Boolean,
@@ -310,10 +302,6 @@ const decodeUpdatePage = Schema.decodeUnknownSync(
   Schema.Struct({ currentPage: Schema.Array(Schema.Struct({ group: Schema.String })) }),
 );
 const decodeUpdates = Schema.decodeUnknownSync(Schema.Array(EASUpdate));
-const decodeSubmitConfig = Schema.decodeUnknownSync(
-  Schema.Struct({ submit: Schema.Record(Schema.String, Schema.Unknown) }),
-);
-const decodeObject = Schema.decodeUnknownSync(Schema.Record(Schema.String, Schema.Unknown));
 const decodePersonalProfile = Schema.decodeUnknownSync(
   Schema.Struct({
     build: Schema.Struct({
@@ -346,11 +334,10 @@ async function appleAvailability(baseline: NativeBaseline) {
   if (builds.length > 1) throw new Error("Ambiguous App Store Connect native build.");
   const build = builds[0];
   if (!build) return undefined;
-  const expiresAt = build.attributes.expirationDate;
-  if (!Number.isFinite(Date.parse(expiresAt)))
-    throw new Error("Invalid TestFlight expiration date.");
+  const expiresAt = build.attributes.expirationDate ?? "";
   if (build.attributes.expired || build.attributes.processingState !== "VALID")
     return { id: build.id, expiresAt, available: false };
+  if (!Number.isFinite(Date.parse(expiresAt))) return { id: build.id, expiresAt, available: false };
   const detail = decodeBetaDetail(await apple(`builds/${build.id}/buildBetaDetail`));
   const state = detail.data.attributes;
   if (
@@ -364,26 +351,6 @@ async function appleAvailability(baseline: NativeBaseline) {
     if (testers.data.length) return { id: build.id, expiresAt, available: true };
   }
   return { id: build.id, expiresAt, available: false };
-}
-
-async function submissionsFor(buildId: string) {
-  const response = await fetch("https://api.expo.dev/graphql", {
-    method: "POST",
-    headers: {
-      "content-type": "application/json",
-      authorization: `Bearer ${required("EXPO_TOKEN")}`,
-    },
-    body: JSON.stringify({
-      query: `query SkaldBuildSubmissions($id: ID!) { builds { byId(buildId: $id) { id app { id } submissions { id status iosConfig { ascAppIdentifier } } } } }`,
-      variables: { id: buildId },
-    }),
-  });
-  if (!response.ok) throw new Error(`Expo submission lookup failed (${response.status}).`);
-  const result = decodeSubmissions(await response.json());
-  const build = result.data.builds.byId;
-  if (build.id !== buildId || build.app.id !== EAS_PROJECT_ID)
-    throw new Error("Submission query returned a different project/build.");
-  return build.submissions;
 }
 
 async function fingerprint(platform: Platform, profile = true) {
@@ -423,169 +390,302 @@ async function checkConfig() {
   }
   return config;
 }
-async function prepare(sha: string, tag: string, out: string, force: string) {
-  await appleIdentity();
-  const old = (await records("ios")).find(
-    (item) => item.payload.tag === tag && item.payload.intent,
-  );
+async function prepare(platform: Platform, sha: string, tag: string, out: string, force: string) {
+  if (platform === "ios") await appleIdentity();
+  const history = await records(platform);
+  const old = history.find((item) => item.payload.tag === tag && item.payload.platformIntent);
   if (old) {
     if (old.payload.sha !== sha) throw new Error("Release planning SHA changed.");
-    await write(out, old.payload.intent);
+    await write(out, old.payload.platformIntent);
     return;
   }
   const config = await checkConfig();
-  const decisions = {} as Record<Platform, ReturnType<typeof chooseMobileDelivery>>;
-  for (const platform of ["android", "ios"] as const) {
-    let baseline = (await records(platform)).find((item) => item.payload.phase === "distributed")
-      ?.payload.baseline;
-    if (baseline && platform === "ios") {
-      const availability = await appleAvailability(baseline);
-      baseline = availability?.available
-        ? { ...baseline, expiresAt: availability.expiresAt }
-        : undefined;
-    }
-    decisions[platform] = chooseMobileDelivery({
-      platform,
-      runtimeVersion: await fingerprint(platform),
-      appVersion: config.version,
-      ...(baseline ? { baseline } : {}),
-      forceNative: force === "all" || force === platform,
-      now: Date.now(),
-    });
+  let baseline = history.find((item) => item.payload.phase === "distributed")?.payload.baseline;
+  if (baseline && platform === "ios") {
+    const availability = await appleAvailability(baseline);
+    baseline = availability?.available
+      ? { ...baseline, expiresAt: availability.expiresAt }
+      : undefined;
   }
-  const intent: MobileReleaseIntent = { channel: MOBILE_CHANNEL, ...decisions };
-  await record({ schemaVersion: 1, tag, sha, platform: "ios", phase: "planned", intent });
-  await write(out, intent);
+  const platformIntent = chooseMobileDelivery({
+    platform,
+    runtimeVersion: await fingerprint(platform),
+    appVersion: config.version,
+    ...(baseline ? { baseline } : {}),
+    forceNative: force === "all" || force === platform,
+    now: Date.now(),
+  });
+  await record({ schemaVersion: 1, tag, sha, platform, phase: "planned", platformIntent });
+  await write(out, platformIntent);
 }
 
-async function buildFor(
+const decodeArtifactPages = Schema.decodeUnknownSync(
+  Schema.Array(Schema.Struct({ artifacts: Schema.Array(ActionsArtifact) })),
+);
+const decodeBaseline = Schema.decodeUnknownSync(NativeBaseline);
+const decodeLocalMetadata = Schema.decodeUnknownSync(LocalBuildMetadata);
+async function output(name: string, value: string) {
+  await NodeFSP.appendFile(required("GITHUB_OUTPUT"), `${name}=${value}\n`);
+}
+async function nativeArtifact(reference: GitHubNativeBuild, allowExpired = false) {
+  const pages = decodeArtifactPages(
+    json(
+      await run("gh", [
+        "api",
+        `${repoPath}/actions/runs/${reference.runId}/artifacts?per_page=100`,
+        "--paginate",
+        "--slurp",
+      ]),
+    ),
+  );
+  return selectNativeArtifact(
+    pages.flatMap((page) => page.artifacts),
+    reference,
+    allowExpired,
+  );
+}
+async function recoverNative(
+  reference: GitHubNativeBuild,
   platform: Platform,
   sha: string,
   tag: string,
   intent: MobileReleaseIntent,
+  dir: string,
+  allowExpired = false,
+) {
+  const artifact = await nativeArtifact(reference, allowExpired);
+  if (!artifact) return undefined;
+  const temp = await NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), "skald-native-"));
+  try {
+    const archive = NodePath.join(temp, "artifact.zip");
+    await new Promise<void>((resolve, reject) => {
+      const child = NodeChildProcess.spawn(
+        "gh",
+        ["api", `${repoPath}/actions/artifacts/${artifact.id}/zip`],
+        { stdio: ["ignore", "pipe", "inherit"] },
+      );
+      const chunks: Buffer[] = [];
+      child.stdout.on("data", (chunk: Buffer) => chunks.push(chunk));
+      child.on("error", reject);
+      child.on("close", (code) => {
+        if (code !== 0) {
+          reject(new Error("Native artifact download failed."));
+          return;
+        }
+        NodeFSP.writeFile(archive, Buffer.concat(chunks)).then(resolve, reject);
+      });
+    });
+    const entries = (await run("unzip", ["-Z1", archive])).trim().split("\n");
+    const name =
+      platform === "android" ? `T3-Code-${tag.replace(/^v/, "")}-android-arm64-v8a.apk` : "app.ipa";
+    if (entries.length !== 2 || !entries.includes("baseline.json") || !entries.includes(name)) {
+      throw new Error("Native artifact must contain only its binary and baseline.json.");
+    }
+    await run("unzip", ["-q", archive, "-d", temp]);
+    const baseline = decodeBaseline(
+      json(await NodeFSP.readFile(NodePath.join(temp, "baseline.json"), "utf8")),
+    );
+    const binary = NodePath.join(temp, name);
+    assertRetainedNative(baseline, {
+      reference,
+      platform,
+      sourceSha: sha,
+      tag,
+      intent: intent[platform],
+      file: name,
+      ...(await digest(binary)),
+    });
+    await NodeFSP.mkdir(dir, { recursive: true });
+    await NodeFSP.copyFile(binary, NodePath.join(dir, name));
+    const recovered = { ...baseline, github: { ...reference, artifactId: String(artifact.id) } };
+    await write(NodePath.join(dir, "baseline.json"), recovered);
+    return recovered;
+  } finally {
+    await NodeFSP.rm(temp, { recursive: true, force: true });
+  }
+}
+async function localBuild(
+  platform: Platform,
+  sha: string,
+  tag: string,
+  intent: MobileReleaseIntent,
+  dir: string,
+  rebuild: boolean,
   publishedAt?: string,
 ) {
   const history = await records(platform);
-  const checkpoint = history.find((item) => item.payload.tag === tag && item.payload.buildId);
-  const previous = checkpoint?.payload;
-  if (checkpoint) activeDeployments.set(platform, checkpoint.id);
-  if (previous && previous.sha !== sha)
-    throw new Error("Recorded build belongs to a different release SHA.");
-  const message = `skald:${tag}:${platform}:${sha}`;
-  let build: EASBuild | undefined;
-  if (previous?.buildId) build = decodeBuild(await eas(["build:view", previous.buildId]));
-  else {
-    const builds: EASBuild[] = [];
-    for (let offset = 0; ; offset += 50) {
-      const page = decodeBuilds(
-        await eas([
-          "build:list",
-          "--platform",
-          platform,
-          "--build-profile",
-          MOBILE_PROFILE,
-          "--git-commit-hash",
-          sha,
-          "--limit",
-          "50",
-          "--offset",
-          String(offset),
-        ]),
-      );
-      builds.push(...page);
-      if (page.length < 50) break;
-    }
-    build = selectBuild(builds, message);
-    if (!build) {
-      if (history.some((item) => item.payload.tag === tag && item.payload.phase === "requesting")) {
-        throw new Error(
-          "A previous EAS build request has no recoverable ID yet. Reconcile it in EAS before another request.",
-        );
-      }
-      await record({
-        schemaVersion: 1,
-        tag,
-        sha,
-        platform,
-        phase: "requesting",
-        ...(publishedAt ? { publishedAt } : {}),
-      });
-      const created = decodeBuilds(
-        await eas([
-          "build",
-          "--platform",
-          platform,
-          "--profile",
-          MOBILE_PROFILE,
-          "--message",
-          message,
-          "--no-wait",
-          "--freeze-credentials",
-        ]),
-      );
-      if (created.length !== 1) throw new Error("Expected one newly requested EAS build.");
-      build = created[0]!;
-    }
-    await record({
-      schemaVersion: 1,
-      tag,
-      sha,
+  const previous = history.find(
+    (item) => item.payload.tag === tag && item.payload.nativeRun,
+  )?.payload;
+  if (previous?.sha !== undefined && previous.sha !== sha)
+    throw new Error("Native build source changed.");
+  if (previous?.nativeRun) {
+    const recovered = await recoverNative(
+      previous.nativeRun,
       platform,
-      phase: "building",
-      buildId: build.id,
-      ...(publishedAt ? { publishedAt } : {}),
-    });
+      sha,
+      tag,
+      intent,
+      dir,
+      rebuild,
+    );
+    if (recovered) {
+      await output("native", "true");
+      await output("upload-native", "false");
+      return recovered;
+    }
+    if (!rebuild)
+      throw new Error(
+        "Previous native build has no retained artifact. Explicitly request rebuild-native to reserve a higher number; never reuse a lost build number.",
+      );
   }
-  // A cancelled runner resumes this exact ID; it never allocates a replacement counter.
-  for (let attempt = 0; build.status !== "FINISHED" && attempt < 240; attempt++) {
-    if (["ERRORED", "CANCELED"].includes(build.status))
-      throw new Error(`EAS build ${build.id} ${build.status}.`);
-    await NodeTimersPromises.setTimeout(30_000);
-    build = decodeBuild(await eas(["build:view", build.id]));
-  }
-  const priorNumbers = history.flatMap((item) =>
-    item.payload.phase === "distributed" && item.payload.baseline
-      ? [BigInt(item.payload.baseline.appBuildVersion)]
-      : [],
-  );
-  const maximum = priorNumbers.reduce((max, number) => (number > max ? number : max), 0n);
-  assertBuild(build, {
-    platform,
+  if ((await fingerprint(platform)) !== intent[platform].runtimeVersion)
+    throw new Error("Native planning/build fingerprints disagree.");
+  await NodeFSP.mkdir(dir, { recursive: true });
+  const nativeRun: GitHubNativeBuild = {
+    runId: required("GITHUB_RUN_ID"),
+    runAttempt: required("GITHUB_RUN_ATTEMPT"),
+    workflowSha: required("GITHUB_SHA"),
+    artifactName: `mobile-native-${platform}-${tag}-${required("GITHUB_RUN_ATTEMPT")}`,
+  };
+  if (
+    previous?.nativeRun?.runId === nativeRun.runId &&
+    previous.nativeRun.runAttempt === nativeRun.runAttempt
+  )
+    throw new Error("Cannot repeat a native build in the same run attempt.");
+  const buildId = `github:${nativeRun.runId}:${nativeRun.runAttempt}:${platform}`;
+  await record({
+    schemaVersion: 1,
+    tag,
     sha,
-    ...intent[platform],
-    previousBuildVersion: maximum.toString(),
+    platform,
+    phase: "building",
+    buildId,
+    nativeRun,
+    ...(publishedAt ? { publishedAt } : {}),
   });
-  return build;
+  const minimum = history
+    .flatMap((item) =>
+      item.payload.baseline ? [BigInt(item.payload.baseline.appBuildVersion)] : [],
+    )
+    .reduce((max, n) => (n > max ? n : max), 0n)
+    .toString();
+  const name =
+    platform === "android" ? `T3-Code-${tag.replace(/^v/, "")}-android-arm64-v8a.apk` : "app.ipa";
+  const binary = NodePath.resolve(dir, name);
+  const metadataFile = NodePath.resolve(dir, "local-metadata.json");
+  await new Promise<void>((resolve, reject) => {
+    const child = NodeChildProcess.spawn(
+      "eas",
+      [
+        "build",
+        "--local",
+        "--platform",
+        platform,
+        "--profile",
+        MOBILE_PROFILE,
+        "--output",
+        binary,
+        "--freeze-credentials",
+        "--non-interactive",
+      ],
+      {
+        cwd: mobile,
+        stdio: "inherit",
+        env: {
+          ...NodeProcess.env,
+          EAS_LOCAL_BUILD_PLUGIN_PATH: NodePath.join(root, "scripts/fork-mobile-local-worker.ts"),
+          EAS_LOCAL_BUILD_WORKINGDIR: NodePath.join(
+            required("RUNNER_TEMP"),
+            `eas-${platform}-${nativeRun.runAttempt}`,
+          ),
+          SKALD_LOCAL_METADATA_FILE: metadataFile,
+          SKALD_LOCAL_PLATFORM: platform,
+          SKALD_LOCAL_SHA: sha,
+          SKALD_LOCAL_RUNTIME: intent[platform].runtimeVersion,
+          SKALD_LOCAL_APP_VERSION: intent[platform].appVersion,
+          SKALD_LOCAL_MINIMUM_NUMBER: minimum,
+        },
+      },
+    );
+    child.on("error", reject);
+    child.on("close", (code) =>
+      code === 0
+        ? resolve()
+        : reject(
+            new Error(
+              `EAS local ${platform} build failed (${code}); its reserved number remains consumed.`,
+            ),
+          ),
+    );
+  });
+  const metadata = decodeLocalMetadata(json(await NodeFSP.readFile(metadataFile, "utf8")));
+  assertLocalBuild(metadata, {
+    platform,
+    sourceSha: sha,
+    ...intent[platform],
+    channel: MOBILE_CHANNEL,
+    minimumBuildVersion: minimum,
+  });
+  return {
+    buildId,
+    github: nativeRun,
+    sourceSha: sha,
+    profile: MOBILE_PROFILE,
+    releaseTag: tag,
+    appBuildVersion: metadata.appBuildVersion,
+    appVersion: metadata.appVersion,
+    runtimeVersion: metadata.runtimeVersion,
+    artifact: {
+      file: name,
+      url:
+        platform === "android"
+          ? `https://github.com/${MOBILE_REPO}/releases/download/${tag}/${name}`
+          : `https://github.com/${MOBILE_REPO}/actions/runs/${nativeRun.runId}`,
+      ...(await digest(binary)),
+    },
+  } satisfies NativeBaseline;
 }
-async function download(url: string, file: string) {
-  const parsed = new URL(url);
-  if (parsed.protocol !== "https:") throw new Error("Artifact URL must use HTTPS.");
-  const response = await fetch(url);
-  if (!response.ok) throw new Error(`Artifact download failed (${response.status}).`);
-  await NodeFSP.writeFile(file, new Uint8Array(await response.arrayBuffer()));
+
+async function registerNative(
+  platform: Platform,
+  sha: string,
+  tag: string,
+  dir: string,
+  intentFile?: string,
+  publishedAt?: string,
+) {
+  const baseline = decodeBaseline(
+    json(await NodeFSP.readFile(NodePath.join(dir, "baseline.json"), "utf8")),
+  );
+  if (!baseline.github || baseline.sourceSha !== sha || baseline.releaseTag !== tag)
+    throw new Error("Invalid local build provenance.");
+  const artifact = await nativeArtifact(baseline.github);
+  if (!artifact) throw new Error("Verified native artifact has not been retained by GitHub.");
+  const stored = { ...baseline, github: { ...baseline.github, artifactId: String(artifact.id) } };
+  await record({
+    schemaVersion: 1,
+    tag,
+    sha,
+    platform,
+    phase: "verified",
+    buildId: baseline.buildId,
+    nativeRun: stored.github,
+    baseline: stored,
+    ...(publishedAt ? { publishedAt } : {}),
+  });
+  await write(NodePath.join(dir, "baseline.json"), stored);
+  if (intentFile) {
+    const intent = await readIntent(intentFile);
+    await write(intentFile, { ...intent, [platform]: { ...intent[platform], baseline: stored } });
+  }
 }
+
 async function digest(file: string) {
   const bytes = await NodeFSP.readFile(file);
   return {
     size: bytes.byteLength,
     sha256: NodeCrypto.createHash("sha256").update(bytes).digest("hex"),
-  };
-}
-function baselineFor(
-  build: EASBuild,
-  sha: string,
-  tag: string,
-  intent: MobileReleaseIntent,
-  platform: Platform,
-): NativeBaseline {
-  return {
-    buildId: build.id,
-    sourceSha: sha,
-    profile: MOBILE_PROFILE,
-    releaseTag: tag,
-    appBuildVersion: build.appBuildVersion!,
-    appVersion: intent[platform].appVersion,
-    runtimeVersion: intent[platform].runtimeVersion,
   };
 }
 function identityArgs(baseline: NativeBaseline) {
@@ -657,7 +757,7 @@ async function verifyPublishedAPK(baseline: NativeBaseline, temp: string) {
   if (actual.sha256 !== artifact.sha256 || actual.size !== artifact.size)
     throw new Error("Published baseline APK checksum changed.");
 }
-async function android(sha: string, tag: string, file: string, dir: string) {
+async function android(sha: string, tag: string, file: string, dir: string, rebuild: boolean) {
   const intent = await readIntent(file);
   const temp = await NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), "skald-apk-"));
   try {
@@ -665,34 +765,18 @@ async function android(sha: string, tag: string, file: string, dir: string) {
       await verifyPublishedAPK(intent.android.baseline!, temp);
       return;
     }
-    const build = await buildFor("android", sha, tag, intent);
-    await NodeFSP.mkdir(dir, { recursive: true });
-    const name = `T3-Code-${tag.replace(/^v/, "")}-android-arm64-v8a.apk`;
-    const apk = NodePath.resolve(dir, name);
-    await download(build.artifacts!.applicationArchiveUrl!, apk);
-    const baseline = baselineFor(build, sha, tag, intent, "android");
-    await verifyAPK(apk, baseline, temp);
-    const verified = {
-      ...baseline,
-      artifact: {
-        file: name,
-        url: `https://github.com/${MOBILE_REPO}/releases/download/${tag}/${name}`,
-        ...(await digest(apk)),
-      },
-    };
-    await record({
-      schemaVersion: 1,
-      tag,
-      sha,
-      platform: "android",
-      phase: "verified",
-      buildId: build.id,
-      baseline: verified,
-    });
-    await write(file, { ...intent, android: { ...intent.android, baseline: verified } });
+    const baseline = await localBuild("android", sha, tag, intent, dir, rebuild);
+    await verifyAPK(NodePath.resolve(dir, baseline.artifact!.file), baseline, temp);
+    await finishLocalArtifact(baseline, dir);
   } finally {
     await NodeFSP.rm(temp, { recursive: true, force: true });
   }
+}
+async function finishLocalArtifact(baseline: NativeBaseline, dir: string) {
+  await write(NodePath.join(dir, "baseline.json"), baseline);
+  await output("native", "true");
+  await output("upload-native", baseline.github?.artifactId ? "false" : "true");
+  await output("artifact-name", baseline.github!.artifactName);
 }
 
 async function published(tag: string) {
@@ -851,7 +935,7 @@ async function publishOTA(
     "success",
   );
 }
-async function deliver(platform: Platform, tag: string) {
+async function deliver(platform: Platform, tag: string, dir: string, rebuild: boolean) {
   const { sha, intent, publishedAt } = await published(tag);
   await assertCheckout(sha);
   const history = await records(platform);
@@ -875,7 +959,24 @@ async function deliver(platform: Platform, tag: string) {
     return;
   }
   if (platform === "ios") {
-    await buildFor(platform, sha, tag, intent, publishedAt);
+    const verified = history.find(
+      (item) => item.payload.tag === tag && item.payload.phase === "verified",
+    )?.payload.baseline;
+    if (verified) {
+      await appleIdentity();
+      const exists = await appleAvailability(verified);
+      if (
+        !shouldUploadToApple(
+          history.map((item) => item.payload),
+          verified.buildId,
+          exists !== undefined,
+        )
+      )
+        return;
+    }
+    const baseline = await localBuild(platform, sha, tag, intent, dir, rebuild, publishedAt);
+    await verifyIPA(NodePath.join(dir, "app.ipa"), baseline);
+    await finishLocalArtifact(baseline, dir);
     return;
   }
   const baseline = intent.android.baseline!;
@@ -909,28 +1010,9 @@ async function deliver(platform: Platform, tag: string) {
   );
 }
 
-async function iosVerify(tag: string) {
-  const { sha, intent, publishedAt } = await published(tag);
-  await assertCheckout(sha);
-  if (intent.ios.mode === "ota") return;
-  const history = await records("ios");
-  assertNotSuperseded(
-    publishedAt,
-    history.map((item) => item.payload),
-  );
-  if (history.some((item) => item.payload.tag === tag && item.payload.phase === "distributed"))
-    return;
-  const selected = history.find(
-    (item) => item.payload.tag === tag && item.payload.buildId,
-  )?.payload;
-  if (!selected?.buildId) throw new Error("No exact iOS EAS build ID has been recorded.");
-  const build = decodeBuild(await eas(["build:view", selected.buildId]));
-  assertBuild(build, { platform: "ios", sha, ...intent.ios });
+async function verifyIPA(ipa: string, baseline: NativeBaseline) {
   const temp = await NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), "skald-ipa-"));
-  let baseline = baselineFor(build, sha, tag, intent, "ios");
   try {
-    const ipa = NodePath.join(temp, "app.ipa");
-    await download(build.artifacts!.applicationArchiveUrl!, ipa);
     await run("ditto", ["-x", "-k", ipa, temp]);
     const apps = (await NodeFSP.readdir(NodePath.join(temp, "Payload"))).filter((name) =>
       name.endsWith(".app"),
@@ -978,120 +1060,128 @@ async function iosVerify(tag: string) {
         "sharing-entitlements",
       ].flatMap((key) => [`--${key}`, NodePath.join(temp, `${key}.json`)]),
     ]);
-    baseline = {
-      ...baseline,
-      artifact: {
-        file: "app.ipa",
-        url: `https://expo.dev/accounts/atlitech/projects/skald-code/builds/${build.id}`,
-        ...(await digest(ipa)),
-      },
-    };
+  } finally {
+    await NodeFSP.rm(temp, { recursive: true, force: true });
+  }
+}
+async function iosSubmit(tag: string, dir: string) {
+  const { sha, intent, publishedAt } = await published(tag);
+  await assertCheckout(sha);
+  if (intent.ios.mode === "ota") return;
+  const history = await records("ios");
+  assertNotSuperseded(
+    publishedAt,
+    history.map((item) => item.payload),
+  );
+  if (history.some((item) => item.payload.tag === tag && item.payload.phase === "distributed"))
+    return;
+  const selected = history.find(
+    (item) => item.payload.tag === tag && item.payload.phase === "verified",
+  )?.payload;
+  const baseline = selected?.baseline;
+  if (!baseline?.github?.artifactId || baseline.sourceSha !== sha)
+    throw new Error("No retained verified IPA for this release.");
+  await appleIdentity();
+  let availability = await appleAvailability(baseline);
+  if (
+    shouldUploadToApple(
+      history.map((item) => item.payload),
+      baseline.buildId,
+      availability !== undefined,
+    )
+  ) {
+    if (!(await recoverNative(baseline.github, "ios", sha, tag, intent, dir)))
+      throw new Error("Retained IPA is missing; refusing upload.");
+    const ipa = NodePath.join(dir, "app.ipa");
+    await verifyIPA(ipa, baseline);
     await record({
       schemaVersion: 1,
       tag,
       sha,
       platform: "ios",
-      phase: "verified",
+      phase: "submitting",
       publishedAt,
       baseline,
-      buildId: build.id,
+      buildId: baseline.buildId,
+      nativeRun: baseline.github,
     });
-    await appleIdentity();
-    let submission = selectSubmission(await submissionsFor(build.id), ascAppId());
-    if (!submission) {
-      // A lost submit response is ambiguous until EAS associates a submission with this exact build.
-      if (history.some((item) => item.payload.tag === tag && item.payload.phase === "submitting"))
+    const temp = await NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), "skald-apple-key-"));
+    try {
+      const keyId = required("ASC_KEY_ID");
+      if (!/^[A-Z0-9]+$/.test(keyId)) throw new Error("Invalid Apple key identifier.");
+      await NodeFSP.writeFile(
+        NodePath.join(temp, `AuthKey_${keyId}.p8`),
+        Buffer.from(required("ASC_KEY_BASE64"), "base64"),
+        { mode: 0o600 },
+      );
+      const result = await execFile(
+        "xcrun",
+        [
+          "altool",
+          "--upload-app",
+          "--type",
+          "ios",
+          "--file",
+          ipa,
+          "--apiKey",
+          keyId,
+          "--apiIssuer",
+          required("ASC_ISSUER_ID"),
+          "--output-format",
+          "json",
+        ],
+        {
+          cwd: root,
+          env: { ...NodeProcess.env, API_PRIVATE_KEYS_DIR: temp },
+          maxBuffer: 4 * 1024 * 1024,
+        },
+      );
+      // Apple's successful exit acknowledges upload; only its build API proves tester availability.
+      if (!result.stdout)
         throw new Error(
-          "Previous submission has no EAS record yet. Reconcile in EAS before retrying; do not upload twice.",
+          "Apple uploader returned no receipt; reconcile App Store Connect before retrying.",
         );
       await record({
         schemaVersion: 1,
         tag,
         sha,
         platform: "ios",
-        phase: "submitting",
+        phase: "submitted",
         publishedAt,
         baseline,
-        buildId: build.id,
+        buildId: baseline.buildId,
+        nativeRun: baseline.github,
       });
-      const configPath = NodePath.join(mobile, "eas.json");
-      const original = await NodeFSP.readFile(configPath, "utf8");
-      const config = decodeSubmitConfig(json(original));
-      const originalObject = decodeObject(json(original));
-      await write(configPath, {
-        ...originalObject,
-        submit: {
-          ...config.submit,
-          personal: { ios: { appleTeamId: "H6L3F33KRM", ascAppId: ascAppId() } },
-        },
-      });
-      try {
-        await run(
-          "eas",
-          [
-            "submit",
-            "--platform",
-            "ios",
-            "--profile",
-            MOBILE_PROFILE,
-            "--id",
-            build.id,
-            "--non-interactive",
-            "--wait",
-          ],
-          mobile,
-        );
-      } finally {
-        await NodeFSP.writeFile(configPath, original);
-      }
-      submission = selectSubmission(await submissionsFor(build.id), ascAppId());
+    } finally {
+      await NodeFSP.rm(temp, { recursive: true, force: true });
     }
-    if (!submission)
-      throw new Error("Submission ID is not available yet; retry after checking EAS.");
-    await record({
+    availability = await appleAvailability(baseline);
+  }
+  if (!availability?.available)
+    throw new Error(
+      "Apple has not made this exact build available to testers. Retry after processing and group assignment; the IPA will not be uploaded twice.",
+    );
+  await record(
+    {
       schemaVersion: 1,
       tag,
       sha,
       platform: "ios",
-      phase: "submitted",
+      phase: "distributed",
       publishedAt,
-      baseline,
-      buildId: build.id,
-      submissionId: submission.id,
-    });
-    if (submission.status !== "FINISHED")
-      throw new Error(
-        `EAS submission ${submission.id}: ${submission.status}. Retry this release after resolving it.`,
-      );
-    const availability = await appleAvailability(baseline);
-    if (!availability?.available)
-      throw new Error(
-        "IPA submitted, but Apple has not made it available to testers. Retry this release after processing and group assignment.",
-      );
-    await record(
-      {
-        schemaVersion: 1,
-        tag,
-        sha,
-        platform: "ios",
-        phase: "distributed",
-        publishedAt,
-        baseline: { ...baseline, expiresAt: availability.expiresAt },
-        buildId: build.id,
-        submissionId: submission.id,
-        appleBuildId: availability.id,
-      },
-      "success",
-    );
-  } finally {
-    await NodeFSP.rm(temp, { recursive: true, force: true });
-  }
+      baseline: { ...baseline, expiresAt: availability.expiresAt },
+      buildId: baseline.buildId,
+      nativeRun: baseline.github,
+      appleBuildId: availability.id,
+    },
+    "success",
+  );
 }
 async function assertCheckout(sha: string) {
   if (!/^[0-9a-f]{40}$/.test(sha) || (await run("git", ["rev-parse", "HEAD"])).trim() !== sha)
     throw new Error("Checkout is not the approved exact SHA.");
   if ((await run("git", ["status", "--porcelain", "--untracked-files=normal"])).trim())
-    throw new Error("EAS publication requires a clean source checkout.");
+    throw new Error("Mobile delivery requires a clean source checkout.");
   if (
     (await run("git", ["config", "--get", "core.sparseCheckout"]).catch(() => "false")).trim() ===
     "true"
@@ -1109,6 +1199,7 @@ async function main() {
       dir: { type: "string" },
       platform: { type: "string" },
       force: { type: "string", default: "none" },
+      "rebuild-native": { type: "boolean", default: false },
     },
   });
   const command = positionals[0];
@@ -1117,7 +1208,8 @@ async function main() {
     throw new Error("Pass a published fork release tag or approved candidate tag.");
   if (
     NodeProcess.env.GITHUB_REPOSITORY !== MOBILE_REPO ||
-    NodeProcess.env.GITHUB_REF !== "refs/heads/atli"
+    NodeProcess.env.GITHUB_REF !== "refs/heads/atli" ||
+    NodeProcess.env.GITHUB_EVENT_NAME !== "workflow_dispatch"
   )
     throw new Error(
       "Mobile publication runs only in the fork's manually dispatched atli workflow.",
@@ -1142,15 +1234,39 @@ async function main() {
       "The personal build profile must fix the fork variant, channel and dotenv policy.",
     );
   }
-  if (command === "prepare") {
+  if (command === "assemble") {
+    const decode = Schema.decodeUnknownSync(PlatformDelivery);
+    const androidIntent = decode(
+      json(await NodeFSP.readFile(NodePath.join(values.dir!, "android-intent.json"), "utf8")),
+    );
+    const iosIntent = decode(
+      json(await NodeFSP.readFile(NodePath.join(values.dir!, "ios-intent.json"), "utf8")),
+    );
+    await write(values.out!, { channel: MOBILE_CHANNEL, android: androidIntent, ios: iosIntent });
+  } else if (command === "prepare") {
     await assertCheckout(values.sha ?? "");
-    await prepare(values.sha!, tag, values.out!, values.force!);
+    await prepare(decodePlatform(values.platform), values.sha!, tag, values.out!, values.force!);
   } else if (command === "android") {
     await assertCheckout(values.sha ?? "");
-    await android(values.sha!, tag, values.intent!, values.dir!);
-  } else if (command === "deliver") await deliver(decodePlatform(values.platform), tag);
-  else if (command === "ios-verify") await iosVerify(tag);
-  else throw new Error("Expected prepare, android, resolve, deliver, or ios-verify.");
+    await android(values.sha!, tag, values.intent!, values.dir!, values["rebuild-native"]!);
+  } else if (command === "register-native") {
+    const release = values.sha ? { sha: values.sha, publishedAt: undefined } : await published(tag);
+    await assertCheckout(release.sha);
+    await registerNative(
+      decodePlatform(values.platform),
+      release.sha,
+      tag,
+      values.dir!,
+      values.intent,
+      release.publishedAt,
+    );
+  } else if (command === "deliver")
+    await deliver(decodePlatform(values.platform), tag, values.dir!, values["rebuild-native"]!);
+  else if (command === "ios-submit") await iosSubmit(tag, values.dir!);
+  else
+    throw new Error(
+      "Expected prepare, assemble, android, register-native, resolve, deliver, or ios-submit.",
+    );
 }
 if (import.meta.main) {
   try {

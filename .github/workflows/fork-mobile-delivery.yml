@@ -6,11 +6,15 @@ on:
       tag:
         type: string
         required: true
+      rebuild-native:
+        type: boolean
+        default: false
 
 # The dispatching workflow holds skald-production-publication for this entire call.
 permissions:
   contents: read
   deployments: write
+  actions: read
 
 jobs:
   resolve:
@@ -42,7 +46,7 @@ jobs:
   deliver:
     needs: resolve
     if: github.repository_id == '1406026313' && github.ref == 'refs/heads/atli' && github.event_name == 'workflow_dispatch'
-    runs-on: ubuntu-24.04
+    runs-on: ${{ matrix.platform == 'android' && 'blacksmith-8vcpu-ubuntu-2404' || 'blacksmith-12vcpu-macos-26' }}
     environment: ${{ matrix.platform == 'android' && 'personal-android-signing' || 'personal-ios-signing' }}
     timeout-minutes: 150
     strategy:
@@ -78,6 +82,10 @@ jobs:
           pnpm_version="$(node --print "require('./package.json').packageManager.split('@').pop()")"
           echo "$HOME/.vite-plus/package_manager/pnpm/$pnpm_version/pnpm/bin" >> "$GITHUB_PATH"
 
+      - uses: ./.github/actions/setup-mobile-worker
+        with:
+          platform: ${{ matrix.platform }}
+
       - name: Setup EAS
         uses: expo/expo-github-action@v8
         with:
@@ -86,60 +94,40 @@ jobs:
           packager: npm
 
       - name: Reconcile exact mobile delivery
+        id: native
         env:
+          REBUILD_NATIVE: ${{ inputs.rebuild-native }}
           PLATFORM: ${{ matrix.platform }}
           SKALD_ASC_APP_ID: ${{ vars.SKALD_ASC_APP_ID }}
           ASC_KEY_ID: ${{ vars.T3CODE_IOS_APP_STORE_CONNECT_KEY_ID }}
           ASC_ISSUER_ID: ${{ vars.T3CODE_IOS_APP_STORE_CONNECT_ISSUER_ID }}
           ASC_KEY_BASE64: ${{ secrets.T3CODE_IOS_APP_STORE_CONNECT_KEY_BASE64 }}
-        run: node scripts/fork-mobile-release.ts deliver --tag "$TAG" --platform "$PLATFORM"
-
-  testflight:
-    name: Verify IPA before exact-build submission
-    needs: [resolve, deliver]
-    if: github.repository_id == '1406026313' && github.ref == 'refs/heads/atli' && github.event_name == 'workflow_dispatch'
-    runs-on: macos-15
-    environment: personal-ios-signing
-    timeout-minutes: 60
-    env:
-      APP_VARIANT: personal
-      T3CODE_MOBILE_CHANNEL: personal-production
-      SKALD_EAS_READY: ${{ vars.SKALD_EAS_READY }}
-      GH_TOKEN: ${{ github.token }}
-      TAG: ${{ inputs.tag }}
-    steps:
-      - name: Checkout complete source
-        uses: actions/checkout@v6
-        with:
-          ref: ${{ needs.resolve.outputs.sha }}
-          fetch-depth: 0
-
-      - name: Setup Vite+
-        uses: voidzero-dev/setup-vp@250f29ce396baf5e8f24498e17c0dfdebabc26eb # v1
-        with:
-          node-version-file: package.json
-          cache: false
-          run-install: false
-
-      - name: Install dependencies
-        run: vp install --frozen-lockfile --filter=@t3tools/mobile... --filter=@t3tools/scripts...
-
-      - name: Expose pnpm
+        shell: bash
         run: |
-          pnpm_version="$(node --print "require('./package.json').packageManager.split('@').pop()")"
-          echo "$HOME/.vite-plus/package_manager/pnpm/$pnpm_version/pnpm/bin" >> "$GITHUB_PATH"
+          args=()
+          if [ "$REBUILD_NATIVE" = true ]; then args+=(--rebuild-native); fi
+          node scripts/fork-mobile-release.ts deliver --tag "$TAG" --platform "$PLATFORM" --dir "$RUNNER_TEMP/mobile-native" "${args[@]}"
 
-      - name: Setup EAS
-        uses: expo/expo-github-action@v8
+      - name: Retain verified IPA
+        if: matrix.platform == 'ios' && steps.native.outputs.upload-native == 'true'
+        uses: actions/upload-artifact@v7
         with:
-          eas-version: 27.5.0
-          token: ${{ secrets.EXPO_OTA_TOKEN }}
-          packager: npm
+          name: ${{ steps.native.outputs.artifact-name }}
+          path: |
+            ${{ runner.temp }}/mobile-native/app.ipa
+            ${{ runner.temp }}/mobile-native/baseline.json
+          if-no-files-found: error
+          retention-days: 90
 
-      - name: Verify IPA and reconcile TestFlight availability
+      - name: Record durable native provenance
+        if: matrix.platform == 'ios' && steps.native.outputs.native == 'true'
+        run: node scripts/fork-mobile-release.ts register-native --platform ios --tag "$TAG" --dir "$RUNNER_TEMP/mobile-native"
+
+      - name: Upload exact IPA and reconcile TestFlight availability
+        if: matrix.platform == 'ios'
         env:
           SKALD_ASC_APP_ID: ${{ vars.SKALD_ASC_APP_ID }}
           ASC_KEY_ID: ${{ vars.T3CODE_IOS_APP_STORE_CONNECT_KEY_ID }}
           ASC_ISSUER_ID: ${{ vars.T3CODE_IOS_APP_STORE_CONNECT_ISSUER_ID }}
           ASC_KEY_BASE64: ${{ secrets.T3CODE_IOS_APP_STORE_CONNECT_KEY_BASE64 }}
-        run: node scripts/fork-mobile-release.ts ios-verify --tag "$TAG"
+        run: node scripts/fork-mobile-release.ts ios-submit --tag "$TAG" --dir "$RUNNER_TEMP/mobile-native"

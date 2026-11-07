@@ -3,6 +3,7 @@ import * as Schema from "effect/Schema";
 
 import {
   chooseMobileDelivery,
+  validateMobileIntent,
   MobileReleaseIntent,
   type NativeBaseline,
 } from "./fork-mobile-release-model.ts";
@@ -23,6 +24,7 @@ const baseline: NativeBaseline = {
   },
   expiresAt: "2026-12-06T00:00:00Z",
 };
+const decodeTypedIntent = Schema.decodeSync(MobileReleaseIntent);
 const now = Date.parse("2026-11-06T00:00:00Z");
 const candidate = { appVersion: "1.0.0", runtimeVersion: "runtime-a", now };
 
@@ -96,4 +98,52 @@ it("rejects malformed externally persisted intent instead of accepting partial p
     },
   ])
     assert.throws(() => decode(invalid));
+});
+
+it("retains legacy EAS baselines while requiring complete GitHub artifact provenance", () => {
+  const github = {
+    workflowSha: "c".repeat(40),
+    runId: "42",
+    runAttempt: "2",
+    artifactName: "native-android",
+    artifactId: "77",
+  };
+  const intent: MobileReleaseIntent = {
+    channel: "personal-production",
+    android: {
+      mode: "ota",
+      runtimeVersion: baseline.runtimeVersion,
+      appVersion: baseline.appVersion,
+      baseline,
+    },
+    ios: {
+      mode: "native",
+      runtimeVersion: baseline.runtimeVersion,
+      appVersion: baseline.appVersion,
+    },
+  };
+  const release = { commit: "d".repeat(40), version: "0.0.46-atli.2", assets: [] };
+  assert.equal(validateMobileIntent(intent, release), undefined);
+  const native = { ...baseline, buildId: "github:42:2:android", github };
+  const next = { ...intent, android: { ...intent.android, baseline: native } };
+  assert.deepEqual(decodeTypedIntent(next), next);
+  assert.equal(validateMobileIntent(next, release), undefined);
+  for (const changed of [
+    { ...native, buildId: "github:42:2:ios" },
+    {
+      ...native,
+      github: {
+        workflowSha: github.workflowSha,
+        runId: github.runId,
+        runAttempt: github.runAttempt,
+        artifactName: github.artifactName,
+      },
+    },
+  ]) {
+    assert.match(
+      validateMobileIntent({ ...next, android: { ...next.android, baseline: changed } }, release) ??
+        "",
+      /provenance/,
+    );
+  }
 });

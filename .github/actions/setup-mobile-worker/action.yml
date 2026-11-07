@@ -1,0 +1,31 @@
+name: Setup fork mobile compiler
+description: Install and validate the native tools EAS local workers use
+inputs:
+  platform:
+    description: android or ios
+    required: true
+runs:
+  using: composite
+  steps:
+    - if: inputs.platform == 'android'
+      uses: actions/setup-java@v5
+      with:
+        distribution: temurin
+        java-version: "17"
+    - if: inputs.platform == 'android'
+      uses: android-actions/setup-android@v3
+    - if: inputs.platform == 'android'
+      shell: bash
+      run: sdkmanager 'platforms;android-36' 'build-tools;36.0.0' 'ndk;27.1.12297006' 'cmake;3.22.1'
+    - if: inputs.platform == 'ios'
+      uses: maxim-lobanov/setup-xcode@v1
+      with:
+        xcode-version: "27.1"
+    - if: inputs.platform == 'ios'
+      shell: bash
+      run: |
+        set -euo pipefail
+        xcodebuild -version | head -1 | grep -x 'Xcode 27.1'
+        xcrun --find altool
+        pod --version
+        fastlane --version
