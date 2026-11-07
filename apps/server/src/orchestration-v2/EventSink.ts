@@ -170,10 +170,11 @@ export interface EventSinkV2Shape {
     readonly acceptedAt: DateTime.Utc;
     readonly events: ReadonlyArray<OrchestrationV2DomainEvent>;
     readonly effects: ReadonlyArray<EffectOutbox.PendingOrchestrationEffectV2>;
-    readonly cancelUnsettledEffects?: {
+    readonly cancelUnsettledEffects?: ReadonlyArray<{
+      readonly threadId: ThreadId;
       readonly effectTypes: ReadonlyArray<EffectOutbox.OrchestrationEffectRequestV2["type"]>;
       readonly reason: string;
-    };
+    }>;
     /** Like writeWithEffects' updateDelegatedCompletionOnly, for this run's run.updated only. */
     readonly updateDelegatedCompletionOnlyRunId?: RunId;
   }) => Effect.Effect<
@@ -714,13 +715,10 @@ const layerBase: Layer.Layer<
             error: null,
           };
           yield* commandReceipts.upsert(receipt);
-          const cancelledEffectIds =
-            input.cancelUnsettledEffects === undefined
-              ? []
-              : yield* effectOutbox.cancelUnsettled({
-                  threadId: input.threadId,
-                  ...input.cancelUnsettledEffects,
-                });
+          const cancelledEffectIds = (yield* Effect.forEach(
+            input.cancelUnsettledEffects ?? [],
+            (cancellation) => effectOutbox.cancelUnsettled(cancellation),
+          )).flat();
           return { receipt, storedEvents, outcomes, committed: true as const, cancelledEffectIds };
         }),
         (result) =>

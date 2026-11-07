@@ -556,6 +556,33 @@ export function threadHasUnfinishedWork(records: {
   );
 }
 
+function isThreadGroupCommand(command: OrchestrationV2ServerCommand): command is Extract<
+  OrchestrationV2ServerCommand,
+  {
+    readonly type:
+      | "thread.delete"
+      | "thread.settle"
+      | "thread.archive"
+      | "thread.unarchive"
+      | "thread.snooze"
+      | "thread.unsnooze"
+      | "thread.stop";
+  }
+> {
+  switch (command.type) {
+    case "thread.delete":
+    case "thread.settle":
+    case "thread.archive":
+    case "thread.unarchive":
+    case "thread.snooze":
+    case "thread.unsnooze":
+    case "thread.stop":
+      return true;
+    default:
+      return false;
+  }
+}
+
 function commandThreadId(command: OrchestrationV2ServerCommand): ThreadId {
   switch (command.type) {
     case "thread.create":
@@ -13743,10 +13770,11 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
     {
       readonly events: ReadonlyArray<OrchestrationV2DomainEvent>;
       readonly effects: ReadonlyArray<PendingOrchestrationEffectV2>;
-      readonly cancelUnsettledEffects?: {
+      readonly cancelUnsettledEffects?: ReadonlyArray<{
+        readonly threadId: ThreadId;
         readonly effectTypes: ReadonlyArray<OrchestrationEffectRequestV2["type"]>;
         readonly reason: string;
-      };
+      }>;
       readonly updateDelegatedCompletionOnlyRunId?: RunId;
     },
     OrchestratorV2Error
@@ -14191,7 +14219,13 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
     return {
       events: decidedEvents,
       effects: yield* Ref.get(effects),
-      ...(cancelUnsettledEffects === undefined ? {} : { cancelUnsettledEffects }),
+      ...(cancelUnsettledEffects === undefined
+        ? {}
+        : {
+            cancelUnsettledEffects: [
+              { threadId: commandThreadId(command), ...cancelUnsettledEffects },
+            ],
+          }),
       ...(updateDelegatedCompletionOnlyRunId === undefined
         ? {}
         : { updateDelegatedCompletionOnlyRunId }),
@@ -14246,10 +14280,11 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
     } satisfies OrchestratorV2DispatchResult;
   });
 
-  /** `sideChatIds` are the live side chats a `thread.delete` cascades to, read under their locks. */
+  // All cascade targets are locked by dispatchWithReceipt until the shared commit finishes.
   const dispatchWithReceiptEffect = Effect.fn("orchestrationV2.dispatch.withReceipt")(function* (
     command: OrchestrationV2ServerCommand,
     sideChatIds: ReadonlyArray<ThreadId> = [],
+    groupedThreadIds: ReadonlyArray<ThreadId> = [],
   ): Effect.fn.Return<OrchestratorV2DispatchResult, OrchestratorV2Error> {
     yield* Effect.annotateCurrentSpan({
       "orchestration_v2.command_id": command.commandId,
@@ -14276,14 +14311,46 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
     const limit = yield* DispatchModeLimit;
     if (limit !== undefined) {
       // Fork and merge-back sources are unlocked; validate the modes copied by their dispatch.
-      const threadId = commandThreadId(command);
-      const shell = yield* projectionStore
-        .getThreadShell(threadId)
-        .pipe(Effect.mapError((cause) => new OrchestratorProjectionError({ threadId, cause })));
-      if (shell !== null) yield* refuseAboveDispatchModeLimit(command, threadId, shell);
+      for (const threadId of [commandThreadId(command), ...groupedThreadIds, ...sideChatIds]) {
+        const shell = yield* projectionStore
+          .getThreadShell(threadId)
+          .pipe(Effect.mapError((cause) => new OrchestratorProjectionError({ threadId, cause })));
+        if (shell !== null) yield* refuseAboveDispatchModeLimit(command, threadId, shell);
+      }
     }
 
-    const plan = yield* dispatchOnce(command, sideChatIds).pipe(
+    const plan = yield* Effect.gen(function* () {
+      // Draft cleanup must not remove a group, even when the parent has no messages yet.
+      if (
+        command.type === "thread.delete" &&
+        command.onlyIfUnused === true &&
+        groupedThreadIds.length > 0
+      ) {
+        return { events: [], effects: [] };
+      }
+      if (command.type === "thread.delete") {
+        return yield* dispatchOnce(command, [...groupedThreadIds, ...sideChatIds]);
+      }
+      const primary = yield* dispatchOnce(command, sideChatIds);
+      if (!isThreadGroupCommand(command) || groupedThreadIds.length === 0) return primary;
+      const children = yield* Effect.forEach(groupedThreadIds, (threadId) => {
+        const childCommand = {
+          ...command,
+          threadId,
+          commandId: CommandId.make(`${command.commandId}:group:${threadId}`),
+        };
+        // The caller's stale-run guard describes only the selected thread.
+        if (childCommand.type === "thread.settle") delete childCommand.expectedLatestRunId;
+        return dispatchOnce(childCommand, []);
+      });
+      const plans = [primary, ...children];
+      return {
+        ...primary,
+        events: plans.flatMap((plan) => plan.events),
+        effects: plans.flatMap((plan) => plan.effects),
+        cancelUnsettledEffects: plans.flatMap((plan) => plan.cancelUnsettledEffects ?? []),
+      };
+    }).pipe(
       Effect.tap((planned) => refuseAboveRuntimeModeCeiling(command, planned.events)),
       Effect.filterOrFail(
         (planned) =>
@@ -14501,18 +14568,35 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         ? dispatch
         : threadDispatch.withLock(command.sourceThreadId, dispatch);
     }
-    if (command.type === "thread.delete")
-      return yield* threadDispatch.withLock(
-        command.threadId,
-        liveSideChatIds(command.threadId).pipe(
-          Effect.flatMap((sideChatIds) =>
-            sideChatIds.reduce(
-              (locked, sideChatId) => threadDispatch.withLock(sideChatId, locked),
-              dispatchWithReceiptEffect(command, sideChatIds),
-            ),
-          ),
-        ),
+    if (isThreadGroupCommand(command)) {
+      return yield* groupingChanges.withPermit(
+        Effect.gen(function* () {
+          const groupedThreadIds = yield* projectionStore
+            .getThreadGroupingDescendants(command.threadId)
+            .pipe(
+              Effect.mapError(
+                (cause) => new OrchestratorProjectionError({ threadId: command.threadId, cause }),
+              ),
+            );
+          const threadIds = [command.threadId, ...groupedThreadIds];
+          const decide = Effect.gen(function* () {
+            const sideChatIds =
+              command.type === "thread.delete"
+                ? [...new Set((yield* Effect.forEach(threadIds, liveSideChatIds)).flat())]
+                : [];
+            return yield* sideChatIds.reduceRight(
+              (locked, threadId) => threadDispatch.withLock(threadId, locked),
+              dispatchWithReceiptEffect(command, sideChatIds, groupedThreadIds),
+            );
+          });
+          // Group mutations share the reparenting gate; execution parents precede their side chats.
+          return yield* threadIds.reduceRight(
+            (locked, threadId) => threadDispatch.withLock(threadId, locked),
+            decide,
+          );
+        }),
       );
+    }
     // Answering a message-mode question can also start a follow-up.
     if (
       command.type !== "runtime-request.respond" &&

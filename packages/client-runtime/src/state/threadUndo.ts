@@ -1,3 +1,5 @@
+import type { EnvironmentThreadShell } from "./models.ts";
+
 // Shared across hook instances so sidebar, header and menu actions invalidate each other.
 const currentActions = new Map<string, symbol>();
 const listeners = new Set<() => void>();
@@ -63,6 +65,55 @@ export function planThreadUndo(
       : [];
   if (action === "unpin") return [pin, ...snooze];
   return [{ action: "unsettle" }, ...(thread?.pinnedAt != null ? [pin] : []), ...snooze];
+}
+
+export function planGroupSettlementUndo<
+  T extends Pick<
+    EnvironmentThreadShell,
+    | "id"
+    | "environmentId"
+    | "projectId"
+    | "groupingParentThreadId"
+    | "settledAt"
+    | "settledOverride"
+    | "pinnedAt"
+    | "pinOrderKey"
+    | "snoozedUntil"
+    | "deletedAt"
+    | "lineage"
+  >,
+>(parent: T, threads: readonly T[]) {
+  const children = new Map<T["id"], T[]>();
+  for (const thread of threads) {
+    if (
+      thread.environmentId !== parent.environmentId ||
+      thread.projectId !== parent.projectId ||
+      thread.deletedAt != null ||
+      thread.groupingParentThreadId == null ||
+      thread.lineage.relationshipToParent === "subagent" ||
+      thread.lineage.sideChat === true
+    )
+      continue;
+    const siblings = children.get(thread.groupingParentThreadId);
+    if (siblings) siblings.push(thread);
+    else children.set(thread.groupingParentThreadId, [thread]);
+  }
+  const seen = new Set([parent.id]);
+  const descendants: T[] = [parent];
+  for (let index = 0; index < descendants.length; index++) {
+    for (const child of children.get(descendants[index]!.id) ?? []) {
+      if (seen.has(child.id)) continue;
+      seen.add(child.id);
+      descendants.push(child);
+    }
+  }
+  return descendants
+    .filter(
+      (thread) =>
+        thread.id === parent.id ||
+        (thread.settledOverride !== "settled" && thread.settledAt === null),
+    )
+    .map((thread) => ({ thread, plan: planThreadUndo("settle", thread) }));
 }
 
 export async function executeThreadUndo<Result>(

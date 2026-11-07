@@ -1699,7 +1699,7 @@ it.effect("dispatch records the command outcome and its duration", () =>
 );
 
 it.effect(
-  "organizes independent threads without changing their execution lineage or lifecycle",
+  "organizes threads without changing execution lineage and cascades explicit lifecycle actions",
   () =>
     Effect.gen(function* () {
       const orchestrator = yield* Orchestrator.OrchestratorV2;
@@ -1882,19 +1882,6 @@ it.effect(
         threadId: childId,
         groupingParentThreadId: parentId,
       });
-      yield* orchestrator.dispatch({
-        type: "thread.settle",
-        commandId: CommandId.make("settle-group-parent"),
-        threadId: parentId,
-      });
-      assert.isNull((yield* projections.getThread(childId)).settledOverride);
-      yield* orchestrator.dispatch({
-        type: "thread.delete",
-        commandId: CommandId.make("delete-group-parent"),
-        threadId: parentId,
-      });
-      assert.isNull((yield* projections.getThread(childId)).deletedAt);
-      assert.equal((yield* projections.getThreadShell(childId))?.groupingParentThreadId, parentId);
       const concurrentMoves = yield* Effect.all(
         (
           [
@@ -1915,5 +1902,84 @@ it.effect(
       );
       assert.equal(concurrentMoves.filter(Result.isSuccess).length, 1);
       assert.equal(concurrentMoves.filter(Result.isFailure).length, 1);
+      yield* orchestrator.dispatch({
+        type: "thread.metadata.update",
+        commandId: CommandId.make("restore-group-child"),
+        threadId: childId,
+        groupingParentThreadId: parentId,
+      });
+      yield* orchestrator.dispatch({
+        type: "thread.metadata.update",
+        commandId: CommandId.make("restore-group-grandchild"),
+        threadId: siblingId,
+        groupingParentThreadId: childId,
+      });
+      const snoozedUntil = "2099-07-25T09:00:00.000Z";
+      for (const action of [
+        { type: "thread.settle" },
+        { type: "thread.snooze", snoozedUntil },
+        { type: "thread.unsnooze", reason: "user" },
+        { type: "thread.archive" },
+        { type: "thread.unarchive" },
+      ] as const) {
+        const command = {
+          ...action,
+          commandId: CommandId.make(`group:${action.type}`),
+          threadId: parentId,
+        };
+        const result = yield* orchestrator.dispatch(command);
+        assert.deepEqual(
+          new Set(result.storedEvents.map(({ event }) => event.threadId)),
+          new Set([parentId, childId, siblingId]),
+        );
+        const parent = yield* projections.getThread(parentId);
+        for (const threadId of [childId, siblingId]) {
+          const child = yield* projections.getThread(threadId);
+          assert.deepEqual(child.archivedAt, parent.archivedAt);
+          assert.deepEqual(child.settledOverride, parent.settledOverride);
+          assert.deepEqual(child.snoozedUntil, parent.snoozedUntil);
+        }
+        const replayed = yield* orchestrator.dispatch(command);
+        assert.isTrue(replayed.replayed);
+        assert.deepEqual(replayed.storedEvents, result.storedEvents);
+      }
+      yield* orchestrator.dispatch({
+        type: "thread.unsettle",
+        commandId: CommandId.make("resume-group-parent"),
+        threadId: parentId,
+        reason: "user",
+      });
+      assert.equal((yield* projections.getThread(parentId)).settledOverride, "active");
+      assert.equal((yield* projections.getThread(childId)).settledOverride, "settled");
+      assert.equal((yield* projections.getThread(siblingId)).settledOverride, "settled");
+      yield* orchestrator.dispatch({
+        type: "thread.delete",
+        commandId: CommandId.make("discard-unused-group-parent"),
+        threadId: parentId,
+        onlyIfUnused: true,
+      });
+      assert.isNull((yield* projections.getThread(parentId)).deletedAt);
+      yield* orchestrator.dispatch({
+        type: "thread.archive",
+        commandId: CommandId.make("archive-child-before-group-delete"),
+        threadId: childId,
+      });
+      const deletion = yield* orchestrator.dispatch({
+        type: "thread.delete",
+        commandId: CommandId.make("delete-group-parent"),
+        threadId: parentId,
+      });
+      assert.deepEqual(
+        new Set(deletion.storedEvents.map(({ event }) => event.threadId)),
+        new Set([parentId, childId, siblingId]),
+      );
+      for (const threadId of [parentId, childId, siblingId]) {
+        assert.isNotNull((yield* projections.getThread(threadId)).deletedAt);
+      }
+      const unrelated = yield* projections.getThread(otherId);
+      assert.isNull(unrelated.deletedAt);
+      assert.isNull(unrelated.archivedAt);
+      assert.isNull(unrelated.settledOverride);
+      assert.isNull(unrelated.snoozedUntil);
     }).pipe(Effect.provide(layerTest)),
 );

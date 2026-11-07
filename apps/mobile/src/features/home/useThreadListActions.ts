@@ -177,7 +177,7 @@ function confirmThreadDeletion(
 ) {
   if (!checkThreadOperationPermission(thread, actionFailureTitle("delete"))) return;
   const title = "Delete thread?";
-  const message = `“${thread.title}” will be permanently deleted, including its terminal history.`;
+  const message = `“${thread.title}” and all nested child threads will be permanently deleted, including their terminal history.`;
   Dialog.confirm({
     title,
     message,
@@ -231,44 +231,52 @@ export function useThreadListActions(
     action: "Settled" | "Snoozed" | "Unpinned",
     claim: ReturnType<typeof ThreadUndo.begin>,
     plan: ThreadUndo.ThreadUndoPlan,
+    groupPlans = [{ thread, plan }],
   ) =>
     showThreadUndoNotice({
       action,
       claim,
       undo: async () => {
-        try {
-          await ThreadUndo.executeThreadUndo(
-            plan,
-            async (step) => {
-              switch (step.action) {
-                case "unsettle":
-                  return unsettleThread(thread);
-                case "unsnooze":
-                  return unsnoozeThread(thread);
-                case "pin":
-                  return pinThread(thread, step.orderKey);
-                case "snooze": {
-                  const failureTitle =
-                    action === "Unpinned" ? "Could not undo unpin" : "Could not undo settle";
-                  if (!checkThreadOperationPermission(thread, failureTitle)) return false;
-                  const result = await snoozeMutation({
-                    environmentId: thread.environmentId,
-                    input: { threadId: thread.id, snoozedUntil: step.snoozedUntil },
-                  });
-                  if (result._tag === "Failure") {
-                    const error = Cause.squash(result.cause);
-                    Dialog.alert(
-                      "Could not restore snooze",
-                      error instanceof Error ? error.message : "The thread could not be snoozed.",
-                    );
-                    return false;
+        const restoreGroup = async () => {
+          for (const entry of groupPlans) {
+            const { thread, plan } = entry;
+            const succeeded = await ThreadUndo.executeThreadUndo(
+              plan,
+              async (step) => {
+                switch (step.action) {
+                  case "unsettle":
+                    return unsettleThread(thread);
+                  case "unsnooze":
+                    return unsnoozeThread(thread);
+                  case "pin":
+                    return pinThread(thread, step.orderKey);
+                  case "snooze": {
+                    const failureTitle =
+                      action === "Unpinned" ? "Could not undo unpin" : "Could not undo settle";
+                    if (!checkThreadOperationPermission(thread, failureTitle)) return false;
+                    const result = await snoozeMutation({
+                      environmentId: thread.environmentId,
+                      input: { threadId: thread.id, snoozedUntil: step.snoozedUntil },
+                    });
+                    if (result._tag === "Failure") {
+                      const error = Cause.squash(result.cause);
+                      Dialog.alert(
+                        "Could not restore snooze",
+                        error instanceof Error ? error.message : "The thread could not be snoozed.",
+                      );
+                      return false;
+                    }
+                    return true;
                   }
-                  return true;
                 }
-              }
-            },
-            (result) => result,
-          );
+              },
+              (result) => result,
+            );
+            if (!succeeded) return;
+          }
+        };
+        try {
+          await restoreGroup();
         } catch (error) {
           Dialog.alert(
             "Could not undo thread action",
@@ -279,7 +287,10 @@ export function useThreadListActions(
     });
   const settleThread = async (thread: EnvironmentThreadShell) => {
     const key = scopedThreadKey(thread.environmentId, thread.id);
-    const plan = ThreadUndo.planThreadUndo("settle", thread);
+    const plans = ThreadUndo.planGroupSettlementUndo(
+      thread,
+      appAtomRegistry.get(environmentThreadShells.threadShellsAtom),
+    );
     let claim: ReturnType<typeof ThreadUndo.begin> | undefined;
     const succeeded = await executeAction("settle", thread, () => {
       ThreadUndo.invalidate("pin", key);
@@ -287,7 +298,7 @@ export function useThreadListActions(
       claim = ThreadUndo.begin("settle", key);
     });
     if (claim) {
-      if (succeeded) offerUndo(thread, "Settled", claim, plan);
+      if (succeeded) offerUndo(thread, "Settled", claim, plans[0]!.plan, plans);
       else claim.finish();
     }
     return succeeded;

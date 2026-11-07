@@ -161,6 +161,60 @@ const threadState = (threadId: ThreadId) =>
     };
   });
 
+it.effect("Stop on a group cancels descendant starts without stopping unrelated threads", () =>
+  Effect.gen(function* () {
+    const orchestrator = yield* Orchestrator.OrchestratorV2;
+    const outbox = yield* EffectOutbox.EffectOutboxV2;
+    const parent = ThreadId.make("thread:group-stop-parent");
+    const child = ThreadId.make("thread:group-stop-child");
+    const grandchild = ThreadId.make("thread:group-stop-grandchild");
+    const unrelated = ThreadId.make("thread:group-stop-unrelated");
+    for (const [index, threadId] of [parent, child, grandchild, unrelated].entries()) {
+      yield* createWatchingThread(threadId, index + 1);
+    }
+    for (const [threadId, groupingParentThreadId] of [
+      [child, parent],
+      [grandchild, child],
+    ] as const) {
+      yield* orchestrator.dispatch({
+        type: "thread.metadata.update",
+        commandId: CommandId.make(`nest:${threadId}`),
+        threadId,
+        groupingParentThreadId,
+      });
+    }
+    for (const threadId of [child, grandchild, unrelated]) {
+      yield* send(threadId, "start", "start_immediately");
+    }
+    const before = (yield* orchestrator.getThreadProjection(parent)).thread;
+    const refused = yield* orchestrator
+      .dispatch({
+        type: "thread.settle",
+        commandId: CommandId.make("settle-running-group"),
+        threadId: parent,
+      })
+      .pipe(Effect.exit);
+    assert.isTrue(Exit.isFailure(refused));
+    assert.deepEqual((yield* orchestrator.getThreadProjection(parent)).thread, before);
+    const command = {
+      type: "thread.stop" as const,
+      commandId: CommandId.make("stop-group"),
+      threadId: parent,
+    };
+    yield* orchestrator.dispatch(command);
+    for (const threadId of [child, grandchild, unrelated]) {
+      const projection = yield* orchestrator.getThreadProjection(threadId);
+      assert.equal(projection.runs[0]?.status, threadId === unrelated ? "starting" : "interrupted");
+      const starts = (yield* outbox.listByCommandId(
+        CommandId.make(`send:${threadId}:start`),
+      )).filter((effect) => effect.request.type === "provider-turn.start");
+      assert.lengthOf(starts, 1);
+      assert.equal(starts[0]?.status, threadId === unrelated ? "pending" : "cancelled");
+    }
+    assert.isTrue((yield* orchestrator.dispatch(command)).replayed);
+  }).pipe(Effect.provide(layerTest)),
+);
+
 it.effect.each([
   ["idle", "thread.stop"],
   ["idle", "run.interrupt"],

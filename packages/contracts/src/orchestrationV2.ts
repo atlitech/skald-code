@@ -3027,7 +3027,7 @@ export const OrchestrationV2Command = Schema.Union([
     type: Schema.Literal("thread.delete"),
     commandId: CommandId,
     threadId: ThreadId,
-    /** Delete only a thread with no runs and no messages; otherwise succeed without a change. */
+    /** Delete only a thread with no runs, messages, or nested children; otherwise succeed without a change. */
     onlyIfUnused: Schema.optional(Schema.Boolean),
   }),
   Schema.Struct({

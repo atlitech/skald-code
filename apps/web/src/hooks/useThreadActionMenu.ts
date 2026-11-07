@@ -351,7 +351,7 @@ export function useThreadActionMenu(input: {
               api.dialogs.confirm(
                 [
                   `Delete thread "${thread.title}"?`,
-                  "This permanently clears conversation history for this thread.",
+                  "This permanently clears conversation history for this thread and all nested child threads.",
                 ].join("\n"),
                 { variant: "destructive" },
               ),

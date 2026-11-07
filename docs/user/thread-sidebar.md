@@ -70,13 +70,16 @@ Snoozed, and Settled sections as the main list; finished work stays in the
 unlabeled active list until it settles. Search still finds individual children.
 Grouping is saved on the server and follows you across devices.
 
-Grouping does not give the parent control over its children's runs. Stopping or
-deleting the parent does not stop or delete these independent threads.
+Deleting, settling, archiving, snoozing, or stopping a parent applies to all nested
+children, including deeper descendants. Unarchiving and waking a parent also apply
+to its children. Un-settling affects only the selected thread, so resuming a parent
+leaves completed children settled. Move a child to the top level before acting on
+the parent if you want to keep it separate.
 The parent stays with its children and appears once. A group with an approval,
 question, or finished result to review stays in the main list. Otherwise, if any
 member is working, the group appears in Working when that section is enabled.
 Pinned parents stay pinned. Once the children settle, the parent returns to the
-section for its own state; grouping does not change anyone's saved settled state.
+section for its own state. Automatic settlement still applies to each thread separately.
 Collapsing a group keeps its activity summary visible and does not change its section.
 Children appear at the top level if their parent is archived or unavailable in the
 current view.

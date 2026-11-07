@@ -723,7 +723,6 @@ function ThreadRouteContent(
       environmentId: selectedThread.environmentId,
       input: {
         threadId: selectedThread.id,
-        runId: composer.interruptibleRunId,
       },
     });
   };

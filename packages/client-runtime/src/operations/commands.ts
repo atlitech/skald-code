@@ -85,7 +85,7 @@ export interface ThreadCommandInput extends CommandMetadata {
 }
 
 export interface DeleteThreadInput extends ThreadCommandInput {
-  /** The server deletes only a thread with no runs and no messages. */
+  /** The server deletes only a thread with no runs, messages, or nested children. */
   readonly onlyIfUnused?: boolean;
 }
 export type ArchiveThreadInput = ThreadCommandInput;

@@ -51,7 +51,7 @@ export function useSidebarThreadGroups(input: {
   >();
   for (const [key, children] of input.childrenByParent) {
     const state = stored[key] ?? {
-      expanded: true,
+      expanded: false,
       working: input.defaultWorkingExpanded,
       snoozed: false,
       settled: false,
