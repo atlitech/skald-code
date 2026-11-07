@@ -74,10 +74,12 @@ it("builds an explicitly unsigned release without evaluating signing credentials
 });
 
 it("leaves managed signing to EAS without evaluating local signing variables", async () => {
-  vi.stubEnv("EAS_BUILD", "true");
-  try {
-    expect(await buildGradle()).toBe(TEMPLATE);
-  } finally {
-    vi.unstubAllEnvs();
+  for (const value of ["true", "1"]) {
+    vi.stubEnv("EAS_BUILD", value);
+    try {
+      expect(await buildGradle()).toBe(TEMPLATE);
+    } finally {
+      vi.unstubAllEnvs();
+    }
   }
 });
