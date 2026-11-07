@@ -47,6 +47,9 @@ const exportIcons = Effect.fn("skaldIcons.export")(function* (check: boolean) {
   yield* write("assets/skald/icon-1024.png", yield* render(install, 1024));
   yield* write("assets/skald/icon-macos-1024.png", yield* render(mac, 1024));
   yield* write("assets/skald/apple-touch-icon.png", yield* render(install, 180));
+  for (const size of [192, 512]) {
+    yield* write(`assets/skald/icon-${size}x${size}.png`, yield* render(install, size));
+  }
   yield* write("assets/skald/splash-light.png", yield* render(lightMark, 1024));
   yield* write("assets/skald/splash-dark.png", yield* render(darkMark, 1024));
   yield* write("assets/skald/android-foreground.png", yield* render(adaptive, 432));
@@ -77,6 +80,8 @@ const exportIcons = Effect.fn("skaldIcons.export")(function* (check: boolean) {
     "favicon-16x16.png",
     "favicon-32x32.png",
     "apple-touch-icon.png",
+    "icon-192x192.png",
+    "icon-512x512.png",
   ]) {
     yield* write(`apps/web/public/${file}`, yield* fs.readFile(path.join(directory, file)));
   }
