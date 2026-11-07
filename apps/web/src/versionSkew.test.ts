@@ -63,22 +63,31 @@ describe("versionSkew", () => {
   it("does not warn when the server is ahead of the client", () => {
     expect(resolveVersionMismatch("0.0.35")).toBeNull();
     expect(resolveVersionMismatch("9.9.9")).toBeNull();
+    expect(resolveVersionMismatch("0.1.8-atli.4", "0.1.8-atli.4")).toBeNull();
+    expect(resolveVersionMismatch("0.1.8-atli.10", "0.1.8-atli.9")).toBeNull();
   });
 
-  it("does not warn when a nightly and a stable build share a core version", () => {
-    expect(resolveVersionMismatch("0.0.34-nightly.20260818.1124")).toBeNull();
-
-    branding.APP_VERSION = "0.0.34-nightly.20260818.1124";
-    expect(resolveVersionMismatch("0.0.34")).toBeNull();
+  it.each([
+    ["0.0.34-nightly.20260818.1124", "0.0.34"],
+    ["0.1.8-atli.4", "0.1.8"],
+    ["0.1.8-atli.4", "0.1.8-nightly.20261107.1"],
+  ])("does not warn between %s and %s sharing a core version", (serverVersion, clientVersion) => {
+    expect(resolveVersionMismatch(serverVersion, clientVersion)).toBeNull();
+    expect(resolveVersionMismatch(clientVersion, serverVersion)).toBeNull();
   });
 
-  it.each(["0.0.34-nightly.20260823.1124", "0.0.34-nightly.20260824.1124"])(
-    "warns when nightly server %s is behind a nightly client on the same release",
-    (serverVersion) => {
-      branding.APP_VERSION = "0.0.34-nightly.20260824.1125";
+  it.each([
+    ["0.0.34-nightly.20260823.1124", "0.0.34-nightly.20260824.1125"],
+    ["0.0.34-nightly.20260824.1124", "0.0.34-nightly.20260824.1125"],
+    ["0.1.8-atli.3", "0.1.8-atli.4"],
+    ["0.1.8-atli.9", "0.1.8-atli.10"],
+  ])(
+    "warns when server %s is behind client %s on the same release",
+    (serverVersion, clientVersion) => {
+      branding.APP_VERSION = clientVersion;
 
       expect(resolveVersionMismatch(serverVersion)).toEqual({
-        clientVersion: "0.0.34-nightly.20260824.1125",
+        clientVersion,
         serverVersion,
         hint: MISMATCH_HINT,
       });
