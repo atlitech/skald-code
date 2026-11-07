@@ -253,7 +253,7 @@ const ThreadReadTool = Tool.make("t3_thread_read", {
 
 const ThreadUpdateTool = Tool.make("t3_thread_update", {
   description:
-    "Rename a thread (`action:'rename'` with `title`), regenerate its title, or organize it (`action:'set_parent'` with `groupingParentThreadId`; null moves to top level). Grouping does not change agent lifecycle. Omit `threadId` for this thread. Workspace and branch cannot change here.",
+    "Rename a thread (`action:'rename'` with `title`), regenerate its title, or organize it (`action:'set_parent'` with `groupingParentThreadId`; null moves to top level). Deleting, settling, archiving, snoozing, or stopping a parent also affects nested children. Un-settling affects only the selected thread. Omit `threadId` for this thread. Workspace and branch cannot change here.",
   // Keeps the input's action/field check, which rebuilding the struct would drop.
   parameters: ThreadMetadataMcpUpdateInput.mapFields(
     Struct.assign({ environmentId: OrchestratorMcpEnvironmentTarget }),

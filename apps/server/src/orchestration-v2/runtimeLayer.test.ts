@@ -621,27 +621,27 @@ it.layer(layerProjectDeletionTest)("project deletion during thread commands", (i
     }),
   );
 
-  it.effect(
-    "deletes a side chat with its parent only after the side chat's in-flight command",
-    () =>
+  it.effect.each(["side-chat", "nested-thread", "nested-side-chat"] as const)(
+    "deletes a %s with its parent only after the child's in-flight command",
+    (kind) =>
       Effect.gen(function* () {
         const projects = yield* ProjectService.ProjectService;
         const orchestrator = yield* Orchestrator.OrchestratorV2;
         const eventSink = yield* EventSink.EventSinkV2;
         const executor = yield* ThreadCommandExecutor.ThreadCommandExecutor;
-        const projectId = ProjectId.make("runtime-side-chat-delete");
-        const parentId = ThreadId.make("runtime-side-chat-delete-parent");
-        const sideChatId = ThreadId.make("runtime-side-chat-delete-child");
-        const updateCommandId = CommandId.make("runtime-side-chat-delete-update");
+        const projectId = ProjectId.make(`runtime-side-chat-delete:${kind}`);
+        const parentId = ThreadId.make(`runtime-side-chat-delete-parent:${kind}`);
+        const sideChatId = ThreadId.make(`runtime-side-chat-delete-child:${kind}`);
+        const updateCommandId = CommandId.make(`runtime-side-chat-delete-update:${kind}`);
         yield* projects.create({
-          commandId: CommandId.make("runtime-side-chat-delete-project"),
+          commandId: CommandId.make(`runtime-side-chat-delete-project:${kind}`),
           projectId,
           title: "Side chat deletion",
-          workspaceRoot: "/work/side-chat-deletion",
+          workspaceRoot: `/work/side-chat-deletion/${kind}`,
         });
         yield* orchestrator.dispatch({
           type: "thread.create",
-          commandId: CommandId.make("runtime-side-chat-delete-create"),
+          commandId: CommandId.make(`runtime-side-chat-delete-create:${kind}`),
           createdBy: "user",
           creationSource: "web",
           threadId: parentId,
@@ -653,16 +653,37 @@ it.layer(layerProjectDeletionTest)("project deletion during thread commands", (i
           branch: null,
           worktreePath: null,
         });
-        yield* orchestrator.dispatch({
-          type: "thread.fork",
-          commandId: CommandId.make("runtime-side-chat-delete-fork"),
-          sourceThreadId: parentId,
-          targetThreadId: sideChatId,
-          sourcePoint: { type: "latest_stable" },
-          sideChat: true,
-          createdBy: "user",
-          creationSource: "web",
-        });
+        const nestedId =
+          kind === "nested-thread" ? sideChatId : ThreadId.make(`runtime-nested-parent:${kind}`);
+        if (kind !== "side-chat") {
+          yield* orchestrator.dispatch({
+            type: "thread.create",
+            commandId: CommandId.make(`runtime-nested-create:${kind}`),
+            createdBy: "user",
+            creationSource: "web",
+            threadId: nestedId,
+            projectId,
+            title: "Nested child",
+            groupingParentThreadId: parentId,
+            modelSelection,
+            runtimeMode: "full-access",
+            interactionMode: "default",
+            branch: null,
+            worktreePath: null,
+          });
+        }
+        if (kind !== "nested-thread") {
+          yield* orchestrator.dispatch({
+            type: "thread.fork",
+            commandId: CommandId.make(`runtime-side-chat-delete-fork:${kind}`),
+            sourceThreadId: kind === "side-chat" ? parentId : nestedId,
+            targetThreadId: sideChatId,
+            sourcePoint: { type: "latest_stable" },
+            sideChat: true,
+            createdBy: "user",
+            creationSource: "web",
+          });
+        }
 
         const updateReady = yield* Deferred.make<void>();
         const releaseUpdate = yield* Deferred.make<void>();
@@ -710,7 +731,7 @@ it.layer(layerProjectDeletionTest)("project deletion during thread commands", (i
           const deleteFiber = yield* orchestrator
             .dispatch({
               type: "thread.delete",
-              commandId: CommandId.make("runtime-side-chat-delete-parent"),
+              commandId: CommandId.make(`runtime-side-chat-delete-parent:${kind}`),
               threadId: parentId,
             })
             .pipe(Effect.forkChild({ startImmediately: true }));

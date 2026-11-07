@@ -758,7 +758,19 @@ export function useThreadActions() {
     // oxlint-disable-next-line react/purity -- runs in an event handler (oxc#27309)
     const nowIso = new Date().toISOString();
     const wokeAt = resolved ? threadWokeAt(resolved.thread, { now: nowIso }) : null;
-    const undoPlan = ThreadUndo.planThreadUndo("settle", resolved?.thread);
+    const undoPlans = resolved
+      ? ThreadUndo.planGroupSettlementUndo(
+          resolved.thread,
+          readEnvironmentThreadRefs(target.environmentId).flatMap((ref) => {
+            const shell = readThreadShell(ref);
+            return shell ? [shell] : [];
+          }),
+        ).map(({ thread, plan }) => ({
+          target:
+            thread === resolved.thread ? target : scopeThreadRef(thread.environmentId, thread.id),
+          plan,
+        }))
+      : [{ target, plan: ThreadUndo.planThreadUndo("settle") }];
     // An older unpin/snooze Undo would re-pin or re-snooze, and the server
     // treats either as a promotion that un-settles; settling supersedes them.
     ThreadUndo.invalidate("pin", scopedThreadKey(target));
@@ -778,7 +790,14 @@ export function useThreadActions() {
     showThreadUndoNotice({
       action: "Settled",
       claim: action,
-      undo: () => runUndoPlan(target, undoPlan),
+      undo: async () => {
+        let result = await runUndoPlan(undoPlans[0]!.target, undoPlans[0]!.plan);
+        for (const entry of undoPlans.slice(1)) {
+          if (result._tag === "Failure") return result;
+          result = await runUndoPlan(entry.target, entry.plan);
+        }
+        return result;
+      },
       failureTitle: "Failed to undo settle",
     });
     return result;
@@ -933,7 +952,7 @@ export function useThreadActions() {
         localApi.dialogs.confirm(
           [
             `Delete thread "${title}"?`,
-            "This permanently clears conversation history for this thread.",
+            "This permanently clears conversation history for this thread and all nested child threads.",
           ].join("\n"),
           { variant: "destructive" },
         ),

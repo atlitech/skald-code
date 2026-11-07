@@ -570,6 +570,9 @@ export interface ProjectionStoreV2Shape {
   readonly getThreadsWithPullRequests: (
     threadId?: ThreadId,
   ) => Effect.Effect<ReadonlyArray<ProjectionThreadPullRequests>, ProjectionStoreV2Error>;
+  readonly getThreadGroupingDescendants: (
+    threadId: ThreadId,
+  ) => Effect.Effect<ReadonlyArray<ThreadId>, ProjectionStoreV2Error>;
   readonly listThreadGroupingParents: (
     input: OrchestrationV2ListThreadGroupingParentsInput,
   ) => Effect.Effect<OrchestrationV2ListThreadGroupingParentsResult, ProjectionStoreV2Error>;
@@ -7346,6 +7349,37 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
       }));
     }, Effect.mapError(shellSnapshotReadError));
 
+    const getThreadGroupingDescendants = Effect.fn("ProjectionStore.getThreadGroupingDescendants")(
+      function* (threadId: ThreadId) {
+        const rows = yield* sql<{
+          readonly thread_id: string;
+          readonly parent_id: string;
+        }>`
+          SELECT thread_id, json_extract(payload_json, '$.groupingParentThreadId') AS parent_id
+          FROM orchestration_v2_projection_threads
+          WHERE project_id = (
+            SELECT project_id FROM orchestration_v2_projection_threads WHERE thread_id = ${threadId}
+          ) AND deleted_at IS NULL
+            AND json_extract(payload_json, '$.groupingParentThreadId') IS NOT NULL
+            AND json_extract(payload_json, '$.lineage.relationshipToParent') IS NOT 'subagent'
+            AND json_extract(payload_json, '$.lineage.sideChat') IS NOT 1
+            AND json_extract(payload_json, '$.delegatedFrom') IS NULL
+        `;
+        const children = Map.groupBy(rows, (row) => row.parent_id);
+        const visited = new Set<string>([threadId]);
+        const ids: Array<ThreadId> = [threadId];
+        for (let index = 0; index < ids.length; index++) {
+          for (const row of children.get(ids[index]!) ?? []) {
+            if (visited.has(row.thread_id)) continue;
+            visited.add(row.thread_id);
+            ids.push(ThreadId.make(row.thread_id));
+          }
+        }
+        return ids.slice(1);
+      },
+      Effect.mapError(shellSnapshotReadError),
+    );
+
     const listThreadGroupingParents = Effect.fn("ProjectionStore.listThreadGroupingParents")(
       function* (input: OrchestrationV2ListThreadGroupingParentsInput) {
         const rows = yield* sql<{
@@ -7607,6 +7641,7 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
       getThreadsWithPullRequests: readOnReader(getThreadsWithPullRequests),
       getThreadTitles: readOnReader(getThreadTitles),
       listThreadGroupingParents: readOnReader(listThreadGroupingParents),
+      getThreadGroupingDescendants: readOnReader(getThreadGroupingDescendants),
       getThreadWorktreePaths: readOnReader(getThreadWorktreePaths),
       getOpenRemoteDelegatedTasks: getOpenRemoteDelegatedTasks.pipe(NodeSqliteClient.readOnly),
       getThreadProjection: readOnReader(getThreadProjection),

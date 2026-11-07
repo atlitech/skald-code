@@ -2543,7 +2543,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
           api.dialogs.confirm(
             [
               `Delete ${count} thread${count === 1 ? "" : "s"}?`,
-              "This permanently clears conversation history for these threads.",
+              "This permanently clears conversation history for these threads and all nested child threads.",
             ].join("\n"),
             { variant: "destructive" },
           ),
@@ -2924,7 +2924,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                 api.dialogs.confirm(
                   [
                     `Delete thread "${thread.title}"?`,
-                    "This permanently clears conversation history for this thread.",
+                    "This permanently clears conversation history for this thread and all nested child threads.",
                   ].join("\n"),
                   { variant: "destructive" },
                 ),

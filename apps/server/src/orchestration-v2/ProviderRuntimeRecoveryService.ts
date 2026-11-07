@@ -852,10 +852,13 @@ export const make = Effect.gen(function* () {
             acceptedAt: now,
             events,
             effects,
-            cancelUnsettledEffects: {
-              effectTypes: EffectOutbox.PROCESS_BOUND_EFFECT_TYPES,
-              reason: detail,
-            },
+            cancelUnsettledEffects: [
+              {
+                threadId: projection.thread.id,
+                effectTypes: EffectOutbox.PROCESS_BOUND_EFFECT_TYPES,
+                reason: detail,
+              },
+            ],
           })
           .pipe(
             Effect.mapError(
