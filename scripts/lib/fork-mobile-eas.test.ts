@@ -5,6 +5,7 @@ import {
   assertNotSuperseded,
   assertUpdate,
   easJsonArgs,
+  parseEasJson,
   EASBuild,
   EAS_PROJECT_ID,
   EASUpdate,
@@ -178,4 +179,23 @@ it("uses only flags supported by CLI 27.5 for JSON reads and mutations", () => {
     "--json",
     "--non-interactive",
   ]);
+});
+
+it("reads fingerprint JSON after EAS's environment notice without accepting arbitrary output", () => {
+  const result = { hash: "80c1d9ba9cbf254ea462fa6fc1f128a16d45d616", sources: [] };
+  for (const notice of [
+    "",
+    'Environment variables with visibility "Plain text" and "Sensitive" loaded from the "production" environment on EAS: T3CODE_RELAY_URL.\n\n',
+    'No environment variables with visibility "Plain text" and "Sensitive" found for the "preview" environment on EAS.\r\n\r\n',
+  ])
+    assert.deepEqual(parseEasJson(notice + JSON.stringify(result)), result);
+  assert.deepEqual(parseEasJson(JSON.stringify([result])), [result]);
+  for (const invalid of [
+    "Unexpected output\n" + JSON.stringify(result),
+    JSON.stringify(result) + " trailing",
+    "{broken",
+    "",
+  ]) {
+    assert.throws(() => parseEasJson(invalid));
+  }
 });

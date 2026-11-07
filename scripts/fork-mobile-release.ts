@@ -22,6 +22,7 @@ import {
   assertNotSuperseded,
   assertUpdate,
   easJsonArgs,
+  parseEasJson,
   EASUpdate,
   selectUpdate,
   EAS_PROJECT_ID,
@@ -116,7 +117,7 @@ async function gh(path: string, body?: unknown): Promise<unknown> {
   );
 }
 async function eas(args: readonly string[]): Promise<unknown> {
-  return json(await run("eas", easJsonArgs(args), mobile));
+  return parseEasJson(await run("eas", easJsonArgs(args), mobile));
 }
 function required(name: string) {
   const value = NodeProcess.env[name];
