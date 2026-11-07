@@ -3,13 +3,13 @@ import * as NodeFS from "node:fs";
 import * as NodePath from "node:path";
 import { describe, expect, it } from "vite-plus/test";
 
-// The personal Android, iOS, and macOS signing values live in the personal-*-signing
-// environments, which only fork-server-release.yml reads, from atli. No workflow
-// a pull request triggers may name them, and the one that does writes them under
-// RUNNER_TEMP without printing them.
+// Signing access is restricted to manual fork releases and their guarded delivery workflow.
+// Mac signing files stay under RUNNER_TEMP; EAS manages the mobile signing material.
 const WORKFLOWS_DIR = NodePath.join(import.meta.dirname, "..", ".github", "workflows");
 const RELEASE_WORKFLOW = "fork-server-release.yml";
+const DELIVERY_WORKFLOW = "fork-mobile-delivery.yml";
 const SIGNING_MARKERS = [
+  "EXPO_OTA_TOKEN",
   "personal-android-signing",
   "T3CODE_PERSONAL_ANDROID",
   "GOOGLE_SERVICES_JSON_BASE64",
@@ -86,18 +86,35 @@ describe("fork workflow signing isolation", () => {
     }
   });
 
-  // A reusable workflow called from a pull request run would inherit the
-  // caller's trigger, so no other workflow may name the signing values at all.
-  it("names the signing environment only in the fork release workflow", () => {
+  it("allows signing only for the manual release and explicitly guarded delivery", () => {
     const mentioning = [...workflows]
       .filter(([, text]) => mentionsSigning(text))
       .map(([file]) => file);
-    expect(mentioning).toEqual([RELEASE_WORKFLOW]);
+    expect(mentioning).toEqual([DELIVERY_WORKFLOW, RELEASE_WORKFLOW]);
     expect(triggersOf(workflows.get(RELEASE_WORKFLOW)!)).toEqual(["workflow_dispatch"]);
+    const delivery = workflows.get(DELIVERY_WORKFLOW)!;
+    expect(triggersOf(delivery)).toEqual(["workflow_call"]);
+    const jobs = delivery
+      .slice(delivery.indexOf("\njobs:\n"))
+      .split(/(?=^ {2}[A-Za-z0-9_-]+:\s*$)/m)
+      .slice(1);
+    expect(jobs.length).toBeGreaterThan(0);
+    for (const job of jobs) {
+      expect(job).toContain("github.repository_id == '1406026313'");
+      expect(job).toContain("github.ref == 'refs/heads/atli'");
+      expect(job).toContain("github.event_name == 'workflow_dispatch'");
+      if (/secrets\./.test(job))
+        expect(job).toMatch(/^ {4}environment: .*personal-(?:android|ios)-signing/m);
+    }
+    const callers = [...workflows].filter(([, text]) =>
+      text.includes("uses: ./.github/workflows/fork-mobile-delivery.yml"),
+    );
+    expect(callers.map(([file]) => file)).toEqual(["fork-mobile-update.yml", RELEASE_WORKFLOW]);
+    for (const [, text] of callers) expect(triggersOf(text)).toEqual(["workflow_dispatch"]);
   });
 
-  describe("in the fork release workflow", () => {
-    const text = workflows.get(RELEASE_WORKFLOW)!;
+  describe("in the authorized release workflows", () => {
+    const text = [workflows.get(RELEASE_WORKFLOW)!, workflows.get(DELIVERY_WORKFLOW)!].join("\n");
     const lines = text.split("\n");
     // Env names a step maps a secret to, for example `KEYSTORE_BASE64: ${{ secrets.X }}`.
     const secretEnv = lines
@@ -110,27 +127,29 @@ describe("fork workflow signing isolation", () => {
     const DECODE_TO_TEMP =
       /^\s*printf '%s' "\$[A-Z0-9_]+" \| base64 -d > "\$RUNNER_TEMP\/[A-Za-z0-9._-]+"$/;
 
-    it("maps the signing secrets into step env only", () => {
+    it("keeps credentials in step env or the EAS action input", () => {
       expect(secretEnv).toEqual(
         expect.arrayContaining([
-          "KEYSTORE_BASE64",
-          "GOOGLE_SERVICES_JSON_BASE64",
-          "T3CODE_PERSONAL_ANDROID_KEYSTORE_PASSWORD",
-          "T3CODE_PERSONAL_ANDROID_KEY_PASSWORD",
-          "CERTIFICATE_BASE64",
-          "CERTIFICATE_PASSWORD",
-          "APP_PROFILE_BASE64",
-          "WIDGETS_PROFILE_BASE64",
-          "SHARING_PROFILE_BASE64",
           "API_KEY_BASE64",
           "PROFILE_BASE64",
           "CSC_LINK",
           "CSC_KEY_PASSWORD",
+          "ASC_KEY_BASE64",
+          "token",
         ]),
       );
       for (const line of lines.filter((line) => /secrets\./.test(line))) {
         expect(line).toMatch(/^ {10}[A-Za-z0-9_]+: \$\{\{ secrets\.[A-Za-z0-9_]+ \}\}$/);
       }
+      for (const step of text
+        .split(/(?=^ {6}- )/m)
+        .filter((step) => step.includes("secrets.EXPO_OTA_TOKEN"))) {
+        expect(step).toMatch(/uses: expo\/expo-github-action@/);
+        expect(step).toContain("token: ${{ secrets.EXPO_OTA_TOKEN }}");
+      }
+      expect(text).not.toMatch(
+        /secrets\.(?:T3CODE_PERSONAL_ANDROID|T3CODE_IOS_(?:DISTRIBUTION|APP_PROFILE|WIDGETS_PROFILE|SHARING_PROFILE))/,
+      );
     });
 
     it("never traces the shell", () => {
@@ -154,12 +173,7 @@ describe("fork workflow signing isolation", () => {
           expect(target[1], line).toMatch(/^"\$RUNNER_TEMP\//);
         }
       }
-      for (const name of [
-        "T3CODE_PERSONAL_ANDROID_KEYSTORE_FILE",
-        "T3CODE_ANDROID_GOOGLE_SERVICES_FILE",
-        "T3CODE_MACOS_PROVISIONING_PROFILE",
-        "APPLE_API_KEY",
-      ]) {
+      for (const name of ["T3CODE_MACOS_PROVISIONING_PROFILE", "APPLE_API_KEY"]) {
         const exports = lines.filter((line) => line.includes(`${name}=`));
         expect(exports, name).toHaveLength(1);
         expect(exports[0], name).toMatch(new RegExp(`${name}=\\$RUNNER_TEMP/`));

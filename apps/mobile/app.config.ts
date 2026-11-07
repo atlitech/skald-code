@@ -1,9 +1,5 @@
 import type { ExpoConfig } from "expo/config";
 
-import {
-  ANDROID_VERSION_CODE_FLOOR,
-  androidVersionCode,
-} from "../../scripts/lib/android-version-code.ts";
 import { BRAND_ASSET_PATHS } from "../../scripts/lib/brand-assets.ts";
 import { loadRepoEnv } from "../../scripts/lib/public-config.ts";
 
@@ -17,7 +13,13 @@ process.env.EXPO_NO_TYPESCRIPT_SETUP = "1";
 const APP_VARIANT = resolveAppVariant(repoEnv.APP_VARIANT);
 const isPersonalBuild = APP_VARIANT === "personal";
 const isIosPersonalTeamBuild = repoEnv.T3CODE_IOS_PERSONAL_TEAM === "1";
-const runtimeVersionPolicy = resolveRuntimeVersionPolicy(process.env.MOBILE_VERSION_POLICY);
+const runtimeVersionPolicy =
+  isPersonalBuild && !isIosPersonalTeamBuild
+    ? "fingerprint"
+    : resolveRuntimeVersionPolicy(process.env.MOBILE_VERSION_POLICY);
+const easProjectId = isPersonalBuild
+  ? "4dfd2e15-bc73-461a-a26f-ba1c7d559172"
+  : "d763fcb8-d37c-41ea-a773-b54a0ab4a454";
 const unsignedAndroidBenchmark = repoEnv.T3CODE_ANDROID_CI_UNSIGNED === "1";
 
 if (
@@ -41,17 +43,11 @@ function resolveRuntimeVersionPolicy(value: string | undefined) {
   }
 }
 
-// The fork release (fork-server-release.yml build-android, or the personal
-// Android skill's build script) sets this so each release APK installs over the
-// last and each TestFlight upload gets a new build number; an unversioned
-// personal build carries the floor.
-const releaseVersion = repoEnv.T3CODE_RELEASE_VERSION?.trim();
-const personalBuildCode =
-  isPersonalBuild && releaseVersion
-    ? androidVersionCode(releaseVersion)
-    : ANDROID_VERSION_CODE_FLOOR;
-// The fork release's TestFlight job sets this to sign the personal app for the
-// App Store: {"<bundle id>": "<profile name>"} for the app and each extension.
+const personalChannel = repoEnv.T3CODE_MOBILE_CHANNEL ?? "personal-production";
+if (isPersonalBuild && !["personal-production", "personal-pilot"].includes(personalChannel)) {
+  throw new Error("T3CODE_MOBILE_CHANNEL must be personal-production or personal-pilot.");
+}
+// EAS injects managed profiles after prebuild; explicit profiles remain available for local diagnostics.
 const iosProvisioningProfiles = parseProvisioningProfiles(repoEnv.T3CODE_IOS_PROVISIONING_PROFILES);
 
 function parseProvisioningProfiles(value: string | undefined) {
@@ -71,11 +67,12 @@ function parseProvisioningProfiles(value: string | undefined) {
 const personalTeamBundleIdentifier = repoEnv.T3CODE_IOS_PERSONAL_TEAM_BUNDLE_ID?.trim();
 const IOS_BUNDLE_IDENTIFIER_PATTERN = /^[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+$/;
 
-// Compiled into the native project. Without a relay, Observe's native side could dispatch to
-// Expo's own ingest before observe.ts turns it off; `.invalid` never resolves (RFC 6761).
-const observeEndpointUrl = repoEnv.T3CODE_RELAY_URL?.trim()
-  ? new URL("/v1/mobile/observe", repoEnv.T3CODE_RELAY_URL.trim()).toString()
-  : "https://observe.invalid";
+// Native Observe can dispatch before JS configures it; personal builds and builds without
+// a relay use `.invalid` (RFC 6761) so they cannot send reports to Expo's default ingest.
+const observeEndpointUrl =
+  !isPersonalBuild && repoEnv.T3CODE_RELAY_URL?.trim()
+    ? new URL("/v1/mobile/observe", repoEnv.T3CODE_RELAY_URL.trim()).toString()
+    : "https://observe.invalid";
 
 const fromRepoRoot = (relativePath: string) => `../../${relativePath}`;
 const androidAdaptiveForeground = "./assets/android-icon-foreground.png";
@@ -302,7 +299,7 @@ const sharingPlugin: NonNullable<ExpoConfig["plugins"]>[number] = [
 
 const config: ExpoConfig = {
   name: isIosPersonalTeamBuild ? "T3 Code Personal" : variant.appName,
-  slug: "t3-code",
+  slug: isPersonalBuild && !isIosPersonalTeamBuild ? "skald-code" : "t3-code",
   platforms: ["ios", "android"],
   scheme: isIosPersonalTeamBuild ? `t3code-${iosBundleIdentifier}` : variant.scheme,
   version: repoEnv.T3CODE_MOBILE_VERSION ?? "2.2.0",
@@ -313,25 +310,22 @@ const config: ExpoConfig = {
   orientation: "portrait",
   icon: variant.assets.appIcon,
   userInterfaceStyle: "automatic",
-  updates:
-    isPersonalBuild || isIosPersonalTeamBuild
-      ? {
-          // Personal fork builds are self-contained. Never replace their
-          // embedded bundle with an update from the maintainers' EAS project.
-          enabled: false,
-        }
-      : {
-          enabled: repoEnv.T3CODE_MOBILE_UPDATES_ENABLED !== "0",
-          url: "https://u.expo.dev/d763fcb8-d37c-41ea-a773-b54a0ab4a454",
-          checkAutomatically: "ON_LOAD",
-          fallbackToCacheTimeout: 0,
-        },
+  updates: isIosPersonalTeamBuild
+    ? {
+        enabled: false,
+      }
+    : {
+        enabled: repoEnv.T3CODE_MOBILE_UPDATES_ENABLED !== "0",
+        url: `https://u.expo.dev/${easProjectId}`,
+        ...(isPersonalBuild ? { requestHeaders: { "expo-channel-name": personalChannel } } : {}),
+        checkAutomatically: "ON_LOAD",
+        fallbackToCacheTimeout: 0,
+      },
   ios: {
     icon: variant.assets.iosIcon,
     supportsTablet: true,
     requireFullScreen: process.env.T3_SHOWCASE_CAPTURE_BUILD === "1",
     bundleIdentifier: iosBundleIdentifier,
-    ...(isPersonalBuild ? { buildNumber: String(personalBuildCode) } : {}),
     // Pin a paid team (the fork's for `personal`, T3 Tools' otherwise) so non-interactive
     // `expo run:ios` never falls back to a free Personal Team, which cannot sign app groups,
     // Sign in with Apple, or push notification entitlements.
@@ -377,7 +371,6 @@ const config: ExpoConfig = {
   android: {
     icon: variant.assets.appIcon,
     package: variant.androidPackage,
-    ...(isPersonalBuild ? { versionCode: personalBuildCode } : {}),
     ...(repoEnv.T3CODE_ANDROID_GOOGLE_SERVICES_FILE
       ? { googleServicesFile: repoEnv.T3CODE_ANDROID_GOOGLE_SERVICES_FILE }
       : {}),
@@ -585,16 +578,16 @@ const config: ExpoConfig = {
       tracesDataset: repoEnv.EXPO_PUBLIC_OTLP_TRACES_DATASET ?? null,
       tracesToken: repoEnv.EXPO_PUBLIC_OTLP_TRACES_TOKEN ?? null,
     },
-    ...(!isPersonalBuild && !isIosPersonalTeamBuild
+    ...(!isIosPersonalTeamBuild
       ? {
           eas: {
-            projectId: "d763fcb8-d37c-41ea-a773-b54a0ab4a454",
+            projectId: easProjectId,
             observe: { endpointUrl: observeEndpointUrl },
           },
         }
       : {}),
   },
-  owner: isPersonalBuild || isIosPersonalTeamBuild ? undefined : "pingdotgg",
+  owner: isIosPersonalTeamBuild ? undefined : isPersonalBuild ? "atlitech" : "pingdotgg",
   experiments: {
     // Metro only runs babel-plugin-react-compiler when this is set; see src/reactCompilerCoverage.test.ts.
     reactCompiler: true,

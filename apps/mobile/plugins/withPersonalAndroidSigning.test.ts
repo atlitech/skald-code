@@ -1,6 +1,6 @@
 import * as NodeModule from "node:module";
 import type { ConfigPlugin, ExportedConfig } from "expo/config-plugins";
-import { expect, it } from "vite-plus/test";
+import { expect, it, vi } from "vite-plus/test";
 
 const require = NodeModule.createRequire(import.meta.url);
 const plugin = require("./withPersonalAndroidSigning.cjs") as ConfigPlugin<{
@@ -71,4 +71,13 @@ it("builds an explicitly unsigned release without evaluating signing credentials
   expect(await buildGradle(true, contents)).toBe(contents);
   await expect(buildGradle(true, await buildGradle())).rejects.toThrow();
   await expect(buildGradle(undefined, contents)).rejects.toThrow();
+});
+
+it("leaves managed signing to EAS without evaluating local signing variables", async () => {
+  vi.stubEnv("EAS_BUILD", "true");
+  try {
+    expect(await buildGradle()).toBe(TEMPLATE);
+  } finally {
+    vi.unstubAllEnvs();
+  }
 });

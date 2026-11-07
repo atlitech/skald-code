@@ -1,17 +1,7 @@
 name: Fork server release
 
-# Fork-only (atlitech/skald-code). Builds the self-contained Linux x64 server
-# archive the official release ships and, from the same commit, the signed and
-# notarized Mac arm64 desktop DMG and OTA payload and the personal Android arm64-v8a APK, and publishes
-# all three with SHA256SUMS and manifest.json as a prerelease, in the layout
-# scripts/install.sh and `t3 update` download from. A release publishes only
-# when all three build and every package's tests pass. Before anything publishes,
-# the admission job installs that exact archive over data the previously
-# admitted release wrote, upgrades and runs it, and the release ships its
-# attested ADMISSION.json only when every check passed. Releases are
-# immutable: the guard refuses a used version, and publish uploads every asset
-# to a draft before exposing the release to update clients. Only after it publishes does the
-# personal iOS app, built from the same commit, go to TestFlight.
+# Guarded manual releases retain Linux admission, Mac signing, and full tests.
+# EAS compiles mobile; Android is verified before publication, OTA and iOS after.
 # Runbook: docs/operations/fork-server.md.
 
 on:
@@ -21,6 +11,11 @@ on:
         description: "Fork version, <next upstream patch>-atli.<n> (for example 0.0.46-atli.1)"
         required: true
         type: string
+      force-native:
+        description: "Refresh a native installer even when OTA is compatible"
+        type: choice
+        options: [none, android, ios, all]
+        default: none
       admission-bootstrap-prior:
         description: "First admission only: the earlier release (for example 0.0.46-atli.3) to upgrade from while no release carries ADMISSION.json. Leave empty otherwise."
         required: false
@@ -28,7 +23,7 @@ on:
         type: string
 
 concurrency:
-  group: fork-server-release
+  group: skald-production-publication
   cancel-in-progress: false
 
 permissions:
@@ -53,6 +48,15 @@ jobs:
     env:
       GH_TOKEN: ${{ github.token }}
     steps:
+      - name: Require approved EAS cutover
+        env:
+          SKALD_EAS_READY: ${{ vars.SKALD_EAS_READY }}
+        run: |
+          if [ "$SKALD_EAS_READY" != true ]; then
+            echo "::error::Complete managed signing, remote counter seeding, protected token setup, and the cloud/device pilot in the runbook before enabling EAS releases."
+            exit 1
+          fi
+
       - name: Require repository variables
         shell: bash
         env:
@@ -342,43 +346,31 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
-  # Builds the personal Android APK (tech.atli.skaldcode) for arm64-v8a, signed
-  # with the owner's key from the personal-android-signing environment, which
-  # only atli may deploy to. The keystore and google-services.json are written
-  # under RUNNER_TEMP and never printed. Native Google sign-in and push turn on
-  # only when their values are set. Checked for its package, certificate, and
-  # versionCode, never run here.
-  build-android:
-    name: Build personal Android arm64-v8a APK
+  mobile-plan:
+    name: Plan mobile delivery from distributed baselines
     needs: guard
     if: github.repository_id == '1406026313' && github.ref == 'refs/heads/atli'
-    runs-on: blacksmith-8vcpu-ubuntu-2404
-    environment: personal-android-signing
-    timeout-minutes: 60
+    runs-on: ubuntu-24.04
+    environment: personal-ios-signing
+    timeout-minutes: 30
     permissions:
       contents: read
-      id-token: write
-      attestations: write
+      deployments: write
+    outputs:
+      android-mode: ${{ steps.plan.outputs.android-mode }}
     env:
-      # Public T3 Connect identifiers baked into the app bundle.
-      T3CODE_CLERK_PUBLISHABLE_KEY: ${{ vars.T3CODE_CLERK_PUBLISHABLE_KEY }}
-      T3CODE_CLERK_JWT_TEMPLATE: ${{ vars.T3CODE_CLERK_JWT_TEMPLATE }}
-      T3CODE_CLERK_CLI_OAUTH_CLIENT_ID: ${{ vars.T3CODE_CLERK_CLI_OAUTH_CLIENT_ID }}
-      T3CODE_RELAY_URL: ${{ vars.T3CODE_RELAY_URL }}
       APP_VARIANT: personal
-      MOBILE_VERSION_POLICY: appVersion
-      # app.config.ts derives android.versionCode from it.
-      T3CODE_RELEASE_VERSION: ${{ needs.guard.outputs.version }}
-      VERSION: ${{ needs.guard.outputs.version }}
+      T3CODE_MOBILE_CHANNEL: personal-production
+      SKALD_EAS_READY: ${{ vars.SKALD_EAS_READY }}
+      GH_TOKEN: ${{ github.token }}
+      SHA: ${{ needs.guard.outputs.sha }}
+      TAG: ${{ needs.guard.outputs.tag }}
     steps:
-      - name: Checkout
+      - name: Checkout complete source
         uses: actions/checkout@v6
         with:
           ref: ${{ needs.guard.outputs.sha }}
-          sparse-checkout: |
-            /*
-            !/.repos/
-          sparse-checkout-cone-mode: false
+          fetch-depth: 0
 
       - name: Setup Vite+
         uses: voidzero-dev/setup-vp@250f29ce396baf5e8f24498e17c0dfdebabc26eb # v1
@@ -388,133 +380,115 @@ jobs:
           run-install: false
 
       - name: Install dependencies
-        run: vp install --filter=@t3tools/mobile... --filter=@t3tools/scripts...
+        run: vp install --frozen-lockfile --filter=@t3tools/mobile... --filter=@t3tools/scripts...
 
-      # As the mobile workflows do, for tools that call the workspace's pnpm.
       - name: Expose pnpm
         run: |
           pnpm_version="$(node --print "require('./package.json').packageManager.split('@').pop()")"
-          vp_pnpm_bin="$HOME/.vite-plus/package_manager/pnpm/$pnpm_version/pnpm/bin"
-          echo "$vp_pnpm_bin" >> "$GITHUB_PATH"
-          "$vp_pnpm_bin/pnpm" --version
+          echo "$HOME/.vite-plus/package_manager/pnpm/$pnpm_version/pnpm/bin" >> "$GITHUB_PATH"
 
-      - name: Setup Java
-        uses: actions/setup-java@v5
+      - name: Setup EAS
+        uses: expo/expo-github-action@v8
         with:
-          distribution: temurin
-          java-version: 17
+          eas-version: 27.5.0
+          token: ${{ secrets.EXPO_OTA_TOKEN }}
+          packager: npm
 
-      - name: Setup Gradle cache
-        uses: gradle/actions/setup-gradle@4c125117fe7c5aed11272ec4213f602f012f89f2 # v5
+      - name: Resolve native compatibility and Apple availability
+        id: plan
+        env:
+          FORCE_NATIVE: ${{ inputs.force-native }}
+          SKALD_ASC_APP_ID: ${{ vars.SKALD_ASC_APP_ID }}
+          ASC_KEY_ID: ${{ vars.T3CODE_IOS_APP_STORE_CONNECT_KEY_ID }}
+          ASC_ISSUER_ID: ${{ vars.T3CODE_IOS_APP_STORE_CONNECT_ISSUER_ID }}
+          ASC_KEY_BASE64: ${{ secrets.T3CODE_IOS_APP_STORE_CONNECT_KEY_BASE64 }}
+        run: |
+          node scripts/fork-mobile-release.ts prepare --sha "$SHA" --tag "$TAG" --force "$FORCE_NATIVE" --out "$RUNNER_TEMP/mobile-intent.json"
+          echo "android-mode=$(jq -r .android.mode "$RUNNER_TEMP/mobile-intent.json")" >> "$GITHUB_OUTPUT"
+
+      - name: Save immutable delivery intent
+        uses: actions/upload-artifact@v7
         with:
-          cache-read-only: ${{ github.ref != 'refs/heads/atli' }}
+          name: mobile-intent
+          path: ${{ runner.temp }}/mobile-intent.json
+          if-no-files-found: error
 
-      - name: Setup native and Metro caches
-        uses: ./.github/actions/setup-android-build-cache
+  build-android:
+    name: Build or reference personal Android APK
+    needs: [guard, mobile-plan]
+    if: github.repository_id == '1406026313' && github.ref == 'refs/heads/atli'
+    runs-on: ubuntu-24.04
+    environment: personal-android-signing
+    timeout-minutes: 150
+    permissions:
+      contents: read
+      deployments: write
+    env:
+      APP_VARIANT: personal
+      T3CODE_MOBILE_CHANNEL: personal-production
+      SKALD_EAS_READY: ${{ vars.SKALD_EAS_READY }}
+      GH_TOKEN: ${{ github.token }}
+      SHA: ${{ needs.guard.outputs.sha }}
+      TAG: ${{ needs.guard.outputs.tag }}
+    steps:
+      - name: Checkout complete source
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.guard.outputs.sha }}
+          fetch-depth: 0
 
-      - name: Write signing keystore
-        shell: bash
-        env:
-          KEYSTORE_BASE64: ${{ secrets.T3CODE_PERSONAL_ANDROID_KEYSTORE_BASE64 }}
+      - name: Setup Vite+
+        uses: voidzero-dev/setup-vp@250f29ce396baf5e8f24498e17c0dfdebabc26eb # v1
+        with:
+          node-version-file: package.json
+          cache: false
+          run-install: false
+
+      - name: Install dependencies
+        run: vp install --frozen-lockfile --filter=@t3tools/mobile... --filter=@t3tools/scripts...
+
+      - name: Expose pnpm
         run: |
-          set -euo pipefail
-          if [ -z "$KEYSTORE_BASE64" ]; then
-            echo "::error::The personal-android-signing environment has no T3CODE_PERSONAL_ANDROID_KEYSTORE_BASE64 secret."
-            exit 1
-          fi
-          printf '%s' "$KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/t3-code-personal.jks"
-          echo "T3CODE_PERSONAL_ANDROID_KEYSTORE_FILE=$RUNNER_TEMP/t3-code-personal.jks" >> "$GITHUB_ENV"
+          pnpm_version="$(node --print "require('./package.json').packageManager.split('@').pop()")"
+          echo "$HOME/.vite-plus/package_manager/pnpm/$pnpm_version/pnpm/bin" >> "$GITHUB_PATH"
 
-      - name: Enable native Google sign-in
-        if: vars.T3CODE_CLERK_GOOGLE_ANDROID_CLIENT_ID != ''
-        shell: bash
-        env:
-          GOOGLE_ANDROID_CLIENT_ID: ${{ vars.T3CODE_CLERK_GOOGLE_ANDROID_CLIENT_ID }}
-        run: echo "EXPO_PUBLIC_CLERK_GOOGLE_ANDROID_CLIENT_ID=$GOOGLE_ANDROID_CLIENT_ID" >> "$GITHUB_ENV"
+      - name: Setup EAS
+        uses: expo/expo-github-action@v8
+        with:
+          eas-version: 27.5.0
+          token: ${{ secrets.EXPO_OTA_TOKEN }}
+          packager: npm
 
-      # The secrets context is unavailable to a step's `if:`, so the shell
-      # checks the value.
-      - name: Write google-services.json
-        shell: bash
-        env:
-          GOOGLE_SERVICES_JSON_BASE64: ${{ secrets.GOOGLE_SERVICES_JSON_BASE64 }}
-        run: |
-          set -euo pipefail
-          if [ -n "$GOOGLE_SERVICES_JSON_BASE64" ]; then
-            printf '%s' "$GOOGLE_SERVICES_JSON_BASE64" | base64 -d > "$RUNNER_TEMP/google-services.json"
-            echo "T3CODE_ANDROID_GOOGLE_SERVICES_FILE=$RUNNER_TEMP/google-services.json" >> "$GITHUB_ENV"
-          fi
+      - name: Download delivery intent
+        uses: actions/download-artifact@v8
+        with:
+          name: mobile-intent
+          path: ${{ runner.temp }}
 
       - name: Check public config
-        shell: bash
         run: |
-          set -euo pipefail
-          (cd apps/mobile && vp exec expo config --type public --json) > "$RUNNER_TEMP/expo-config.json"
+          (cd apps/mobile && eas env:exec production 'vp exec expo config --type public --json' --non-interactive) > "$RUNNER_TEMP/expo-config.json"
           node scripts/fork-android-config.ts --config "$RUNNER_TEMP/expo-config.json"
 
-      - name: Generate the Android project
-        run: cd apps/mobile && EXPO_NO_GIT_STATUS=1 vp exec expo prebuild --clean --platform android --no-install
-
-      - name: Build signed release APK
-        shell: bash
-        env:
-          T3CODE_PERSONAL_ANDROID_KEYSTORE_PASSWORD: ${{ secrets.T3CODE_PERSONAL_ANDROID_KEYSTORE_PASSWORD }}
-          T3CODE_PERSONAL_ANDROID_KEY_PASSWORD: ${{ secrets.T3CODE_PERSONAL_ANDROID_KEY_PASSWORD }}
-          T3CODE_PERSONAL_ANDROID_KEY_ALIAS: ${{ vars.T3CODE_PERSONAL_ANDROID_KEY_ALIAS }}
-        run: |
-          cd apps/mobile/android
-          /usr/bin/time -v ./gradlew :app:assembleRelease -PreactNativeArchitectures=arm64-v8a \
-            -I "$GITHUB_WORKSPACE/apps/mobile/scripts/android-ci.gradle" \
-            --build-cache --parallel --max-workers=8 --profile --console=plain \
-            -Dorg.gradle.jvmargs="-Xmx8g -XX:MaxMetaspaceSize=2g" \
-            2>&1 | tee "$RUNNER_TEMP/android-build.log"
-
-      - name: Name the APK
-        shell: bash
-        run: |
-          set -euo pipefail
-          mkdir -p release
-          cp apps/mobile/android/app/build/outputs/apk/release/app-release.apk "release/T3-Code-$VERSION-android-arm64-v8a.apk"
-
       - name: Check APK identity
-        shell: bash
-        run: |
-          set -euo pipefail
-          apk="release/T3-Code-$VERSION-android-arm64-v8a.apk"
-          "$ANDROID_HOME/build-tools/36.0.0/aapt" dump badging "$apk" > "$RUNNER_TEMP/badging.txt"
-          "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --print-certs "$apk" > "$RUNNER_TEMP/certs.txt"
-          node scripts/fork-android-identity.ts \
-            --badging "$RUNNER_TEMP/badging.txt" \
-            --certs "$RUNNER_TEMP/certs.txt" \
-            --release-version "$VERSION"
+        run: node scripts/fork-mobile-release.ts android --sha "$SHA" --tag "$TAG" --intent "$RUNNER_TEMP/mobile-intent.json" --dir "$RUNNER_TEMP/release-android"
 
-      - name: Attest APK provenance
-        uses: actions/attest-build-provenance@v3
-        with:
-          subject-path: release/T3-Code-${{ needs.guard.outputs.version }}-android-arm64-v8a.apk
-
-      # publish downloads every `release-*` artifact into one directory.
-      - name: Upload APK
+      # EAS is the compiler. The manifest attests what GitHub verified, with the EAS build ID.
+      - name: Upload newly verified APK
+        if: needs.mobile-plan.outputs.android-mode == 'native'
         uses: actions/upload-artifact@v7
         with:
           name: release-android-arm64-v8a
-          path: release/T3-Code-${{ needs.guard.outputs.version }}-android-arm64-v8a.apk
+          path: ${{ runner.temp }}/release-android/*.apk
           if-no-files-found: error
           retention-days: 7
 
-      - name: Report compiler cache usage
-        if: always()
-        run: ccache --show-stats --verbose | tee "$RUNNER_TEMP/android-ccache.txt" >> "$GITHUB_STEP_SUMMARY"
-
-      - name: Upload Android build diagnostics
-        if: always()
+      - name: Save verified mobile intent
         uses: actions/upload-artifact@v7
         with:
-          name: android-build-diagnostics
-          path: |
-            apps/mobile/android/build/reports/profile/
-            ${{ runner.temp }}/android-build.log
-            ${{ runner.temp }}/android-ccache.txt
+          name: mobile-intent-verified
+          path: ${{ runner.temp }}/mobile-intent.json
+          if-no-files-found: error
           retention-days: 7
 
   # Installs the built archive over a T3 home the prior release migrated and
@@ -659,9 +633,15 @@ jobs:
       # manifest.json's verificationScope: Linux x64 runtime-verified by
       # ADMISSION.json, Mac and Android build-checked but runtime-unverified
       # (owner decision of 2026-10-06). Writes nothing if the evidence differs.
+      - name: Download verified mobile intent
+        uses: actions/download-artifact@v8
+        with:
+          name: mobile-intent-verified
+          path: ${{ runner.temp }}
+
       - name: Write SHA256SUMS and manifest.json
         run: |
-          node scripts/fork-release-manifest.ts --dir release --commit "$SHA" --release-version "$VERSION" --admission release/ADMISSION.json
+          node scripts/fork-release-manifest.ts --dir release --commit "$SHA" --release-version "$VERSION" --admission release/ADMISSION.json --mobile-intent "$RUNNER_TEMP/mobile-intent.json"
           cat release/SHA256SUMS release/manifest.json
 
       # Only a refusal guard: the evidence verdict is an independent reader
@@ -693,184 +673,14 @@ jobs:
             --notes-file "$RUNNER_TEMP/release-notes.md"
           gh release edit "$TAG" --draft=false
 
-  # Uploads the personal iOS app (tech.atli.skaldcode) to TestFlight for the
-  # owner's internal testers, from the guarded commit, once the release has
-  # published. It is not a release asset, so it cannot hold back or change a
-  # release; a failed upload is retried by re-running this job. Signed with the
-  # owner's Apple Distribution certificate and App Store profiles from the
-  # personal-ios-signing environment, which only atli may deploy to, and
-  # uploaded with an App Store Connect API key. Checked for its bundle ID,
-  # build number, signature, and entitlements before it uploads.
-  testflight:
-    name: Upload personal iOS app to TestFlight
+  mobile-delivery:
+    name: Deliver mobile from the published release
     needs: [guard, publish]
     if: github.repository_id == '1406026313' && github.ref == 'refs/heads/atli'
-    # Duo support needs the iOS 27.1 SDK; only the Xcode 27 image has it.
-    runs-on: xcode-27
-    environment: personal-ios-signing
-    timeout-minutes: 90
     permissions:
       contents: read
-    env:
-      # Public T3 Connect identifiers baked into the app bundle.
-      T3CODE_CLERK_PUBLISHABLE_KEY: ${{ vars.T3CODE_CLERK_PUBLISHABLE_KEY }}
-      T3CODE_CLERK_JWT_TEMPLATE: ${{ vars.T3CODE_CLERK_JWT_TEMPLATE }}
-      T3CODE_CLERK_CLI_OAUTH_CLIENT_ID: ${{ vars.T3CODE_CLERK_CLI_OAUTH_CLIENT_ID }}
-      T3CODE_RELAY_URL: ${{ vars.T3CODE_RELAY_URL }}
-      APP_VARIANT: personal
-      # Personal builds take no OTA updates, so skip the native fingerprint.
-      MOBILE_VERSION_POLICY: appVersion
-      # app.config.ts derives ios.buildNumber from it.
-      T3CODE_RELEASE_VERSION: ${{ needs.guard.outputs.version }}
-      VERSION: ${{ needs.guard.outputs.version }}
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v6
-        with:
-          ref: ${{ needs.guard.outputs.sha }}
-          sparse-checkout: |
-            /*
-            !/.repos/
-          sparse-checkout-cone-mode: false
-
-      - name: Setup Vite+
-        uses: voidzero-dev/setup-vp@250f29ce396baf5e8f24498e17c0dfdebabc26eb # v1
-        with:
-          node-version-file: package.json
-          cache: false
-          run-install: false
-
-      - name: Install dependencies
-        run: vp install --filter=@t3tools/mobile... --filter=@t3tools/scripts...
-
-      # As the mobile workflows do, for tools that call the workspace's pnpm.
-      - name: Expose pnpm
-        run: |
-          pnpm_version="$(node --print "require('./package.json').packageManager.split('@').pop()")"
-          vp_pnpm_bin="$HOME/.vite-plus/package_manager/pnpm/$pnpm_version/pnpm/bin"
-          echo "$vp_pnpm_bin" >> "$GITHUB_PATH"
-          "$vp_pnpm_bin/pnpm" --version
-
-      - name: Import the distribution certificate
-        shell: bash
-        env:
-          CERTIFICATE_BASE64: ${{ secrets.T3CODE_IOS_DISTRIBUTION_CERTIFICATE_BASE64 }}
-          CERTIFICATE_PASSWORD: ${{ secrets.T3CODE_IOS_DISTRIBUTION_CERTIFICATE_PASSWORD }}
-        run: |
-          set -euo pipefail
-          if [ -z "$CERTIFICATE_BASE64" ]; then
-            echo "::error::The personal-ios-signing environment has no T3CODE_IOS_DISTRIBUTION_CERTIFICATE_BASE64 secret."
-            exit 1
-          fi
-          printf '%s' "$CERTIFICATE_BASE64" | base64 -d > "$RUNNER_TEMP/distribution.p12"
-          keychain="$RUNNER_TEMP/signing.keychain-db"
-          keychain_password="$(uuidgen)"
-          security create-keychain -p "$keychain_password" "$keychain"
-          security set-keychain-settings -lut 21600 "$keychain"
-          security unlock-keychain -p "$keychain_password" "$keychain"
-          security import "$RUNNER_TEMP/distribution.p12" -k "$keychain" -P "$CERTIFICATE_PASSWORD" -f pkcs12 -A -t cert
-          security set-key-partition-list -S apple-tool:,apple: -k "$keychain_password" "$keychain" > /dev/null
-          security list-keychains -d user -s "$keychain"
-
-      # Xcode finds profiles only in its own directory. The app config signs
-      # each target with the profile T3CODE_IOS_PROVISIONING_PROFILES names.
-      - name: Install the App Store profiles
-        shell: bash
-        env:
-          APP_PROFILE_BASE64: ${{ secrets.T3CODE_IOS_APP_PROFILE_BASE64 }}
-          WIDGETS_PROFILE_BASE64: ${{ secrets.T3CODE_IOS_WIDGETS_PROFILE_BASE64 }}
-          SHARING_PROFILE_BASE64: ${{ secrets.T3CODE_IOS_SHARING_PROFILE_BASE64 }}
-        run: |
-          set -euo pipefail
-          printf '%s' "$APP_PROFILE_BASE64" | base64 -d > "$RUNNER_TEMP/app.mobileprovision"
-          printf '%s' "$WIDGETS_PROFILE_BASE64" | base64 -d > "$RUNNER_TEMP/widgets.mobileprovision"
-          printf '%s' "$SHARING_PROFILE_BASE64" | base64 -d > "$RUNNER_TEMP/sharing.mobileprovision"
-          profiles_dir="$HOME/Library/Developer/Xcode/UserData/Provisioning Profiles"
-          mkdir -p "$profiles_dir"
-          profiles='{}'
-          for kind in app widgets sharing; do
-            plist="$RUNNER_TEMP/$kind-profile.plist"
-            if ! security cms -D -i "$RUNNER_TEMP/$kind.mobileprovision" > "$plist" 2> /dev/null; then
-              echo "::error::The $kind profile secret is missing or is not a provisioning profile."
-              exit 1
-            fi
-            if plutil -extract ProvisionedDevices xml1 -o /dev/null "$plist" 2> /dev/null; then
-              echo "::error::The $kind profile lists devices; use an App Store Connect distribution profile."
-              exit 1
-            fi
-            uuid="$(plutil -extract UUID raw "$plist")"
-            name="$(plutil -extract Name raw "$plist")"
-            app_id="$(plutil -extract Entitlements.application-identifier raw "$plist")"
-            cp "$RUNNER_TEMP/$kind.mobileprovision" "$profiles_dir/$uuid.mobileprovision"
-            profiles="$(jq -c --arg id "${app_id#*.}" --arg name "$name" '. + {($id): $name}' <<< "$profiles")"
-          done
-          echo "T3CODE_IOS_PROVISIONING_PROFILES=$profiles" >> "$GITHUB_ENV"
-
-      - name: Check public config
-        shell: bash
-        run: |
-          set -euo pipefail
-          (cd apps/mobile && vp exec expo config --type public --json) > "$RUNNER_TEMP/expo-config.json"
-          node scripts/fork-android-config.ts --config "$RUNNER_TEMP/expo-config.json"
-
-      - name: Generate the iOS project
-        run: |
-          cd apps/mobile
-          EXPO_NO_GIT_STATUS=1 vp exec expo prebuild --clean --platform ios --no-install
-          pod install --project-directory=ios
-
-      - name: Archive
-        run: >-
-          xcodebuild -quiet -workspace apps/mobile/ios/SkaldCode.xcworkspace -scheme SkaldCode
-          -configuration Release -destination generic/platform=iOS
-          -archivePath "$RUNNER_TEMP/SkaldCode.xcarchive" archive
-
-      - name: Check the app's identity and entitlements
-        shell: bash
-        run: |
-          set -euo pipefail
-          app="$RUNNER_TEMP/SkaldCode.xcarchive/Products/Applications/SkaldCode.app"
-          entitlements() {
-            codesign -d --entitlements :- "$1" 2> /dev/null | plutil -convert json -o "$2" -
-          }
-          plutil -convert json -o "$RUNNER_TEMP/Info.json" "$app/Info.plist"
-          entitlements "$app" "$RUNNER_TEMP/app-entitlements.json"
-          entitlements "$app/PlugIns/ExpoWidgetsTarget.appex" "$RUNNER_TEMP/widgets-entitlements.json"
-          entitlements "$app/PlugIns/expo-sharing-extension.appex" "$RUNNER_TEMP/sharing-entitlements.json"
-          node scripts/fork-ios-identity.ts \
-            --info-plist "$RUNNER_TEMP/Info.json" \
-            --app-entitlements "$RUNNER_TEMP/app-entitlements.json" \
-            --widgets-entitlements "$RUNNER_TEMP/widgets-entitlements.json" \
-            --sharing-entitlements "$RUNNER_TEMP/sharing-entitlements.json" \
-            --release-version "$VERSION"
-
-      - name: Upload to TestFlight
-        shell: bash
-        env:
-          API_KEY_BASE64: ${{ secrets.T3CODE_IOS_APP_STORE_CONNECT_KEY_BASE64 }}
-          API_KEY_ID: ${{ vars.T3CODE_IOS_APP_STORE_CONNECT_KEY_ID }}
-          API_ISSUER_ID: ${{ vars.T3CODE_IOS_APP_STORE_CONNECT_ISSUER_ID }}
-        run: |
-          set -euo pipefail
-          if [ -z "$API_KEY_BASE64" ] || [ -z "$API_KEY_ID" ] || [ -z "$API_ISSUER_ID" ]; then
-            echo "::error::The personal-ios-signing environment lacks the App Store Connect API key, key ID, or issuer ID."
-            exit 1
-          fi
-          printf '%s' "$API_KEY_BASE64" | base64 -d > "$RUNNER_TEMP/AuthKey.p8"
-          options="$RUNNER_TEMP/ExportOptions.plist"
-          plutil -create xml1 "$options"
-          plutil -insert method -string app-store-connect "$options"
-          plutil -insert destination -string upload "$options"
-          plutil -insert signingStyle -string manual "$options"
-          plutil -insert signingCertificate -string "Apple Distribution" "$options"
-          # The build number comes from the release version, never from Xcode.
-          plutil -insert manageAppVersionAndBuildNumber -bool NO "$options"
-          plutil -insert provisioningProfiles -json "$T3CODE_IOS_PROVISIONING_PROFILES" "$options"
-          xcodebuild -exportArchive \
-            -archivePath "$RUNNER_TEMP/SkaldCode.xcarchive" \
-            -exportOptionsPlist "$options" \
-            -exportPath "$RUNNER_TEMP/export" \
-            -allowProvisioningUpdates \
-            -authenticationKeyPath "$RUNNER_TEMP/AuthKey.p8" \
-            -authenticationKeyID "$API_KEY_ID" \
-            -authenticationKeyIssuerID "$API_ISSUER_ID"
+      deployments: write
+    uses: ./.github/workflows/fork-mobile-delivery.yml
+    with:
+      tag: ${{ needs.guard.outputs.tag }}
+    secrets: inherit

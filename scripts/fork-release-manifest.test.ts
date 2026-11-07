@@ -377,3 +377,134 @@ it.layer(Layer.mergeAll(NodeServices.layer, NodeCryptoServices.layer))(
     );
   },
 );
+
+it.effect(
+  "records original APK references for OTA and exact new APK provenance for native delivery",
+  () =>
+    Effect.gen(function* () {
+      const baseline = {
+        buildId: "00000000-0000-0000-0000-000000000001",
+        sourceSha: "a".repeat(40),
+        profile: "personal" as const,
+        appBuildVersion: "4600001",
+        appVersion: "1.0.0",
+        runtimeVersion: "runtime-a",
+        releaseTag: "v0.0.45-atli.1",
+        artifact: {
+          ...apk,
+          file: "T3-Code-0.0.45-atli.1-android-arm64-v8a.apk",
+          url: "https://github.com/atlitech/skald-code/releases/download/v0.0.45-atli.1/T3-Code-0.0.45-atli.1-android-arm64-v8a.apk",
+        },
+      };
+      const mobile = {
+        channel: "personal-production" as const,
+        android: {
+          mode: "ota" as const,
+          appVersion: baseline.appVersion,
+          runtimeVersion: baseline.runtimeVersion,
+          baseline,
+        },
+        ios: { mode: "native" as const, appVersion: "1.0.0", runtimeVersion: "runtime-b" },
+      };
+      const release = yield* buildReleaseManifest({
+        commit,
+        version,
+        files: [linux, dmg],
+        admission,
+        mobile,
+      });
+      assert.deepEqual(release.manifest.mobile, mobile);
+      assert.lengthOf(release.manifest.assets, 2);
+      assert.lengthOf(release.manifest.verificationScope.entries, 2);
+      assert.notInclude(release.sha256sums, ".apk");
+      for (const change of [
+        { files: [linux, dmg, apk] },
+        {
+          mobile: {
+            ...mobile,
+            android: {
+              mode: "ota" as const,
+              appVersion: baseline.appVersion,
+              runtimeVersion: baseline.runtimeVersion,
+            },
+          },
+        },
+        { mobile: { ...mobile, android: { ...mobile.android, runtimeVersion: "incompatible" } } },
+        {
+          mobile: {
+            ...mobile,
+            android: {
+              ...mobile.android,
+              baseline: { ...baseline, artifact: { ...baseline.artifact, file: apk.file } },
+            },
+          },
+        },
+        {
+          mobile: {
+            ...mobile,
+            android: {
+              ...mobile.android,
+              baseline: {
+                ...baseline,
+                artifact: { ...baseline.artifact, url: "https://example.com/renamed.apk" },
+              },
+            },
+          },
+        },
+      ]) {
+        const error = yield* Effect.flip(
+          buildReleaseManifest({
+            commit,
+            version,
+            files: [linux, dmg],
+            admission,
+            mobile,
+            ...change,
+          }),
+        );
+        assert.equal(error._tag, "ReleaseManifestError");
+      }
+      const native = {
+        ...mobile,
+        android: {
+          ...mobile.android,
+          mode: "native" as const,
+          baseline: {
+            ...baseline,
+            sourceSha: commit,
+            releaseTag: `v${version}`,
+            artifact: {
+              ...apk,
+              url: `https://github.com/atlitech/skald-code/releases/download/v${version}/${apk.file}`,
+            },
+          },
+        },
+      };
+      const built = yield* buildReleaseManifest({
+        commit,
+        version,
+        files: [linux, dmg, apk],
+        admission,
+        mobile: native,
+      });
+      assert.equal(built.manifest.mobile?.android.baseline?.artifact?.sha256, apk.sha256);
+      for (const edit of [
+        { sourceSha: "b".repeat(40) },
+        { artifact: { ...native.android.baseline.artifact, sha256: dmg.sha256 } },
+      ]) {
+        const error = yield* Effect.flip(
+          buildReleaseManifest({
+            commit,
+            version,
+            files: [linux, dmg, apk],
+            admission,
+            mobile: {
+              ...native,
+              android: { ...native.android, baseline: { ...native.android.baseline, ...edit } },
+            },
+          }),
+        );
+        assert.equal(error._tag, "ReleaseManifestError");
+      }
+    }),
+);

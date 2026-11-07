@@ -50,10 +50,21 @@ describe("personal iOS configuration", () => {
   });
 
   it("signs the personal variant with the fork's paid team and keeps team capabilities", async () => {
-    const result = await config({ APP_VARIANT: "personal" });
+    const result = await config({
+      APP_VARIANT: "personal",
+      T3CODE_RELAY_URL: "https://relay.test",
+    });
     expect(result.ios?.appleTeamId).toBe("H6L3F33KRM");
-    expect(result.updates?.enabled).toBe(false);
-    expect(result.extra?.eas).toBeUndefined();
+    expect(result.owner).toBe("atlitech");
+    expect(result.slug).toBe("skald-code");
+    expect(result.updates).toMatchObject({
+      enabled: true,
+      url: "https://u.expo.dev/4dfd2e15-bc73-461a-a26f-ba1c7d559172",
+      requestHeaders: { "expo-channel-name": "personal-production" },
+    });
+    expect(result.extra?.eas?.projectId).toBe("4dfd2e15-bc73-461a-a26f-ba1c7d559172");
+    expect(result.extra?.eas?.observe.endpointUrl).toBe("https://observe.invalid");
+    expect(result.runtimeVersion).toEqual({ policy: "fingerprint" });
     const plugins = result.plugins?.map((plugin) =>
       typeof plugin === "string" ? plugin : plugin[0],
     );
@@ -64,16 +75,39 @@ describe("personal iOS configuration", () => {
     expect(clerk?.[1]).toMatchObject({ appleSignIn: false });
   });
 
-  it.each([
-    [undefined, 1],
-    ["0.1.7-atli.1", 1007003],
-  ])("gives personal release %j one build code on iOS and Android", async (version, code) => {
+  it("can disable personal OTA without falling back to the official project", async () => {
     const result = await config({
       APP_VARIANT: "personal",
-      ...(version ? { T3CODE_RELEASE_VERSION: version } : {}),
+      T3CODE_MOBILE_UPDATES_ENABLED: "0",
+      MOBILE_VERSION_POLICY: "appVersion",
     });
-    expect(result.ios?.buildNumber).toBe(String(code));
-    expect(result.android?.versionCode).toBe(code);
+    expect(result.updates?.enabled).toBe(false);
+    expect(result.updates?.url).toBe("https://u.expo.dev/4dfd2e15-bc73-461a-a26f-ba1c7d559172");
+    expect(result.runtimeVersion).toEqual({ policy: "fingerprint" });
+  });
+
+  it.each([undefined, "0.1.7-atli.1"])(
+    "leaves native numbers to EAS independently of fork release %j",
+    async (version) => {
+      const result = await config({
+        APP_VARIANT: "personal",
+        ...(version ? { T3CODE_RELEASE_VERSION: version } : {}),
+      });
+      expect(result.ios?.buildNumber).toBeUndefined();
+      expect(result.android?.versionCode).toBeUndefined();
+    },
+  );
+
+  it("isolates pilot updates and rejects upstream channels", async () => {
+    const result = await config({
+      APP_VARIANT: "personal",
+      T3CODE_MOBILE_CHANNEL: "personal-pilot",
+    });
+    expect(result.updates?.requestHeaders).toEqual({ "expo-channel-name": "personal-pilot" });
+    vi.resetModules();
+    await expect(
+      config({ APP_VARIANT: "personal", T3CODE_MOBILE_CHANNEL: "production" }),
+    ).rejects.toThrow("T3CODE_MOBILE_CHANNEL");
   });
 
   it("hands the TestFlight job's App Store profiles to the signing plugin", async () => {
@@ -133,7 +167,7 @@ describe("personal Android benchmark signing", () => {
         { unsigned: unsigned === "1" },
       ]);
       expect(result.android?.package).toBe("tech.atli.skaldcode");
-      expect(result.updates?.enabled).toBe(false);
+      expect(result.updates?.enabled).toBe(true);
     },
   );
 

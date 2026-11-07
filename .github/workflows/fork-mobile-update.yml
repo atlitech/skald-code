@@ -1,0 +1,25 @@
+name: Retry fork mobile delivery
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Published fork release tag to resume (exact manifest SHA)"
+        type: string
+        required: true
+
+concurrency:
+  group: skald-production-publication
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  deployments: write
+
+jobs:
+  retry:
+    if: github.repository_id == '1406026313' && github.ref == 'refs/heads/atli'
+    uses: ./.github/workflows/fork-mobile-delivery.yml
+    with:
+      tag: ${{ inputs.tag }}
+    secrets: inherit
