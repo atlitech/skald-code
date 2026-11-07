@@ -5,6 +5,7 @@ import * as NodeSqlite from "node:sqlite";
 
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, expect, it } from "@effect/vitest";
+import { vi } from "vite-plus/test";
 import * as NodeSqliteClient from "@t3tools/shared/nodeSqliteClient";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
@@ -17,8 +18,13 @@ import {
   databaseMigrationHead,
 } from "../persistence/databaseMigrationHead.ts";
 import { migrationManifest, runMigrations } from "../persistence/Migrations.ts";
-import { runServicePreflight } from "./servicePreflight.ts";
+import { runServicePreflight, snapshotDatabase } from "./servicePreflight.ts";
 import { SERVICE_LAUNCHER_PROTOCOL } from "./serviceProtocol.ts";
+
+vi.mock("node:sqlite", async (importOriginal) => {
+  const original = await importOriginal<typeof NodeSqlite>();
+  return { ...original, backup: vi.fn(original.backup) };
+});
 
 const fileSha256 = (path: string) =>
   NodeCrypto.createHash("sha256").update(NodeFS.readFileSync(path)).digest("hex");
@@ -289,6 +295,62 @@ it.layer(NodeServices.layer)("runServicePreflight", (it) => {
 });
 
 it.layer(NodeServices.layer)("service preflight database", (it) => {
+  it.effect("keeps a fixed snapshot while another connection writes between backup pages", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const directory = yield* fs.makeTempDirectoryScoped({ prefix: "t3-preflight-writes-" });
+      const source = path.join(directory, "source.sqlite");
+      const destination = path.join(directory, "copy.sqlite");
+      const writer = yield* openLiveWriter(
+        source,
+        "CREATE TABLE marker (value INTEGER); INSERT INTO marker VALUES (0); " +
+          "CREATE TABLE payload (body BLOB); INSERT INTO payload VALUES (zeroblob(1048576));",
+      );
+      const remaining: number[] = [];
+      let writes = 0;
+      const { backup } = yield* Effect.promise(() =>
+        vi.importActual<typeof NodeSqlite>("node:sqlite"),
+      );
+      using _backup = vi
+        .spyOn(NodeSqlite, "backup")
+        .mockImplementation((database, target, options) =>
+          backup(database, target, {
+            ...options,
+            rate: 10,
+            progress: (progress) => {
+              remaining.push(progress.remainingPages);
+              if (writes < 5) {
+                writer.exec("UPDATE marker SET value = value + 1");
+                writes++;
+              }
+            },
+          }),
+        );
+      yield* snapshotDatabase(source, destination);
+      assert.equal(writes, 5);
+      assert.isAbove(remaining.length, 5);
+      assert.isTrue(
+        remaining.every((pages, index) => index === 0 || pages < remaining[index - 1]!),
+      );
+      const copy = new NodeSqlite.DatabaseSync(destination, { readOnly: true });
+      try {
+        assert.equal(copy.prepare("SELECT value FROM marker").get()?.value, 0);
+        assert.equal(writer.prepare("SELECT value FROM marker").get()?.value, 5);
+        writer.exec("PRAGMA wal_checkpoint(TRUNCATE)");
+        assert.equal(NodeFS.statSync(`${source}-wal`).size, 0);
+      } finally {
+        copy.close();
+      }
+      _backup.mockRejectedValueOnce(new Error("backup failed"));
+      writer.exec("UPDATE marker SET value = value + 1");
+      const failure = yield* Effect.flip(snapshotDatabase(source, destination));
+      assert.equal(failure._tag, "PinnedRuntimeInstallError");
+      writer.exec("PRAGMA wal_checkpoint(TRUNCATE)");
+      assert.equal(NodeFS.statSync(`${source}-wal`).size, 0);
+    }).pipe(Effect.scoped),
+  );
+
   it.effect("blocks a database that a newer build migrated", () =>
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
