@@ -89,7 +89,7 @@ and restart `<n>` at 1.
   uses Blacksmith, as upstream's tests do; upstream's browser tests time out on a
   standard GitHub runner. Without repository access, those jobs stay queued.
   Mobile compilation runs on `blacksmith-8vcpu-ubuntu-2404` for Android and
-  `blacksmith-12vcpu-macos-26` for iOS. Confirm the Mac image has Xcode 27.1,
+  `blacksmith-12vcpu-macos-26` for iOS. Confirm the Mac image has Xcode 27.0,
   CocoaPods and Fastlane; setup selects and verifies that Xcode version. Planning, native compilation, and OTA use the same
   per-platform toolchain. EAS image settings do not install local tools; CI
   installs Java 17, Android SDK/build tools 36 and NDK 27.1, plus the repository's
