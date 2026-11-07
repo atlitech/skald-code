@@ -670,15 +670,12 @@ it.layer(NodeServices.layer)("t3 recover", (it) => {
     () =>
       Effect.gen(function* () {
         const home = yield* makeUpdatedHome();
-        // The launcher is repointed through a temporary symlink next to it.
         const { exit, events, logs, errors } = yield* recover(home, {
           service: "serves-this-home",
           fs: (fs) => ({
             ...fs,
-            symlink: (target, linkPath) =>
-              linkPath.startsWith(`${home.launcher}.`)
-                ? refusedBy("symlink", linkPath)
-                : fs.symlink(target, linkPath),
+            rename: (from, to) =>
+              to === home.launcher ? refusedBy("rename", to) : fs.rename(from, to),
           }),
         });
 

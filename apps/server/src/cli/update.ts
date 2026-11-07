@@ -160,7 +160,7 @@ export const repointLauncher = Effect.fn("cli.update.repoint_launcher")(function
   if (launcher === undefined) return Option.none<string>();
   return yield* repointPinnedRuntimeLauncher({ ...input, launcher }).pipe(
     Effect.mapError(
-      () => new CliUpdateError({ reason: `Could not update the t3 launcher at ${launcher}.` }),
+      () => new CliUpdateError({ reason: `Could not repoint the t3 launcher at ${launcher}.` }),
     ),
   );
 });
