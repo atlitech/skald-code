@@ -266,6 +266,10 @@ it("reuses a large thread list across tab renders and updates when its inputs ch
   expect(grouped.items[0]).toMatchObject({ childAttentionCount: 1, childrenExpanded: true });
   await act(async () => grouped.toggleGroup(`${environmentId}:${parent.id}`));
   expect(seen.at(-1)!.items.filter((item) => item.type === "v2-thread")).toHaveLength(1);
+  expect(seen.at(-1)!.items[0]).toMatchObject({
+    childrenExpanded: false,
+    containsSelection: true,
+  });
   await act(async () =>
     root.render(
       <Probe

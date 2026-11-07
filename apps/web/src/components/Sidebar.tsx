@@ -1,5 +1,8 @@
 import { openThreadParentDialog, useMoveThreadToTopLevel } from "./ThreadParentDialog";
-import { buildThreadGrouping } from "@t3tools/client-runtime/state/thread-grouping";
+import {
+  buildThreadGrouping,
+  resolveThreadGroupSections,
+} from "@t3tools/client-runtime/state/thread-grouping";
 import {
   SidebarThreadGroup,
   useSidebarThreadGroups,
@@ -493,7 +496,7 @@ function useSidebarThreads(input: {
     clockKey: `${nowMinute}:${snoozeWakeClock}:${inboxReturnsVersion}`,
   });
 
-  const sectionByThreadKey = new Map<string, SidebarSection>();
+  const ownSectionByThreadKey = new Map<string, SidebarSection>();
   const allOrderedThreads = [
     ...allPartition.pinnedThreads,
     ...allPartition.activeThreads,
@@ -508,23 +511,28 @@ function useSidebarThreads(input: {
     [allPartition.snoozedThreads, "snoozed"],
     [allPartition.settledThreads, "settled"],
   ] as const) {
-    for (const thread of list) sectionByThreadKey.set(threadShellKey(thread), section);
+    for (const thread of list) ownSectionByThreadKey.set(threadShellKey(thread), section);
   }
-  const grouping = buildThreadGrouping(allOrderedThreads, {
-    isParked: (thread) => {
-      const section = sectionByThreadKey.get(threadShellKey(thread));
-      return section === "settled" || section === "snoozed";
-    },
-  });
-  const isRoot = (thread: EnvironmentThreadShell) =>
-    !grouping.parentByChild.has(threadShellKey(thread));
+  const grouping = buildThreadGrouping(allOrderedThreads);
+  const sectionByThreadKey = resolveThreadGroupSections(
+    grouping,
+    ownSectionByThreadKey,
+    workingShelfEnabled,
+  );
+  const rootsInSection = (section: SidebarSection) =>
+    grouping.roots.filter((thread) => sectionByThreadKey.get(threadShellKey(thread)) === section);
   const partition = {
     ...allPartition,
-    pinnedThreads: allPartition.pinnedThreads.filter(isRoot),
-    activeThreads: allPartition.activeThreads.filter(isRoot),
-    workingThreads: allPartition.workingThreads.filter(isRoot),
-    snoozedThreads: allPartition.snoozedThreads.filter(isRoot),
-    settledThreads: allPartition.settledThreads.filter(isRoot),
+    pinnedThreads: rootsInSection("pinned"),
+    activeThreads:
+      folderGroups !== null
+        ? sortWorkingThreadsBySend(rootsInSection("active"))
+        : workingShelfEnabled
+          ? sortInboxThreadsByReturn(rootsInSection("active"), allPartition.inboxReturnedAt)
+          : sortThreadsForSidebar(rootsInSection("active")),
+    workingThreads: sortWorkingThreadsBySend(rootsInSection("working")),
+    snoozedThreads: rootsInSection("snoozed"),
+    settledThreads: rootsInSection("settled"),
   };
   const { pinnedThreads, activeThreads, workingThreads, snoozedThreads, settledThreads } =
     partition;
@@ -535,20 +543,6 @@ function useSidebarThreads(input: {
     if (parent === undefined) break;
     routeAncestors.add(parent);
     rootRouteKey = parent;
-  }
-  const attentionAncestors = new Set<string>();
-  for (const thread of allOrderedThreads) {
-    if (
-      !thread.hasPendingApprovals &&
-      !thread.hasPendingUserInput &&
-      thread.pendingSubagentRequest == null
-    )
-      continue;
-    let parent = grouping.parentByChild.get(threadShellKey(thread));
-    while (parent !== undefined && !attentionAncestors.has(parent)) {
-      attentionAncestors.add(parent);
-      parent = grouping.parentByChild.get(parent);
-    }
   }
   const childGroupState = useSidebarThreadGroups({
     childrenByParent: grouping.childrenByParent,
@@ -586,10 +580,7 @@ function useSidebarThreads(input: {
     : routeThreadOnly(snoozedThreads, rootRouteKey);
   const visibleWorkingThreads = workingShelfExpanded
     ? workingThreads
-    : workingThreads.filter(
-        (thread) =>
-          threadShellKey(thread) === rootRouteKey || attentionAncestors.has(threadShellKey(thread)),
-      );
+    : workingThreads.filter((thread) => threadShellKey(thread) === rootRouteKey);
   const projectFolders =
     folderGroups === null
       ? null
@@ -767,6 +758,7 @@ function partitionSidebarThreads(input: SidebarThreadPartitionInput) {
     settledThreads: sortSettledThreads(settled),
     visibleThreads: visible,
     snoozeNow: preciseNow,
+    inboxReturnedAt: inboxObservation.returnedAt,
   };
 }
 
@@ -3422,15 +3414,13 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                         const rowVariant =
                           navigationParent !== undefined
                             ? "child"
-                            : childGroup !== undefined
-                              ? "group"
-                              : folderRow
-                                ? folderRowsMultiline
-                                  ? "folder-multiline"
-                                  : "folder"
-                                : isCard
-                                  ? "card"
-                                  : "slim";
+                            : folderRow
+                              ? folderRowsMultiline
+                                ? "folder-multiline"
+                                : "folder"
+                              : isCard
+                                ? "card"
+                                : "slim";
                         return (
                           <SortableThreadRow
                             key={threadKey}
@@ -3457,9 +3447,9 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                                 : undefined)
                             }
                             variantAction={
-                              section === "snoozed"
+                              snoozedThreadKeys.has(threadKey)
                                 ? "unsnooze"
-                                : section === "settled"
+                                : settledThreadKeys.has(threadKey)
                                   ? "unsettle"
                                   : "settle"
                             }

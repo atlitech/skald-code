@@ -1,3 +1,4 @@
+import type { ThreadGroupSection } from "@t3tools/client-runtime/state/thread-grouping";
 import {
   canSnooze,
   effectiveSnoozed,
@@ -383,6 +384,7 @@ export interface ThreadListV2Grouping {
   readonly childWorkingCount?: number;
   readonly childAttentionCount?: number;
   readonly childrenExpanded?: boolean;
+  readonly containsSelection?: boolean;
 }
 
 export interface ThreadListV2ThreadListItem extends ThreadListV2Grouping {
@@ -463,7 +465,8 @@ export function threadListV2ListItemsAreEqual(
       previous.childCount !== item.childCount ||
       previous.childWorkingCount !== item.childWorkingCount ||
       previous.childAttentionCount !== item.childAttentionCount ||
-      previous.childrenExpanded !== item.childrenExpanded
+      previous.childrenExpanded !== item.childrenExpanded ||
+      previous.containsSelection !== item.containsSelection
     )
       return false;
   }
@@ -668,6 +671,35 @@ function sortSettledThreadsReusingLast(
   return lastSettledOutput;
 }
 
+export function resolveThreadListV2Section(
+  thread: EnvironmentThreadShell,
+  input: Pick<
+    Parameters<typeof buildThreadListV2Items>[0],
+    | "settlementEnvironmentIds"
+    | "snoozeEnvironmentIds"
+    | "queuedThreadKeys"
+    | "now"
+    | "workingShelfEnabled"
+    | "isWorking"
+  >,
+): ThreadGroupSection {
+  if (
+    (input.snoozeEnvironmentIds?.has(thread.environmentId) ?? true) &&
+    effectiveSnoozed(thread, { now: input.now })
+  )
+    return "snoozed";
+  if (
+    (input.settlementEnvironmentIds?.has(thread.environmentId) ?? true) &&
+    thread.settledOverride === "settled" &&
+    !input.queuedThreadKeys?.has(`${thread.environmentId}:${thread.id}`)
+  )
+    return "settled";
+  if (thread.pinnedAt != null) return "pinned";
+  return input.workingShelfEnabled && (input.isWorking ?? isThreadWorking)(thread)
+    ? "working"
+    : "active";
+}
+
 export function buildThreadListV2Items(input: {
   readonly pendingOrder?: PendingThreadOrder | null;
   readonly threads: ReadonlyArray<EnvironmentThreadShell>;
@@ -685,6 +717,7 @@ export function buildThreadListV2Items(input: {
   readonly workingShelfEnabled?: boolean;
   readonly workingShelfExpanded?: boolean;
   readonly isWorking?: (thread: EnvironmentThreadShell) => boolean;
+  readonly groupSections?: ReadonlyMap<string, ThreadGroupSection>;
   readonly inboxReturnAt?: (thread: EnvironmentThreadShell) => number | undefined;
   readonly snoozedShelfExpanded?: boolean;
   readonly settledShelfExpanded?: boolean;
@@ -720,7 +753,6 @@ export function buildThreadListV2Items(input: {
   const settled: EnvironmentThreadShell[] = [];
   const snoozed: EnvironmentThreadShell[] = [];
   let nextSnoozeWakeAt: string | null = null;
-  const queuedThreadKeys = input.queuedThreadKeys?.size ? input.queuedThreadKeys : undefined;
   const listedThreads = input.threads.filter(
     (thread) =>
       thread.archivedAt === null &&
@@ -752,30 +784,18 @@ export function buildThreadListV2Items(input: {
       if (input.matchedThreadKeys?.has(key) !== true) continue;
       contentOnlyThreadKeys.add(key);
     }
-    const supportsSettlement = input.settlementEnvironmentIds?.has(thread.environmentId) ?? true;
-    const supportsSnooze = input.snoozeEnvironmentIds?.has(thread.environmentId) ?? true;
-    if (supportsSnooze && effectiveSnoozed(thread, { now })) {
-      snoozed.push(thread);
-      if (
-        thread.snoozedUntil != null &&
-        (nextSnoozeWakeAt === null ||
-          parseTimestampMs(thread.snoozedUntil) < parseTimestampMs(nextSnoozeWakeAt))
-      ) {
-        nextSnoozeWakeAt = thread.snoozedUntil;
-      }
-      continue;
+    const section =
+      input.groupSections?.get(`${thread.environmentId}:${thread.id}`) ??
+      resolveThreadListV2Section(thread, input);
+    if (
+      effectiveSnoozed(thread, { now }) &&
+      thread.snoozedUntil != null &&
+      (nextSnoozeWakeAt === null ||
+        parseTimestampMs(thread.snoozedUntil) < parseTimestampMs(nextSnoozeWakeAt))
+    ) {
+      nextSnoozeWakeAt = thread.snoozedUntil;
     }
-    const hasQueuedMessages =
-      queuedThreadKeys?.has(`${thread.environmentId}:${thread.id}`) === true;
-    if (supportsSettlement && thread.settledOverride === "settled" && !hasQueuedMessages) {
-      settled.push(thread);
-    } else if (thread.pinnedAt != null) {
-      pinned.push(thread);
-    } else if (workingShelfEnabled && (input.isWorking ?? isThreadWorking)(thread)) {
-      working.push(thread);
-    } else {
-      active.push(thread);
-    }
+    ({ pinned, active, working, settled, snoozed })[section].push(thread);
   }
 
   if (rankedMatches !== null) {
@@ -873,7 +893,9 @@ export function buildThreadListV2Items(input: {
     items.push({
       thread,
       variant: "card",
-      snoozed: false,
+      snoozed:
+        (input.snoozeEnvironmentIds?.has(thread.environmentId) ?? true) &&
+        effectiveSnoozed(thread, { now }),
       pinned: true,
       wokeAt: resolveThreadListV2WokeAt(thread, { now }),
       isLast: false,
@@ -883,7 +905,9 @@ export function buildThreadListV2Items(input: {
     items.push({
       thread,
       variant: "card",
-      snoozed: false,
+      snoozed:
+        (input.snoozeEnvironmentIds?.has(thread.environmentId) ?? true) &&
+        effectiveSnoozed(thread, { now }),
       pinned: false,
       wokeAt: resolveThreadListV2WokeAt(thread, { now }),
       isLast: false,
@@ -894,7 +918,9 @@ export function buildThreadListV2Items(input: {
     items.push({
       thread,
       variant: "card",
-      snoozed: false,
+      snoozed:
+        (input.snoozeEnvironmentIds?.has(thread.environmentId) ?? true) &&
+        effectiveSnoozed(thread, { now }),
       pinned: false,
       wokeAt: resolveThreadListV2WokeAt(thread, { now }),
       isLast: false,
@@ -916,7 +942,9 @@ export function buildThreadListV2Items(input: {
     items.push({
       thread,
       variant: "slim",
-      snoozed: false,
+      snoozed:
+        (input.snoozeEnvironmentIds?.has(thread.environmentId) ?? true) &&
+        effectiveSnoozed(thread, { now }),
       pinned: false,
       wokeAt: null,
       isLast: false,

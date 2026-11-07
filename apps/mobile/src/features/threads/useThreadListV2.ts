@@ -1,8 +1,10 @@
 import type { OlderSettledScope } from "@t3tools/client-runtime/state/threads";
 import type { EnvironmentId } from "@t3tools/contracts";
 import { useMemo, useState, useSyncExternalStore } from "react";
-import { buildThreadGrouping } from "@t3tools/client-runtime/state/thread-grouping";
-import { effectiveSnoozed } from "@t3tools/client-runtime/state/thread-settled";
+import {
+  buildThreadGrouping,
+  resolveThreadGroupSections,
+} from "@t3tools/client-runtime/state/thread-grouping";
 import { nestThreadListItems } from "./nestedThreadList";
 
 import { scopedProjectKey } from "../../lib/scopedEntities";
@@ -12,6 +14,7 @@ import {
   buildThreadListV2Items,
   buildThreadListV2ListItems,
   getThreadListV2OrderedSection,
+  resolveThreadListV2Section,
   threadListInboxReturns,
   threadListV2LayoutTime,
 } from "./threadListV2";
@@ -99,30 +102,8 @@ export function useThreadListV2(input: {
               ref.environmentId === thread.environmentId && ref.projectId === thread.projectId,
           )),
     );
-    return buildThreadGrouping(scoped, {
-      isParked: (thread) =>
-        effectiveSnoozed(thread, { now: layoutTime }) ||
-        (thread.settledOverride === "settled" &&
-          !input.queuedThreadKeys.has(`${thread.environmentId}:${thread.id}`)),
-    });
-  }, [threads, input.environmentId, input.projectRefs, layoutTime, input.queuedThreadKeys]);
-  const attentionAncestors = useMemo(() => {
-    const result = new Set<string>();
-    for (const thread of threads) {
-      if (
-        !thread.hasPendingApprovals &&
-        !thread.hasPendingUserInput &&
-        !thread.pendingSubagentRequest
-      )
-        continue;
-      let key = grouping.parentByChild.get(`${thread.environmentId}:${thread.id}`);
-      while (key !== undefined && !result.has(key)) {
-        result.add(key);
-        key = grouping.parentByChild.get(key);
-      }
-    }
-    return result;
-  }, [threads, grouping]);
+    return buildThreadGrouping(scoped);
+  }, [threads, input.environmentId, input.projectRefs]);
   const listedThreads = input.searchQuery.trim().length > 0 ? threads : grouping.roots;
   const selectedRootThreadKey = useMemo(() => {
     let key = input.selectedThreadKey;
@@ -144,6 +125,33 @@ export function useThreadListV2(input: {
     [threads, workingShelfEnabled, inboxVersion],
   );
   const { isWorking: inboxIsWorking, returnedAt: inboxReturnedAt } = inbox;
+  const groupSections = useMemo(() => {
+    if (input.searchQuery.trim().length > 0) return undefined;
+    const sections = new Map(
+      threads.map((thread) => [
+        `${thread.environmentId}:${thread.id}`,
+        resolveThreadListV2Section(thread, {
+          now: layoutTime,
+          settlementEnvironmentIds: input.settlementEnvironmentIds,
+          snoozeEnvironmentIds: input.snoozeEnvironmentIds,
+          queuedThreadKeys: input.queuedThreadKeys,
+          workingShelfEnabled,
+          isWorking: inboxIsWorking,
+        }),
+      ]),
+    );
+    return resolveThreadGroupSections(grouping, sections, workingShelfEnabled);
+  }, [
+    threads,
+    grouping,
+    input.searchQuery,
+    layoutTime,
+    input.settlementEnvironmentIds,
+    input.snoozeEnvironmentIds,
+    input.queuedThreadKeys,
+    workingShelfEnabled,
+    inboxIsWorking,
+  ]);
   // Compute move availability per section; per-row planning is quadratic.
   const moveAvailability = useMemo(() => {
     const sectionAvailability = (section: "pinned" | "active") =>
@@ -212,8 +220,8 @@ export function useThreadListV2(input: {
         workingShelfEnabled,
         workingShelfExpanded: input.workingShelfExpanded,
         inboxReturnAt: inboxReturnedAt,
-        isWorking: (thread) =>
-          !attentionAncestors.has(`${thread.environmentId}:${thread.id}`) && inboxIsWorking(thread),
+        isWorking: inboxIsWorking,
+        groupSections,
         snoozedShelfExpanded: input.snoozedShelfExpanded,
         settledShelfExpanded: input.settledShelfExpanded,
         selectedThreadKey: selectedRootThreadKey,
@@ -247,7 +255,7 @@ export function useThreadListV2(input: {
       input.workingShelfExpanded,
       inboxReturnedAt,
       inboxIsWorking,
-      attentionAncestors,
+      groupSections,
       input.snoozedShelfExpanded,
       input.settledShelfExpanded,
       selectedRootThreadKey,
@@ -327,9 +335,8 @@ export function useThreadListV2(input: {
               snoozeEnvironmentIds: input.snoozeEnvironmentIds,
               queuedThreadKeys: input.queuedThreadKeys,
               selectedThreadKey: input.selectedThreadKey,
-              isWorking: (thread) =>
-                !attentionAncestors.has(`${thread.environmentId}:${thread.id}`) &&
-                inboxIsWorking(thread),
+              isWorking: inboxIsWorking,
+              groupSections,
               inboxReturnAt: inboxReturnedAt,
             },
             listInput: {
@@ -356,7 +363,7 @@ export function useThreadListV2(input: {
       input.selectedThreadKey,
       input.now,
       inboxIsWorking,
-      attentionAncestors,
+      groupSections,
       inboxReturnedAt,
       expandedGroups,
       expandedShelves,

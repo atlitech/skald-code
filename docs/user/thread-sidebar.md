@@ -72,8 +72,14 @@ Grouping is saved on the server and follows you across devices.
 
 Grouping does not give the parent control over its children's runs. Stopping or
 deleting the parent does not stop or delete these independent threads.
-Active children remain visible at the top level if their parent is settled,
-snoozed, archived, or unavailable in the current view.
+The parent stays with its children and appears once. A group with an approval,
+question, or finished result to review stays in the main list. Otherwise, if any
+member is working, the group appears in Working when that section is enabled.
+Pinned parents stay pinned. Once the children settle, the parent returns to the
+section for its own state; grouping does not change anyone's saved settled state.
+Collapsing a group keeps its activity summary visible and does not change its section.
+Children appear at the top level if their parent is archived or unavailable in the
+current view.
 
 ## Pin and reorder threads
 

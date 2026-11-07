@@ -1,7 +1,11 @@
-import { EnvironmentId, ThreadId } from "@t3tools/contracts";
+import { EnvironmentId, RunId, ThreadId } from "@t3tools/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
-import { buildThreadGrouping } from "./threadGrouping.ts";
+import {
+  buildThreadGrouping,
+  resolveThreadGroupSections,
+  type ThreadGroupSection,
+} from "./threadGrouping.ts";
 
 function thread(id: string, parent?: string | null) {
   return {
@@ -10,6 +14,14 @@ function thread(id: string, parent?: string | null) {
     projectId: "project",
     groupingParentThreadId: parent ?? null,
     archivedAt: null as string | null,
+    hasPendingApprovals: false,
+    hasPendingUserInput: false,
+    pendingSubagentRequest: null,
+    pendingGuestMessageCount: 0,
+    hasActionableProposedPlan: false,
+    interactionMode: "default" as const,
+    latestRun: null,
+    runtime: null,
     lineage: {
       rootThreadId: ThreadId.make(id),
       parentThreadId: null,
@@ -71,15 +83,79 @@ describe("thread grouping", () => {
     expect([...group.parentByChild]).toEqual([["local:child", "local:a"]]);
   });
 
-  it("keeps active children visible outside a parked parent while grouping settled children", () => {
+  it("keeps active and settled children attached to a settled parent", () => {
     const parent = { ...thread("parent"), settledOverride: "settled" as const };
     const active = thread("active", "parent");
     const settled = { ...thread("settled", "parent"), settledOverride: "settled" as const };
     const group = buildThreadGrouping([parent, active, settled]);
-    expect(group.roots).toEqual([parent, active]);
-    expect(group.childrenByParent.get("local:parent")).toEqual([settled]);
-    expect(buildThreadGrouping([parent, active], { isParked: () => false }).roots).toEqual([
-      parent,
-    ]);
+    expect(group.roots).toEqual([parent]);
+    expect(group.childrenByParent.get("local:parent")).toEqual([active, settled]);
   });
+});
+
+it.each<{
+  parent: ThreadGroupSection;
+  child: ThreadGroupSection;
+  attention?: boolean;
+  expected: ThreadGroupSection;
+}>([
+  { parent: "working", child: "settled", expected: "working" },
+  { parent: "settled", child: "working", expected: "working" },
+  { parent: "active", child: "working", expected: "working" },
+  { parent: "working", child: "working", expected: "working" },
+  { parent: "working", child: "active", attention: true, expected: "active" },
+  { parent: "settled", child: "active", attention: true, expected: "active" },
+  { parent: "settled", child: "settled", expected: "settled" },
+  { parent: "active", child: "settled", expected: "active" },
+  { parent: "pinned", child: "working", expected: "pinned" },
+  { parent: "pinned", child: "active", attention: true, expected: "pinned" },
+  { parent: "snoozed", child: "snoozed", expected: "snoozed" },
+])("places a $parent parent with a $child child in $expected (attention: $attention)", (row) => {
+  const parent = thread("parent");
+  const child = { ...thread("child", "parent"), hasPendingApprovals: row.attention ?? false };
+  const sections = new Map<string, ThreadGroupSection>([
+    ["local:parent", row.parent],
+    ["local:child", row.child],
+  ]);
+  const result = resolveThreadGroupSections(buildThreadGrouping([parent, child]), sections);
+  expect(result.get("local:parent")).toBe(row.expected);
+  expect(result.get("local:child")).toBe(row.child);
+  expect(sections.get("local:parent")).toBe(row.parent);
+});
+
+it("promotes nested work and review, then restores the settled group without changing thread state", () => {
+  const parent = { ...thread("parent"), settledOverride: "settled" as const };
+  const middle = { ...thread("middle", "parent"), settledOverride: "settled" as const };
+  const leaf = thread("leaf", "middle");
+  const worker = thread("worker", "parent");
+  const completed = {
+    ...leaf,
+    latestRun: {
+      runId: RunId.make("done"),
+      status: "completed" as const,
+      requestedAt: null,
+      startedAt: null,
+      completedAt: "2026-11-06T00:00:00Z",
+      assistantMessageId: null,
+    },
+  };
+  const sections = new Map<string, ThreadGroupSection>([
+    ["local:parent", "settled"],
+    ["local:middle", "settled"],
+    ["local:leaf", "working"],
+    ["local:worker", "working"],
+  ]);
+  const resolve = (child: typeof leaf | typeof completed) =>
+    resolveThreadGroupSections(buildThreadGrouping([parent, middle, child, worker]), sections);
+  expect(resolve(leaf).get("local:parent")).toBe("working");
+  expect(resolve(leaf).get("local:middle")).toBe("working");
+  sections.set("local:leaf", "active");
+  expect(resolve(completed).get("local:parent")).toBe("active");
+  expect(resolve(completed).get("local:middle")).toBe("active");
+  sections.set("local:leaf", "settled");
+  expect(resolve(completed).get("local:parent")).toBe("working");
+  sections.set("local:worker", "settled");
+  expect(resolve(completed).get("local:parent")).toBe("settled");
+  expect(parent.settledOverride).toBe("settled");
+  expect(middle.settledOverride).toBe("settled");
 });

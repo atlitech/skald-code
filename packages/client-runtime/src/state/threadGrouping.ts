@@ -4,6 +4,11 @@ import {
   type OrchestrationV2DelegatedFrom,
 } from "@t3tools/contracts";
 
+import type { EnvironmentThreadShell } from "./models.ts";
+import { isThreadWorking } from "./threadInbox.ts";
+
+export type ThreadGroupSection = "pinned" | "active" | "working" | "snoozed" | "settled";
+
 interface GroupableThread {
   readonly id: string;
   readonly environmentId: string;
@@ -27,11 +32,7 @@ function isThreadGroupingParent(
   );
 }
 
-export function buildThreadGrouping<T extends GroupableThread>(
-  threads: readonly T[],
-  options?: { readonly isParked?: (thread: T) => boolean },
-) {
-  const isParked = options?.isParked ?? ((thread: T) => thread.settledOverride === "settled");
+export function buildThreadGrouping<T extends GroupableThread>(threads: readonly T[]) {
   const byKey = new Map(threads.map((thread) => [`${thread.environmentId}:${thread.id}`, thread]));
   const parentByChild = new Map<string, string>();
   for (const [key, thread] of byKey) {
@@ -42,8 +43,7 @@ export function buildThreadGrouping<T extends GroupableThread>(
       parent !== undefined &&
       parentKey !== key &&
       parent.projectId === thread.projectId &&
-      isThreadGroupingParent(parent) &&
-      (!isParked(parent) || isParked(thread))
+      isThreadGroupingParent(parent)
     ) {
       parentByChild.set(key, parentKey);
     }
@@ -74,4 +74,55 @@ export function buildThreadGrouping<T extends GroupableThread>(
     }
   }
   return { roots, childrenByParent, parentByChild };
+}
+
+export function resolveThreadGroupSections<
+  T extends GroupableThread &
+    Pick<
+      EnvironmentThreadShell,
+      | "hasPendingApprovals"
+      | "hasPendingUserInput"
+      | "pendingSubagentRequest"
+      | "pendingGuestMessageCount"
+      | "hasActionableProposedPlan"
+      | "interactionMode"
+      | "latestRun"
+      | "runtime"
+    >,
+>(
+  grouping: ReturnType<typeof buildThreadGrouping<T>>,
+  sections: ReadonlyMap<string, ThreadGroupSection>,
+  workingShelfEnabled = true,
+): ReadonlyMap<string, ThreadGroupSection> {
+  const result = new Map(sections);
+  const visit = (thread: T): { review: boolean; working: boolean; active: boolean } => {
+    const key = `${thread.environmentId}:${thread.id}`;
+    const own = sections.get(key) ?? "active";
+    const parked = own === "settled" || own === "snoozed";
+    let working =
+      own === "working" || (workingShelfEnabled && own === "pinned" && isThreadWorking(thread));
+    let review =
+      !parked &&
+      Boolean(
+        thread.hasPendingApprovals ||
+        thread.hasPendingUserInput ||
+        thread.pendingSubagentRequest ||
+        (thread.pendingGuestMessageCount ?? 0) > 0 ||
+        (!working && (thread.hasActionableProposedPlan || thread.latestRun?.completedAt)),
+      );
+    let active = own === "active" || own === "pinned";
+    const children = grouping.childrenByParent.get(key) ?? [];
+    for (const child of children) {
+      const state = visit(child);
+      review ||= state.review;
+      working ||= state.working;
+      active ||= state.active;
+    }
+    if (children.length > 0 && own !== "pinned") {
+      result.set(key, review ? "active" : working ? "working" : active ? "active" : own);
+    }
+    return { review, working, active };
+  };
+  for (const root of grouping.roots) visit(root);
+  return result;
 }
