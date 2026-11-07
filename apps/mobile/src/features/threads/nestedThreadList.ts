@@ -30,14 +30,16 @@ export function nestThreadListItems(input: {
     }
     selected = parent;
   }
-  const summaries = new Map<string, { working: number; attention: number }>();
-  const summarize = (key: string): { working: number; attention: number } => {
+  const summaries = new Map<string, { count: number; working: number; attention: number }>();
+  const summarize = (key: string): { count: number; working: number; attention: number } => {
     const cached = summaries.get(key);
     if (cached) return cached;
+    let count = 0;
     let working = 0;
     let attention = 0;
     for (const child of input.grouping.childrenByParent.get(key) ?? []) {
       const nested = summarize(`${child.environmentId}:${child.id}`);
+      count += 1 + nested.count;
       working += Number(isThreadWorking(child)) + nested.working;
       attention +=
         Number(
@@ -46,7 +48,7 @@ export function nestThreadListItems(input: {
           ),
         ) + nested.attention;
     }
-    const summary = { working, attention };
+    const summary = { count, working, attention };
     summaries.set(key, summary);
     return summary;
   };
@@ -67,10 +69,11 @@ export function nestThreadListItems(input: {
         ...item,
         depth,
         groupingParentKey: parentKey,
-        childCount: children.length,
+        childCount: summarize(key).count,
         childWorkingCount: summarize(key).working,
         childAttentionCount: summarize(key).attention,
         childrenExpanded: expanded,
+        containsSelection: selectedAncestors.has(key),
       });
       if (children.length === 0 || !expanded) continue;
       const workingShelfExpanded = input.expandedShelves.get(`${key}:v2-working-shelf`) ?? true;

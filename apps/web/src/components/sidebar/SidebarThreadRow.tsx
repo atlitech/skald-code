@@ -538,7 +538,7 @@ type SidebarThreadRowProps = {
   thread: SidebarThreadSummary;
   // "folder" is a one-line row inside a boring sidebar project folder;
   // "folder-multiline" adds the card's branch and PR line under it.
-  variant: "card" | "slim" | "folder" | "folder-multiline" | "child" | "group";
+  variant: "card" | "slim" | "folder" | "folder-multiline" | "child";
   navigationParent?: string | undefined;
   childGroup?: SidebarChildGroupControl | undefined;
   variantAction: SidebarSweepAction;
@@ -901,6 +901,24 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
     event.stopPropagation();
     onUnsnooze(threadRef);
   };
+  const cardActionLabel =
+    variantAction === "unsnooze"
+      ? "Wake now"
+      : variantAction === "unsettle"
+        ? "Unsettle"
+        : "Settle";
+  const CardActionIcon =
+    variantAction === "unsnooze"
+      ? AlarmClockOffIcon
+      : variantAction === "unsettle"
+        ? Undo2Icon
+        : CheckIcon;
+  const handleCardAction =
+    variantAction === "unsnooze"
+      ? handleUnsnoozeClick
+      : variantAction === "unsettle"
+        ? handleUnsettleClick
+        : handleSettleClick;
   const handleUnpinClick = (event: ReactMouseEvent) => {
     event.preventDefault();
     event.stopPropagation();
@@ -936,7 +954,10 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
     setSnoozeGateClock({ thread, now: new Date(snoozeGateOpensAt).toISOString() });
   }
   const showSnoozeButton =
-    canOperateThread && props.snoozeSupported && canSnooze(thread, { now: snoozeGateNow });
+    canOperateThread &&
+    variantAction !== "unsnooze" &&
+    props.snoozeSupported &&
+    canSnooze(thread, { now: snoozeGateNow });
   // Closing here, not just masking, keeps the menu from reopening when the button returns.
   if (snoozeMenuOpenRaw && !showSnoozeButton) setSnoozeMenuOpen(false);
   const snoozeMenuOpen = snoozeMenuOpenRaw && showSnoozeButton;
@@ -954,6 +975,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
   const rowSurfaceClassName = cn(
     "group/sidebar-row relative w-full cursor-pointer overflow-hidden rounded-md text-left outline-none select-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
     variantAction === "unsettle" &&
+      !props.childGroup &&
       !props.isActive &&
       "[&:not(:hover):not(:focus-within)_*]:text-secondary-label",
     props.isActive
@@ -1066,13 +1088,21 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
         event.stopPropagation();
         props.childGroup?.onToggle();
       }}
+      onDoubleClick={(event) => event.stopPropagation()}
       onPointerDown={(event) => event.stopPropagation()}
-      className="-ml-1 inline-flex size-6 shrink-0 cursor-pointer items-center justify-center rounded-sm text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring pointer-coarse:size-11"
+      className={cn(
+        "inline-flex shrink-0 cursor-pointer items-center rounded-sm text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
+        variant === "card"
+          ? "mt-1 min-h-7 w-full gap-1.5 text-left text-2xs pointer-coarse:min-h-11"
+          : "-ml-1 size-6 justify-center pointer-coarse:size-11",
+        variant === "card" && props.childGroup.attention && "text-warning-foreground",
+      )}
     >
       <ChevronRightIcon
         aria-hidden
-        className={cn("size-3.5", props.childGroup.expanded && "rotate-90")}
+        className={cn("size-3.5 shrink-0", props.childGroup.expanded && "rotate-90")}
       />
+      {variant === "card" ? <span>{props.childGroup.summary}</span> : null}
     </button>
   ) : null;
 
@@ -1221,8 +1251,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
   ) : null;
 
   if (variant !== "card") {
-    const grouped = variant === "group";
-    const multiline = variant === "folder-multiline" || grouped;
+    const multiline = variant === "folder-multiline";
     const inFolder = variant === "folder" || variant === "folder-multiline";
     return (
       <li
@@ -1232,7 +1261,6 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
         className={cn(
           "list-none [content-visibility:auto] [contain-intrinsic-size:auto_--spacing(9)]",
           variant === "child" && "[contain-intrinsic-size:auto_--spacing(8)]",
-          grouped && "[contain-intrinsic-size:auto_--spacing(13)]",
           metaLine !== null && multiline && "[contain-intrinsic-size:auto_--spacing(13.5)]",
           sortable?.isDragging && "relative z-20",
         )}
@@ -1281,7 +1309,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
                   thread={thread}
                   providerEntryByInstanceId={props.providerEntryByInstanceId}
                 />
-              ) : inFolder || grouped ? null : (
+              ) : inFolder ? null : (
                 <span
                   className={cn(
                     "flex shrink-0 items-center transition-opacity",
@@ -1296,7 +1324,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
               )}
               {draftIndicator}
               {title}
-              {props.childGroup && !grouped ? (
+              {props.childGroup ? (
                 <span
                   className={cn(
                     "shrink-0 text-2xs text-muted-foreground",
@@ -1304,19 +1332,11 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
                   )}
                   aria-label={props.childGroup.summary}
                 >
-                  {props.childGroup.attention
-                    ? "Needs you"
-                    : props.childGroup.summary.split(" · ")[0]}
+                  {props.childGroup.summary.split(" · ")[0]}
+                  {props.childGroup.attention ? " · Needs you" : null}
                 </span>
               ) : null}
-              {grouped ? (
-                <SidebarProviderStack
-                  thread={thread}
-                  providerEntryByInstanceId={props.providerEntryByInstanceId}
-                />
-              ) : multiline ? (
-                titleLineIcons
-              ) : null}
+              {multiline ? titleLineIcons : null}
               {pinIndicator}
               {multiline ? null : terminalStatusIcon}
               {isRegeneratingTitle ? (
@@ -1363,7 +1383,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
                         />
                         <TooltipPopup side="top">Dismiss Woke notification</TooltipPopup>
                       </Tooltip>
-                    ) : (inFolder || variant === "child" || grouped) && topStatus ? (
+                    ) : (inFolder || variant === "child") && topStatus ? (
                       // Folder rows have no status line, so the status takes the time slot.
                       <span
                         className={cn(
@@ -1372,7 +1392,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
                         )}
                       >
                         <TopStatusIcon icon={topStatus.icon} className="size-3" />
-                        {variant !== "child" && !grouped ? (
+                        {variant !== "child" ? (
                           topStatus.label
                         ) : topStatus.icon === "approval" ? (
                           "Approval"
@@ -1384,7 +1404,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
                           <span className="sr-only">{topStatus.label}</span>
                         )}
                       </span>
-                    ) : variant === "child" || grouped ? null : (
+                    ) : variant === "child" ? null : (
                       <span className="text-xs">
                         <RelativeTimeLabel
                           timestamp={
@@ -1457,18 +1477,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
               )}
               {props.sweepAction !== null ? dragDestination : null}
             </div>
-            {grouped && props.childGroup ? (
-              <div
-                className={cn(
-                  "ml-6 text-2xs text-muted-foreground",
-                  props.childGroup.attention && "text-warning-foreground",
-                )}
-              >
-                {props.childGroup.summary}
-              </div>
-            ) : multiline ? (
-              metaLine
-            ) : null}
+            {multiline ? metaLine : null}
           </TooltipTrigger>
           {detailsTooltip}
         </Tooltip>
@@ -1641,17 +1650,17 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
                             render={
                               <button
                                 type="button"
-                                aria-label="Settle thread"
-                                onClick={handleSettleClick}
+                                aria-label={`${cardActionLabel} thread`}
+                                onClick={handleCardAction}
                                 onPointerDown={handleActionPointerDown}
                                 className="-mr-1 inline-flex cursor-pointer items-center gap-1 rounded-md bg-transparent px-1.5 text-xs text-muted-foreground hover:text-foreground"
                               />
                             }
                           >
-                            <CheckIcon className="size-3.5" />
-                            Settle
+                            <CardActionIcon className="size-3.5" />
+                            {cardActionLabel}
                           </TooltipTrigger>
-                          <TooltipPopup>Settle thread</TooltipPopup>
+                          <TooltipPopup>{cardActionLabel} thread</TooltipPopup>
                         </Tooltip>
                       ) : null}
                     </span>
@@ -1662,7 +1671,6 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
               {props.sweepAction !== null ? dragDestination : null}
             </div>
             <div className="mt-1 flex min-w-0 items-center gap-1.5">
-              {childToggle}
               {title}
               {isRegeneratingTitle ? (
                 <span role="status" className="sr-only">
@@ -1672,16 +1680,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
               {titleLineIcons}
             </div>
             {metaLine}
-            {props.childGroup ? (
-              <div
-                className={cn(
-                  "mt-1 text-2xs text-muted-foreground",
-                  props.childGroup.attention && "text-warning-foreground",
-                )}
-              >
-                {props.childGroup.summary}
-              </div>
-            ) : null}
+            {childToggle}
           </div>
         </TooltipTrigger>
         {detailsTooltip}

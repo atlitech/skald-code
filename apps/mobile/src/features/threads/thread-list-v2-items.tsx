@@ -138,6 +138,7 @@ function ThreadListV2Duration(props: { readonly startedAt: string | null }) {
 
 function ThreadListV2Section(props: {
   readonly label: string;
+  readonly count?: number;
   readonly pane?: "screen" | "sidebar";
   readonly tone?: "default" | "snoozed";
   readonly depth?: number;
@@ -151,13 +152,35 @@ function ThreadListV2Section(props: {
 }) {
   const snoozed = props.tone === "snoozed";
   const sidebarPane = props.pane === "sidebar";
+  const nested = (props.depth ?? 0) > 0;
+  const theme = useUniwindTheme();
   const className = cn(
-    "mb-1.5 mt-4 flex-row items-center gap-2.5",
-    (props.depth ?? 0) > 0 && "min-h-11",
+    "flex-row items-center gap-2.5",
+    nested ? "min-h-11" : "mb-1.5 mt-4",
     props.pane === "sidebar" ? "px-3" : "px-5",
   );
+  const disclosureIcon = props.disclosure ? (
+    <SymbolView
+      name={nested && !props.disclosure.expanded ? "chevron.right" : "chevron.down"}
+      size={10}
+      tintColorClassName={
+        sidebarPane
+          ? "accent-drawer-foreground-muted"
+          : !nested && snoozed
+            ? "accent-icon-muted"
+            : "accent-foreground-muted"
+      }
+      type="monochrome"
+      style={
+        !nested
+          ? { transform: [{ rotate: props.disclosure.expanded ? "180deg" : "0deg" }] }
+          : undefined
+      }
+    />
+  ) : null;
   const content = (
     <>
+      {nested ? disclosureIcon : null}
       <Text
         className={cn(
           "text-xs font-t3-medium",
@@ -170,27 +193,24 @@ function ThreadListV2Section(props: {
       >
         {props.label}
       </Text>
-      <View
-        className={cn(
-          "h-px flex-1",
-          snoozed ? "bg-primary/20" : sidebarPane ? "bg-drawer-border" : "bg-border",
-        )}
-      />
-      {props.disclosure ? (
-        <SymbolView
-          name="chevron.down"
-          size={10}
-          tintColorClassName={
-            sidebarPane
-              ? "accent-drawer-foreground-muted"
-              : snoozed
-                ? "accent-icon-muted"
-                : "accent-foreground-muted"
-          }
-          type="monochrome"
-          style={{ transform: [{ rotate: props.disclosure.expanded ? "180deg" : "0deg" }] }}
+      {nested ? (
+        <Text
+          className={cn(
+            "ml-auto text-xs tabular-nums",
+            sidebarPane ? "text-drawer-foreground-muted" : "text-foreground-tertiary",
+          )}
+        >
+          {props.count}
+        </Text>
+      ) : (
+        <View
+          className={cn(
+            "h-px flex-1",
+            snoozed ? "bg-primary/20" : sidebarPane ? "bg-drawer-border" : "bg-border",
+          )}
         />
-      ) : null}
+      )}
+      {!nested ? disclosureIcon : null}
     </>
   );
 
@@ -208,7 +228,9 @@ function ThreadListV2Section(props: {
       onPress={props.disclosure.onToggle}
       style={({ pressed }) => ({
         opacity: pressed ? 0.6 : 1,
-        marginLeft: Math.min(props.depth ?? 0, 5) * 12,
+        marginLeft: nested ? 18 + Math.min(props.depth ?? 0, 5) * 12 : 0,
+        borderLeftWidth: nested ? 1 : 0,
+        borderLeftColor: theme[sidebarPane ? "--color-drawer-border" : "--color-border"],
       })}
     >
       {content}
@@ -243,7 +265,8 @@ function ThreadListV2ShelfHeader(
   return (
     <ThreadListV2Section
       depth={props.depth}
-      label={props.expanded ? label : `${label} (${props.count})`}
+      label={props.expanded || (props.depth ?? 0) > 0 ? label : `${label} (${props.count})`}
+      count={props.count}
       pane={props.pane}
       tone={props.kind === "snoozed" ? "snoozed" : "default"}
       disclosure={{
@@ -656,9 +679,10 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
   readonly simultaneousSwipeGesture?: ComponentProps<typeof ThreadSwipeable>["simultaneousWith"];
 }) {
   const { width: windowWidth, fontScale } = useWindowDimensions();
-  const titleTypography = useScaledTextRole("body");
+  const compactChild = (props.grouping?.depth ?? 0) > 0;
+  const titleTypography = useScaledTextRole(compactChild ? "footnote" : "body");
   const metadataTypography = useScaledTextRole("label");
-  const projectIconSize = titleTypography.fontSize * 1.25 * fontScale;
+  const projectIconSize = titleTypography.fontSize * (compactChild ? 1.14 : 1.25) * fontScale;
   const machineIconSize = metadataTypography.fontSize * fontScale;
   // Android's nonlinear system text scaling can differ from the fontScale estimate.
   const [androidTitleLineHeight, setTitleLineHeight] = useState(
@@ -711,7 +735,6 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
 
   const theme = useUniwindTheme();
   const sidebarPane = props.pane === "sidebar";
-  const compactChild = (props.grouping?.depth ?? 0) > 0;
   const selected = props.selected === true;
   const rowAppearance = getThreadListV2RowAppearance(theme, sidebarPane, selected);
 
@@ -732,25 +755,21 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
       ? { ...workingLabel, label: "Goal" }
       : workingLabel) ?? (isUnread ? DONE_STATUS_LABEL : undefined);
   const childAttentionCount = props.grouping?.childAttentionCount ?? 0;
-  const compactStatusLabel: StatusLabel | undefined =
-    childAttentionCount > 0
-      ? {
-          label: `${childAttentionCount} need you`,
-          icon: "exclamationmark.shield",
-          className: "text-warning-foreground",
-          iconTintClassName: "accent-warning-foreground",
-        }
-      : showsWoke
-        ? {
-            label: "Woke",
-            icon: "bell.badge",
-            className: "text-warning-foreground",
-            iconTintClassName: "accent-warning-foreground",
-          }
-        : statusLabel;
+  const childWorkingCount = props.grouping?.childWorkingCount ?? 0;
+  const compactStatusLabel: StatusLabel | undefined = showsWoke
+    ? {
+        label: "Woke",
+        icon: "bell.badge",
+        className: "text-warning-foreground",
+        iconTintClassName: "accent-warning-foreground",
+      }
+    : statusLabel;
   const recede = shouldRecedeThreadRow({ status, selected });
   const isRegeneratingTitle = thread.titleRegeneration != null;
-  const rowAccessibilityLabel = `${thread.title}${compactStatusLabel ? `, ${compactStatusLabel.label}` : ""}${props.hasQueuedMessages ? ", messages queued to send" : ""}${isRegeneratingTitle ? ", regenerating title" : ""}`;
+  const hasInlineGroupControl = (props.grouping?.childCount ?? 0) > 0;
+  const containsHiddenSelection =
+    props.grouping?.containsSelection && !props.grouping.childrenExpanded;
+  const rowAccessibilityLabel = `${thread.title}${compactStatusLabel ? `, ${compactStatusLabel.label}` : ""}${props.hasQueuedMessages ? ", messages queued to send" : ""}${isRegeneratingTitle ? ", regenerating title" : ""}${hasInlineGroupControl ? `, ${props.grouping?.childCount} child threads, ${props.grouping?.childrenExpanded ? "expanded" : "collapsed"}${childWorkingCount > 0 ? `, ${childWorkingCount} children working` : ""}${childAttentionCount > 0 ? `, ${childAttentionCount} children need your attention` : ""}${containsHiddenSelection ? ", current thread inside" : ""}` : ""}`;
   const timeLabel = props.timeLabel;
 
   const visitThread = useAtomCommand(threadEnvironment.visit, { reportFailure: false });
@@ -766,8 +785,18 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
     () => [
       ...(prBadgeLabel ? [{ name: "openPullRequests", label: prBadgeLabel }] : []),
       ...(showsWoke ? [{ name: "dismissWoke", label: "Dismiss Woke notification" }] : []),
+      ...(hasInlineGroupControl
+        ? [
+            {
+              name: "toggleChildren",
+              label: props.grouping?.childrenExpanded
+                ? "Collapse child threads"
+                : "Expand child threads",
+            },
+          ]
+        : []),
     ],
-    [prBadgeLabel, showsWoke],
+    [prBadgeLabel, showsWoke, hasInlineGroupControl, props.grouping?.childrenExpanded],
   );
 
   const handleDelete = useCallback(() => onDeleteThread(thread), [onDeleteThread, thread]);
@@ -786,8 +815,10 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
   // The window is inclusive, so wake just past it.
   const snoozeGateNowMs = useNowAfter(snoozeGateExpiryMs === null ? null : snoozeGateExpiryMs + 1);
   const snoozeGateNow = new Date(snoozeGateNowMs).toISOString();
+  const settled =
+    props.settlementSupported && thread.settledOverride === "settled" && !props.hasQueuedMessages;
   const swipeActions = resolveThreadListV2SwipeActions({
-    variant,
+    variant: settled ? "slim" : "card",
     settlementSupported: props.settlementSupported,
     snoozeSupported: props.snoozeSupported,
     snoozable: canSnooze(thread, { now: snoozeGateNow }),
@@ -803,7 +834,7 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
     thread,
     state: {
       canOperate: canOperateThread,
-      settled: variant === "slim",
+      settled,
       snoozed: snoozedRow,
       snoozable: swipeActions.secondary === "snooze",
       settlementSupported: props.settlementSupported,
@@ -920,6 +951,38 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
       ? `Opens the thread. Swipe left to ${primaryAction.label.toLowerCase()}.`
       : `Opens the thread. Swipe left for ${primaryAction.label.toLowerCase()} and snooze actions.`;
 
+  const groupControl =
+    (props.grouping?.childCount ?? 0) > 0 ? (
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel={`${props.grouping?.childrenExpanded ? "Collapse" : "Expand"} ${props.grouping?.childCount} child threads of ${thread.title}${childWorkingCount > 0 ? `, ${childWorkingCount} working` : ""}${childAttentionCount > 0 ? `, ${childAttentionCount} need your attention` : ""}${containsHiddenSelection ? ", current thread inside" : ""}`}
+        accessibilityState={{ expanded: props.grouping?.childrenExpanded === true }}
+        onPress={(event) => {
+          event.stopPropagation();
+          props.onToggleChildren?.();
+        }}
+        onLongPress={() => undefined}
+        className="min-h-11 flex-row flex-wrap content-center items-center gap-1.5"
+      >
+        <SymbolView
+          name={props.grouping?.childrenExpanded ? "chevron.down" : "chevron.right"}
+          size={10}
+          tintColorClassName="accent-foreground-muted"
+        />
+        {containsHiddenSelection ? <View className="size-1.5 rounded-full bg-primary" /> : null}
+        <Text className="text-xs text-foreground-muted">
+          {props.grouping?.childCount}
+          {props.grouping?.childCount === 1 ? " thread" : " threads"}
+        </Text>
+        {childWorkingCount > 0 ? (
+          <Text className="text-xs text-foreground-muted">· {childWorkingCount} working</Text>
+        ) : null}
+        {childAttentionCount > 0 ? (
+          <Text className="text-xs text-warning-foreground">· {childAttentionCount} need you</Text>
+        ) : null}
+      </Pressable>
+    ) : null;
+
   const titleTextInset = props.project ? projectIconSize + 8 : 0;
   const cardContent = (
     <>
@@ -938,11 +1001,14 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
         ) : null}
         <Text
           className={cn(
-            "flex-1 text-base",
-            !recede && "font-t3-medium",
+            "flex-1",
+            compactChild ? "text-sm" : "text-base",
+            !recede && !compactChild && "font-t3-medium",
             selected
               ? selectedThreadRowColors.foregroundClassName
-              : rowAppearance.foregroundClassName,
+              : variant === "slim"
+                ? rowAppearance.mutedForegroundClassName
+                : rowAppearance.foregroundClassName,
             isRegeneratingTitle && "opacity-55",
           )}
           numberOfLines={2}
@@ -1035,7 +1101,9 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
                   : rowAppearance.tertiaryForegroundClassName,
               )}
             >
-              {timeLabel}
+              {snoozedRow && props.snoozeWakeLabelText !== undefined
+                ? props.snoozeWakeLabelText
+                : timeLabel}
             </Text>
           )}
         </View>
@@ -1165,9 +1233,15 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
   ) : (
     cardContent
   );
+  const fullRowContent = (
+    <>
+      {fadedCardContent}
+      {groupControl ? <View style={{ paddingLeft: titleTextInset }}>{groupControl}</View> : null}
+    </>
+  );
 
   const rowContent = (close: () => void) =>
-    variant === "card" && !compactChild ? (
+    variant === "card" || compactChild || hasInlineGroupControl ? (
       <RowPressable
         key={`${thread.environmentId}:${thread.id}`}
         interactionClassName={rowAppearance.interactionClassName}
@@ -1176,23 +1250,39 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
         accessibilityHint={swipeAccessibilityHint}
         accessibilityLabel={rowAccessibilityLabel}
         accessibilityRole="button"
-        accessibilityState={{ selected }}
+        accessibilityState={{
+          selected,
+          ...(hasInlineGroupControl ? { expanded: props.grouping?.childrenExpanded === true } : {}),
+        }}
         accessibilityActions={rowAccessibilityActions}
         onAccessibilityAction={(event) => {
           if (event.nativeEvent.actionName === "openPullRequests") handleOpenPullRequests();
           if (event.nativeEvent.actionName === "dismissWoke") handleAcknowledgeWoke();
+          if (event.nativeEvent.actionName === "toggleChildren") props.onToggleChildren?.();
         }}
         onPress={() => {
           close();
           selectThread();
         }}
-        style={rowAppearance.cardStyle}
+        style={[
+          rowAppearance.cardStyle,
+          sidebarPane && compactChild ? { paddingVertical: 6 } : undefined,
+          sidebarPane && hasInlineGroupControl ? { paddingBottom: 0 } : undefined,
+        ]}
       >
         {sidebarPane ? (
-          fadedCardContent
+          fullRowContent
         ) : (
           <View>
-            <View className={THREAD_LIST_V2_ROW_CONTENT_CLASS_NAME}>{fadedCardContent}</View>
+            <View
+              className={cn(
+                THREAD_LIST_V2_ROW_CONTENT_CLASS_NAME,
+                compactChild && "py-1.5",
+                hasInlineGroupControl && "pb-0",
+              )}
+            >
+              {fullRowContent}
+            </View>
             {THREAD_LIST_V2_ROW_DIVIDERS && props.showTrailingDivider !== false ? (
               <View className="ml-5 h-px bg-border-subtle" />
             ) : null}
@@ -1207,11 +1297,15 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
         accessibilityHint={swipeAccessibilityHint}
         accessibilityLabel={rowAccessibilityLabel}
         accessibilityRole="button"
-        accessibilityState={{ selected }}
+        accessibilityState={{
+          selected,
+          ...(hasInlineGroupControl ? { expanded: props.grouping?.childrenExpanded === true } : {}),
+        }}
         accessibilityActions={rowAccessibilityActions}
         onAccessibilityAction={(event) => {
           if (event.nativeEvent.actionName === "openPullRequests") handleOpenPullRequests();
           if (event.nativeEvent.actionName === "dismissWoke") handleAcknowledgeWoke();
+          if (event.nativeEvent.actionName === "toggleChildren") props.onToggleChildren?.();
         }}
         className={rowAppearance.className}
         onPress={() => {
@@ -1227,18 +1321,7 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
             sidebarPane && "px-3",
           )}
         >
-          {compactChild && providerInstance ? (
-            <ProviderInstanceIcon
-              iconUrl={providerIconUrl}
-              provider={providerInstance.driverKind}
-              size={14}
-              displayName={providerInstance.displayName}
-              accentColor={providerInstance.accentColor}
-              showBadge={providerInstance.showBadge}
-              surfaceColor={rowAppearance.providerIconSurfaceColor}
-            />
-          ) : null}
-          {props.project && !compactChild ? (
+          {props.project ? (
             <View className="opacity-40">
               <ProjectFavicon
                 environmentId={thread.environmentId}
@@ -1253,13 +1336,10 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
           <View className="min-w-0 flex-1">
             <Text
               className={cn(
-                compactChild ? "text-sm" : "text-base",
-                compactChild && variant === "card" && "font-t3-medium",
+                "text-base",
                 selected
                   ? selectedThreadRowColors.foregroundClassName
-                  : compactChild && variant === "card"
-                    ? rowAppearance.foregroundClassName
-                    : rowAppearance.mutedForegroundClassName,
+                  : rowAppearance.mutedForegroundClassName,
                 isRegeneratingTitle && "opacity-55",
               )}
               numberOfLines={1}
@@ -1276,80 +1356,26 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
             ) : null}
           </View>
           {props.hasQueuedMessages ? <QueuedMessageIcon selected={selected} /> : null}
-          {compactChild && compactStatusLabel ? (
-            <View className="flex-row items-center gap-1">
-              <SymbolView
-                name={compactStatusLabel.icon}
-                size={12}
-                tintColorClassName={
-                  selected
-                    ? selectedThreadRowColors.iconTintClassName
-                    : compactStatusLabel.iconTintClassName
-                }
-              />
-              <Text
-                className={cn(
-                  "text-xs",
-                  selected
-                    ? selectedThreadRowColors.foregroundClassName
-                    : compactStatusLabel.className,
-                )}
-              >
-                {compactStatusLabel.label}
-              </Text>
-            </View>
-          ) : (
-            <Text
-              className={cn(
-                "text-sm tabular-nums",
-                selected
-                  ? selectedThreadRowColors.mutedForegroundClassName
-                  : snoozedRow
-                    ? rowAppearance.mutedForegroundClassName
-                    : rowAppearance.tertiaryForegroundClassName,
-              )}
-              style={{ fontFamily: MONO_FONT }}
-            >
-              {snoozedRow && props.snoozeWakeLabelText !== undefined
-                ? props.snoozeWakeLabelText
-                : timeLabel}
-            </Text>
-          )}
+          <Text
+            className={cn(
+              "text-sm tabular-nums",
+              selected
+                ? selectedThreadRowColors.mutedForegroundClassName
+                : snoozedRow
+                  ? rowAppearance.mutedForegroundClassName
+                  : rowAppearance.tertiaryForegroundClassName,
+            )}
+            style={{ fontFamily: MONO_FONT }}
+          >
+            {snoozedRow && props.snoozeWakeLabelText !== undefined
+              ? props.snoozeWakeLabelText
+              : timeLabel}
+          </Text>
         </View>
       </RowPressable>
     );
 
-  const groupControl =
-    (props.grouping?.childCount ?? 0) > 0 ? (
-      <Pressable
-        accessibilityRole="button"
-        accessibilityLabel={`${props.grouping?.childrenExpanded ? "Collapse" : "Expand"} children of ${thread.title}`}
-        accessibilityState={{ expanded: props.grouping?.childrenExpanded === true }}
-        onPress={props.onToggleChildren}
-        className={
-          compactChild
-            ? "h-11 w-11 flex-row items-center justify-center gap-1"
-            : "min-h-11 flex-row items-center gap-2 px-5 pb-2"
-        }
-      >
-        <SymbolView
-          name={props.grouping?.childrenExpanded ? "chevron.down" : "chevron.right"}
-          size={10}
-          tintColorClassName="accent-foreground-muted"
-        />
-        <Text className="text-xs text-foreground-muted">
-          {props.grouping?.childCount}
-          {compactChild ? "" : " threads"}
-          {!compactChild && (props.grouping?.childWorkingCount ?? 0) > 0
-            ? ` · ${props.grouping?.childWorkingCount} working`
-            : ""}
-          {!compactChild && (props.grouping?.childAttentionCount ?? 0) > 0
-            ? ` · ${props.grouping?.childAttentionCount} need you`
-            : ""}
-        </Text>
-      </Pressable>
-    ) : null;
-  const groupingInset = Math.min(props.grouping?.depth ?? 0, 5) * 12;
+  const groupingInset = compactChild ? 18 + Math.min(props.grouping?.depth ?? 0, 5) * 12 : 0;
   const groupingStyle = {
     marginLeft: groupingInset,
     borderLeftWidth: compactChild ? 1 : 0,
@@ -1358,16 +1384,7 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
   if (!canOperateThread)
     return (
       <View style={groupingStyle}>
-        <View className={compactChild ? "flex-row items-center" : undefined}>
-          {compactChild ? groupControl : null}
-          <View
-            className={compactChild ? "min-w-0 flex-1" : undefined}
-            style={rowAppearance.swipeContainerStyle}
-          >
-            {rowContent(() => {})}
-          </View>
-        </View>
-        {!compactChild ? groupControl : null}
+        <View style={rowAppearance.swipeContainerStyle}>{rowContent(() => {})}</View>
       </View>
     );
 
@@ -1375,41 +1392,30 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
     <View collapsable={false} style={groupingStyle}>
       {parentPickerSheet}
       {customSnoozeSheet}
-      <View className={compactChild ? "flex-row items-center" : undefined}>
-        {compactChild ? groupControl : null}
-        <View className={compactChild ? "min-w-0 flex-1" : undefined}>
-          <ThreadSwipeable
-            dormant={dormant}
-            threadKey={`${thread.environmentId}:${thread.id}`}
-            backgroundColor={rowAppearance.swipeBackgroundColor}
-            compactActions={variant === "slim" || compactChild}
-            containerStyle={rowAppearance.swipeContainerStyle}
-            enableTrackpadSwipe
-            fullSwipeAction="primary"
-            fullSwipeWidth={Math.max(
-              44,
-              (props.fullSwipeWidth ?? windowWidth - 32) -
-                groupingInset -
-                (compactChild && groupControl !== null ? 44 : 0),
-            )}
-            onDelete={handleDelete}
-            onSwipeableClose={props.onSwipeableClose}
-            onSwipeableWillOpen={props.onSwipeableWillOpen}
-            primaryAction={primaryAction}
-            secondaryAction={secondaryAction}
-            resetKey={`${thread.environmentId}:${thread.id}:${variant}:${snoozedRow}:${thread.settledAt}:${thread.unsettledAt}:${thread.snoozedUntil}:${thread.pinnedAt}`}
-            simultaneousWith={props.simultaneousSwipeGesture}
-            threadTitle={thread.title}
-          >
-            {(close) => (
-              <Menu actions={menuActions} onPressAction={handleMenuAction} shouldOpenOnLongPress>
-                {rowContent(close)}
-              </Menu>
-            )}
-          </ThreadSwipeable>
-        </View>
-      </View>
-      {!compactChild ? groupControl : null}
+      <ThreadSwipeable
+        dormant={dormant}
+        threadKey={`${thread.environmentId}:${thread.id}`}
+        backgroundColor={rowAppearance.swipeBackgroundColor}
+        compactActions={variant === "slim"}
+        containerStyle={rowAppearance.swipeContainerStyle}
+        enableTrackpadSwipe
+        fullSwipeAction="primary"
+        fullSwipeWidth={Math.max(44, (props.fullSwipeWidth ?? windowWidth - 32) - groupingInset)}
+        onDelete={handleDelete}
+        onSwipeableClose={props.onSwipeableClose}
+        onSwipeableWillOpen={props.onSwipeableWillOpen}
+        primaryAction={primaryAction}
+        secondaryAction={secondaryAction}
+        resetKey={`${thread.environmentId}:${thread.id}:${variant}:${snoozedRow}:${thread.settledAt}:${thread.unsettledAt}:${thread.snoozedUntil}:${thread.pinnedAt}`}
+        simultaneousWith={props.simultaneousSwipeGesture}
+        threadTitle={thread.title}
+      >
+        {(close) => (
+          <Menu actions={menuActions} onPressAction={handleMenuAction} shouldOpenOnLongPress>
+            {rowContent(close)}
+          </Menu>
+        )}
+      </ThreadSwipeable>
     </View>
   );
 });

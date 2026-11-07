@@ -105,7 +105,7 @@ it("reveals a selected descendant, permits explicit collapse, and keeps nested a
   const toggle = screen.getByRole("button", { name: "Toggle Release" });
   await userEvent.click(toggle);
   await expect.element(toggle).toHaveAttribute("aria-expanded", "false");
-  await expect.element(toggle).toHaveTextContent("1 thread · 1 working · 1 needs you");
+  await expect.element(toggle).toHaveTextContent("2 threads · 1 working · 1 needs you");
   await expect.element(screen.getByText("Approval", { exact: true })).not.toBeInTheDocument();
   await screen.rerender(view(workerKey));
   await expect.element(toggle).toHaveAttribute("aria-expanded", "true");

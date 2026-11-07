@@ -142,11 +142,12 @@ function ExpandedThreadGroup(props: SidebarThreadGroupProps) {
         ) === section,
     ),
   }));
-  const working = children.filter(isThreadWorking).length;
+  let working = 0;
   const descendants = [...children];
   let attention = 0;
   for (let index = 0; index < descendants.length; index += 1) {
     const child = descendants[index]!;
+    if (isThreadWorking(child)) working += 1;
     if (
       child.hasPendingApprovals ||
       child.hasPendingUserInput ||
@@ -160,7 +161,7 @@ function ExpandedThreadGroup(props: SidebarThreadGroupProps) {
     );
   }
   const summary = [
-    `${children.length} ${children.length === 1 ? "thread" : "threads"}`,
+    `${descendants.length} ${descendants.length === 1 ? "thread" : "threads"}`,
     ...(working > 0 ? [`${working} working`] : []),
     ...(attention > 0 ? [`${attention} needs you`] : []),
   ].join(" · ");
