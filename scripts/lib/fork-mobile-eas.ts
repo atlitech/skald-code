@@ -167,3 +167,10 @@ export function selectSubmission(submissions: readonly EASSubmission[], appId: s
   }
   return submissions[0];
 }
+
+export const parseEasJson = (output: string): unknown => {
+  // CLI 27.5 loads --environment before redirecting notices away from JSON stdout.
+  const notice =
+    /^(?:Environment variables with visibility "Plain text" and "Sensitive" loaded from the "[^"\r\n]+" environment on EAS: [^\r\n]*|No environment variables with visibility "Plain text" and "Sensitive" found for the "[^"\r\n]+" environment on EAS\.)\r?\n\s*/;
+  return JSON.parse(output.trimStart().replace(notice, ""));
+};
