@@ -7,7 +7,9 @@ import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
+import * as Logger from "effect/Logger";
 import * as Path from "effect/Path";
+import * as TestClock from "effect/testing/TestClock";
 import * as SqlClient from "effect/sql/SqlClient";
 
 import * as DatabaseMaintenance from "./DatabaseMaintenance.ts";
@@ -148,6 +150,12 @@ it.layer(DatabaseMaintenance.layer.pipe(Layer.provideMerge(NodeServices.layer)))
         const refused = yield* Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient;
           yield* sql`SELECT value FROM retained_data`;
+          for (const pruneEventsNow of [false, true]) {
+            const failure = yield* maintenance
+              .compact(dbPath, { pruneEventsNow })
+              .pipe(Effect.flip);
+            assert.equal(failure._tag, "DatabaseInUseError");
+          }
           return yield* maintenance.compact(dbPath).pipe(Effect.flip);
         }).pipe(Effect.provide(NodeSqliteClient.layer({ filename: dbPath })));
         assert.equal(refused._tag, "DatabaseInUseError");
@@ -185,6 +193,172 @@ it.layer(DatabaseMaintenance.layer.pipe(Layer.provideMerge(NodeServices.layer)))
             [{ messageId: "message-1" }],
           );
         }).pipe(Effect.provide(NodeSqliteClient.layer({ filename: dbPath, readonly: true })));
+      }).pipe(Effect.scoped),
+    );
+
+    it.effect("prunes expired transcripts in batches without rebuilding the database", () =>
+      Effect.gen(function* () {
+        yield* TestClock.setTime(Date.parse("2026-11-07T00:00:00.000Z"));
+        const fs = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        const maintenance = yield* DatabaseMaintenance.DatabaseMaintenance;
+        const dbPath = path.join(
+          yield* fs.makeTempDirectoryScoped({ prefix: "t3-prune-batches-" }),
+          "statev2.sqlite",
+        );
+        yield* Effect.void.pipe(Effect.provide(Sqlite.layerFromPath(dbPath)));
+        yield* Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient;
+          for (const [threadId, deletedAt] of [
+            ["old", "2026-09-01T00:00:00.000Z"],
+            ["recent", "2026-11-01T00:00:00.000Z"],
+          ] as const) {
+            yield* sql`INSERT INTO orchestration_v2_projection_threads (
+              thread_id, project_id, title, default_provider, runtime_mode, interaction_mode,
+              created_at, updated_at, deleted_at, payload_json
+            ) VALUES (${threadId}, 'project', ${threadId}, 'codex', 'full-access', 'default',
+              ${deletedAt}, ${deletedAt}, ${deletedAt}, ${JSON.stringify({
+                lineage: { rootThreadId: threadId },
+                deletedAt,
+              })})`;
+            yield* sql`INSERT INTO orchestration_v2_projection_messages (
+              message_id, thread_id, role, streaming, created_at, updated_at, payload_json
+            ) VALUES (${threadId}, ${threadId}, 'assistant', 0, ${deletedAt}, ${deletedAt}, '{"text":"needle"}')`;
+            yield* sql`INSERT INTO orchestration_v2_projection_turn_items (
+              turn_item_id, thread_id, ordinal, type, status, updated_at, payload_json
+            ) VALUES (${threadId}, ${threadId}, 1, 'assistant_message', 'completed', ${deletedAt}, '{}')`;
+            yield* sql`INSERT INTO orchestration_v2_turn_item_positions VALUES (${threadId}, ${threadId}, 1)`;
+            yield* sql`INSERT INTO orchestration_v2_projection_plans (
+              plan_id, thread_id, node_id, kind, status, payload_json
+            ) VALUES (${threadId}, ${threadId}, ${threadId}, 'todo', 'completed', '{}')`;
+          }
+          yield* sql`WITH RECURSIVE n(x) AS (SELECT 1 UNION ALL SELECT x + 1 FROM n WHERE x < 500)
+            INSERT INTO orchestration_v2_projection_messages (
+              message_id, thread_id, role, streaming, created_at, updated_at, payload_json
+            ) SELECT 'old-' || x, 'old', 'assistant', 0, '2026-09-01', '2026-09-01', '{"text":"needle"}' FROM n`;
+          for (const id of ["protected-parent", "active-child", "pending"]) {
+            yield* sql`INSERT INTO orchestration_v2_projection_threads (
+              thread_id, project_id, title, default_provider, runtime_mode, interaction_mode,
+              created_at, updated_at, deleted_at, payload_json
+            ) VALUES (${id}, 'project', ${id}, 'codex', 'full-access', 'default',
+              '2026-09-01', '2026-09-01', ${id === "active-child" ? null : "2026-09-01"},
+              ${JSON.stringify({ lineage: { rootThreadId: id === "active-child" ? "protected-parent" : id } })})`;
+            yield* sql`INSERT INTO orchestration_v2_projection_messages (
+              message_id, thread_id, role, streaming, created_at, updated_at, payload_json
+            ) VALUES (${id}, ${id}, 'assistant', 0, '2026-09-01', '2026-09-01', '{"text":"protected"}')`;
+          }
+          yield* sql`INSERT INTO orchestration_v2_effect_outbox (
+            effect_id, command_id, thread_id, effect_type, payload_json, status, attempt_count,
+            available_at, created_at, updated_at
+          ) VALUES ('pending', 'pending', 'pending', 'attachment.cleanup', '{}', 'pending', 0,
+            '2026-09-01', '2026-09-01', '2026-09-01')`;
+          yield* sql`INSERT INTO orchestration_v2_projection_runs (
+            run_id, thread_id, ordinal, provider, status, requested_at, payload_json
+          ) VALUES ('old-run', 'old', 1, 'codex', 'completed', '2026-09-01T00:00:00.000Z', '{}')`;
+        }).pipe(Effect.provide(NodeSqliteClient.layer({ filename: dbPath })));
+
+        const preview = yield* maintenance.inspectDeletedThreads(dbPath, 30);
+        assert.equal(preview.eligibleThreadCount, 1);
+        assert.equal(preview.messageCount, 501);
+        assert.equal(preview.skippedThreadCount, 2);
+        assert.equal(preview.turnItemCount, 1);
+        assert.equal(preview.planCount, 1);
+        yield* Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient;
+          yield* sql`SELECT * FROM orchestration_v2_projection_threads LIMIT 1`;
+          assert.equal(
+            (yield* Effect.flip(maintenance.pruneDeletedThreads(dbPath, 30)))._tag,
+            "DatabaseInUseError",
+          );
+          assert.equal((yield* maintenance.inspectDeletedThreads(dbPath, 30)).messageCount, 501);
+        }).pipe(Effect.provide(NodeSqliteClient.layer({ filename: dbPath })));
+        const first = yield* maintenance.pruneDeletedThreads(dbPath, 30, 1);
+        assert.equal(first.deletedMessages, 250);
+        assert.equal(first.deletedItems, 0);
+        assert.equal(first.batches, 1);
+        assert.isFalse(first.complete);
+        assert.equal((yield* maintenance.inspectDeletedThreads(dbPath, 30)).messageCount, 251);
+        const logs: unknown[] = [];
+        const clock = yield* Clock.Clock;
+        let nanos = 0n;
+        const result = yield* maintenance.pruneDeletedThreads(dbPath, 30).pipe(
+          Effect.provideService(Clock.Clock, {
+            ...clock,
+            monotonicTimeNanos: Effect.sync(() => (nanos += 6_000_000_000n)),
+          }),
+          Effect.provide(
+            Logger.layer(
+              [
+                Logger.make(({ message }) => {
+                  logs.push(message);
+                }),
+              ],
+              { mergeWithExisting: false },
+            ),
+          ),
+        );
+        assert.equal(result.deletedThreads, 1);
+        assert.equal(result.deletedMessages, 251);
+        assert.equal(result.deletedItems, 1);
+        assert.equal(result.deletedPlans, 1);
+        assert.equal(result.batches, 5);
+        assert.isTrue(result.complete);
+        const progressLogs = logs.filter(
+          (entry) => Array.isArray(entry) && entry[0] === "Deleted-thread pruning progress",
+        );
+        assert.lengthOf(progressLogs, 5);
+        assert.include(JSON.stringify(progressLogs.at(-1)), '"deletedMessages":251');
+        assert.include(JSON.stringify(progressLogs.at(-1)), '"elapsedSeconds":30');
+        yield* Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient;
+          assert.deepEqual(
+            yield* sql`SELECT thread_id FROM orchestration_v2_projection_messages ORDER BY thread_id`,
+            [
+              { thread_id: "active-child" },
+              { thread_id: "pending" },
+              { thread_id: "protected-parent" },
+              { thread_id: "recent" },
+            ],
+          );
+          assert.deepEqual(yield* sql`SELECT run_id FROM orchestration_v2_projection_runs`, [
+            { run_id: "old-run" },
+          ]);
+          assert.deepEqual(
+            yield* sql`SELECT messages.message_id AS "messageId"
+              FROM orchestration_v2_message_search AS search
+              JOIN orchestration_v2_projection_messages AS messages ON messages.rowid = search.rowid
+              WHERE orchestration_v2_message_search MATCH '"needle"'`,
+            [{ messageId: "recent" }],
+          );
+        }).pipe(Effect.provide(NodeSqliteClient.layer({ filename: dbPath, readonly: true })));
+        assert.equal((yield* maintenance.pruneDeletedThreads(dbPath, 30)).batches, 0);
+        yield* Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient;
+          for (const [id, size] of [
+            ["large-1", 700_000],
+            ["large-2", 700_000],
+            ["oversized", 2_000_000],
+          ] as const) {
+            yield* sql`INSERT INTO orchestration_v2_projection_turn_items (
+              turn_item_id, thread_id, ordinal, type, status, updated_at, payload_json
+            ) VALUES (${id}, 'old', 1, 'command_execution', 'completed', '2026-09-01',
+              ${JSON.stringify({ output: "x".repeat(size) })})`;
+          }
+        }).pipe(Effect.provide(NodeSqliteClient.layer({ filename: dbPath })));
+        for (let pass = 0; pass < 3; pass++) {
+          assert.equal((yield* maintenance.pruneDeletedThreads(dbPath, 30, 1)).deletedItems, 1);
+        }
+        assert.equal((yield* maintenance.inspectDeletedThreads(dbPath, 30)).eligibleThreadCount, 0);
+        for (const budget of [0, -1, 1.5, 10001]) {
+          assert.equal(
+            (yield* Effect.flip(maintenance.pruneDeletedThreads(dbPath, 30, budget)))._tag,
+            "DatabasePruneBudgetError",
+          );
+        }
+        assert.equal(
+          (yield* Effect.flip(maintenance.pruneDeletedThreads(dbPath, 0)))._tag,
+          "DatabaseRetentionError",
+        );
       }).pipe(Effect.scoped),
     );
   },

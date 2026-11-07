@@ -383,3 +383,65 @@ it.effect("keeps an anchor that a row appended during the pass borrows from", ()
     }),
   ).pipe(Effect.provide(layerTest)),
 );
+
+it.effect(
+  "offline pruning bypasses the retained day without crossing the projection boundary",
+  () =>
+    Effect.gen(function* () {
+      const sink = yield* EventSink.EventSinkV2;
+      const eventStore = yield* EventStore.EventStoreV2;
+      const events = yield* OrchestrationEventStore.OrchestrationEventStore;
+      const projections = yield* ProjectionStore.ProjectionStoreV2;
+      const maintenance = yield* ProjectionMaintenance.ProjectionMaintenanceV2;
+      const sql = yield* SqlClient.SqlClient;
+      const now = yield* DateTime.now;
+      const threadId = ThreadId.make("thread:offline-prune");
+      yield* sink.write({ events: [threadCreated(makeThread(threadId, now), now)] });
+      yield* sink.write({ events: [itemEvent(threadId, now, itemSpecs[0], 0)] });
+      assert.equal((yield* maintenance.pruneEventStore()).deletedEventCount, 0);
+      yield* insertRunningRunUpdate(threadId);
+      yield* sink.write({ events: subagentEvents(threadId, now, 0) });
+      yield* sink.write({ events: subagentEvents(threadId, now, 0, "repeat") });
+      const projectedThrough = yield* eventStore.latestSequence();
+      const projection = yield* projections.getThreadProjection(threadId);
+      // Simulate a committed event whose projection has not caught up yet.
+      yield* sql`INSERT INTO orchestration_events (
+      event_id, aggregate_kind, stream_id, stream_version, event_type,
+      occurred_at, actor_kind, payload_json, metadata_json, application_event_version
+    ) VALUES ('unprojected', 'thread', 'other', 1, 'thread.updated',
+      '2026-11-01', 'server', '{}', '{}', 2)`;
+      const highWater = yield* eventStore.latestSequence();
+      assert.equal((yield* maintenance.pruneEventStore()).deletedEventCount, 0);
+      assert.isAbove(
+        (yield* maintenance.pruneEventStore(undefined, { skipRetention: true })).deletedEventCount,
+        0,
+      );
+      assert.equal(yield* events.prunedThroughSequence, projectedThrough);
+      assert.equal(yield* eventStore.latestSequence(), highWater);
+      assert.deepEqual(yield* projections.getThreadProjection(threadId), projection);
+      assert.deepEqual(yield* remainingEventIds(threadId), [
+        "event:turn-item-compaction:thread",
+        "event:prune:run-running",
+        "event:turn-item-compaction:subagent-item:0",
+        "event:turn-item-compaction:subagent-item:repeat",
+      ]);
+      assert.deepEqual(
+        yield* sql`SELECT event_id FROM orchestration_events WHERE event_id = 'unprojected'`,
+        [{ event_id: "unprojected" }],
+      );
+      const stored = yield* eventStore
+        .read({ threadId, eventType: "turn-item.updated" })
+        .pipe(Stream.runCollect);
+      const head = Array.from(stored).at(-1)?.event;
+      assert.equal(
+        head?.type === "turn-item.updated" && head.payload.type === "subagent"
+          ? head.payload.prompt
+          : null,
+        "Review prompt A. ".repeat(40),
+      );
+      assert.equal(
+        (yield* maintenance.pruneEventStore(undefined, { skipRetention: true })).deletedEventCount,
+        0,
+      );
+    }).pipe(Effect.provide(layerTest)),
+);

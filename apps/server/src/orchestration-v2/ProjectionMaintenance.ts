@@ -23,7 +23,11 @@ export class ProjectionMaintenanceError extends Schema.TaggedError<ProjectionMai
 
 export interface ProjectionMaintenanceV2Shape {
   /** Deletes events the projections already cover once they are older than the retained history. */
-  readonly pruneEventStore: (betweenPages?: Effect.Effect<void>) => Effect.Effect<
+  readonly pruneEventStore: (
+    betweenPages?: Effect.Effect<void>,
+    /** Only offline maintenance holding the exclusive database lock may skip retention. */
+    options?: { readonly skipRetention?: boolean },
+  ) => Effect.Effect<
     {
       readonly deletedEventCount: number;
       readonly deletedReceiptCount: number;
@@ -255,7 +259,10 @@ export const layer: Layer.Layer<ProjectionMaintenanceV2, never, SqlClient.SqlCli
     // A pass prunes through the mark the previous pass left once that mark is a day old, so
     // at least RETAINED_EVENT_HISTORY of events always remains. Receipts stay for idempotency.
     const pruneEventStore = Effect.fn("ProjectionMaintenance.pruneEventStore")(
-      function* (betweenPages: Effect.Effect<void> = Effect.void) {
+      function* (
+        betweenPages: Effect.Effect<void> = Effect.void,
+        options?: { readonly skipRetention?: boolean },
+      ) {
         const now = yield* DateTime.now;
         const metadata = yield* sql<MetadataRow>`
           SELECT projection_name, last_sequence, updated_at
@@ -281,15 +288,20 @@ export const layer: Layer.Layer<ProjectionMaintenanceV2, never, SqlClient.SqlCli
           mark !== undefined &&
           DateTime.toEpochMillis(now) - Date.parse(mark.updated_at) >=
             Duration.toMillis(RETAINED_EVENT_HISTORY);
-        if (mark !== undefined && markIsDue) {
-          const throughSequence = Math.max(Math.min(mark.last_sequence, projected), prunedThrough);
+        if (options?.skipRetention || (mark !== undefined && markIsDue)) {
+          const throughSequence = Math.max(
+            Math.min(options?.skipRetention ? head : (mark?.last_sequence ?? 0), projected),
+            prunedThrough,
+          );
           if (throughSequence > prunedThrough) {
             // Publish the boundary first so resuming clients take a snapshot, never a partial replay.
             yield* writeMetadata(EVENT_LOG_PRUNED_THROUGH, throughSequence, now);
           }
           deletedEventCount += yield* pruneEvents(throughSequence, head, betweenPages);
         }
-        if (mark === undefined || markIsDue) yield* writeMetadata(EVENT_LOG_PRUNE_MARK, head, now);
+        if (options?.skipRetention || mark === undefined || markIsDue) {
+          yield* writeMetadata(EVENT_LOG_PRUNE_MARK, head, now);
+        }
 
         const legacy = yield* pruneImportedLegacyHistory(
           head,
