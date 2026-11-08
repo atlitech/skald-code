@@ -131,6 +131,14 @@ const UserInputQuestionOption = Schema.Struct({
   value: Schema.optional(Schema.String),
 });
 
+/** A free-text field answered in the same step as a single-select question, keyed by its own id. */
+const UserInputCompanionText = Schema.Struct({
+  id: TrimmedNonEmptyStringSchema,
+  header: TrimmedNonEmptyStringSchema,
+  description: Schema.optional(TrimmedNonEmptyStringSchema),
+  required: Schema.optional(Schema.Boolean),
+});
+
 export const UserInputQuestion = Schema.Struct({
   id: TrimmedNonEmptyStringSchema,
   header: TrimmedNonEmptyStringSchema,
@@ -138,6 +146,7 @@ export const UserInputQuestion = Schema.Struct({
   options: Schema.Array(UserInputQuestionOption),
   allowCustomAnswer: Schema.optional(Schema.Boolean),
   initialAnswer: Schema.optional(Schema.String),
+  companionText: Schema.optional(UserInputCompanionText),
   multiSelect: Schema.optional(Schema.Boolean).pipe(
     Schema.withConstructorDefault(Effect.succeed(false)),
   ),

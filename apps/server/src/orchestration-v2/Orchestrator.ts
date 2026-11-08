@@ -82,7 +82,7 @@ import {
 import { modelSelectionsEqual } from "@t3tools/shared/model";
 import { modelSwitchSince } from "./modelSwitch.ts";
 import { recordThreadOpen } from "@t3tools/shared/paletteSearch";
-import { userInputAnswerError } from "@t3tools/shared/userInputConstraints";
+import { userInputAnswersError } from "@t3tools/shared/userInputConstraints";
 import {
   backgroundWorkHoldsCompletion,
   derivePendingBackgroundWork,
@@ -9746,15 +9746,13 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
           ]),
         );
         const questions = context.item?.type === "user_input_request" ? context.item.questions : [];
-        for (const question of questions) {
-          const error = userInputAnswerError(question, normalized[question.id]);
-          if (error !== null) {
-            return yield* new OrchestratorDispatchError({
-              commandId: command.commandId,
-              commandType: command.type,
-              cause: error,
-            });
-          }
+        const error = userInputAnswersError(questions, normalized);
+        if (error !== null) {
+          return yield* new OrchestratorDispatchError({
+            commandId: command.commandId,
+            commandType: command.type,
+            cause: error,
+          });
         }
         answers = normalized;
       }
@@ -9793,7 +9791,20 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
             cause: "The provider for this project is disabled.",
           });
         }
-        const questionIds = new Set(approvalTurnItem.questions.map((question) => question.id));
+        // A companion text is answered under its own id, right after its question.
+        const prompts = approvalTurnItem.questions.flatMap((question) => [
+          { id: question.id, prompt: question.question, optional: question.required === false },
+          ...(question.companionText === undefined
+            ? []
+            : [
+                {
+                  id: question.companionText.id,
+                  prompt: question.companionText.header,
+                  optional: question.companionText.required !== true,
+                },
+              ]),
+        ]);
+        const questionIds = new Set(prompts.map((prompt) => prompt.id));
         if (
           !Object.entries(answers ?? {}).every(
             ([questionId, answer]) =>
@@ -9806,11 +9817,11 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
             cause: "Answer each question before sending.",
           });
         }
-        for (const question of approvalTurnItem.questions) {
-          const answer = answers?.[question.id];
+        for (const { id, prompt, optional } of prompts) {
+          const answer = answers?.[id];
           const answered = isMessageQuestionAnswer(answer);
           // Clients send "" for a skipped optional question, such as an attachment-only answer.
-          if (!answered && question.required === false) continue;
+          if (!answered && optional) continue;
           if (!answered) {
             return yield* new OrchestratorDispatchError({
               commandId: command.commandId,
@@ -9819,7 +9830,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
             });
           }
           const text = typeof answer === "string" ? answer : answer.join(", ");
-          replies.push(`${question.question}\n${text.trim()}`);
+          replies.push(`${prompt}\n${text.trim()}`);
         }
         if (replies.length === 0) {
           return yield* new OrchestratorDispatchError({

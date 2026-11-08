@@ -1356,6 +1356,22 @@ export const OrchestrationV2UserInputAnswerConstraints = Schema.Struct({
 export type OrchestrationV2UserInputAnswerConstraints =
   typeof OrchestrationV2UserInputAnswerConstraints.Type;
 
+/**
+ * A free-text field asked in the same step as a single-select question, such as a note on the
+ * picked option or the user's own answer. Its answer is keyed by its own id; absent means the
+ * question stands alone.
+ */
+export const OrchestrationV2UserInputCompanionText = Schema.Struct({
+  id: TrimmedNonEmptyString,
+  header: TrimmedNonEmptyString,
+  description: Schema.optional(TrimmedNonEmptyString),
+  /** Absent means the text may be left blank. */
+  required: Schema.optional(Schema.Boolean),
+  constraints: Schema.optional(OrchestrationV2UserInputAnswerConstraints),
+});
+export type OrchestrationV2UserInputCompanionText =
+  typeof OrchestrationV2UserInputCompanionText.Type;
+
 export const OrchestrationV2UserInputQuestion = Schema.Struct({
   id: TrimmedNonEmptyString,
   header: TrimmedNonEmptyString,
@@ -1373,6 +1389,7 @@ export const OrchestrationV2UserInputQuestion = Schema.Struct({
   initialAnswer: Schema.optional(Schema.String),
   required: Schema.optional(Schema.Boolean),
   constraints: Schema.optional(OrchestrationV2UserInputAnswerConstraints),
+  companionText: Schema.optional(OrchestrationV2UserInputCompanionText),
 });
 export type OrchestrationV2UserInputQuestion = typeof OrchestrationV2UserInputQuestion.Type;
 

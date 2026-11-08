@@ -410,6 +410,7 @@ export interface ChatComposerProps {
       initialAnswer?: string | undefined;
       multiSelect?: boolean | undefined;
       allowCustomAnswer?: boolean | undefined;
+      companionText?: { readonly header: string } | undefined;
       options: ReadonlyArray<unknown>;
     } | null;
   } | null;
@@ -1204,8 +1205,10 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   const composerSuggestionsVisible = composerMenuOpen;
   const composerSuggestionListVisible = composerSuggestionsVisible && composerMenuItems.length > 0;
   const activePendingUserInput = pendingUserInputs[0] ?? null;
+  // A choice with companion text still takes the composer's text, as that companion's answer.
   const isChoiceOnlyPendingQuestion =
-    activePendingProgress?.activeQuestion?.allowCustomAnswer === false;
+    activePendingProgress?.activeQuestion?.allowCustomAnswer === false &&
+    activePendingProgress.activeQuestion.companionText === undefined;
   const showComposerTopDrawer =
     pendingUserInputs.length > 0 ||
     (!isComposerCollapsedMobile && showPlanFollowUpPrompt && activeProposedPlan !== null);
@@ -1611,7 +1614,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   ) => {
     refreshWorkspaceSnapshotOnTyping();
     if (activePendingProgress?.activeQuestion && pendingUserInputs.length > 0) {
-      if (activePendingProgress.activeQuestion.allowCustomAnswer === false) return;
+      if (isChoiceOnlyPendingQuestion) return;
       setComposerCursor(nextCursor);
       setComposerTrigger(
         cursorAdjacentToMention ? null : detectComposerTrigger(nextPrompt, expandedCursor),
@@ -1757,10 +1760,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       };
     },
   ): boolean => {
-    if (
-      activePendingUserInput &&
-      activePendingProgress?.activeQuestion?.allowCustomAnswer === false
-    ) {
+    if (activePendingUserInput && isChoiceOnlyPendingQuestion) {
       return false;
     }
     const currentText = promptRef.current;
@@ -1849,7 +1849,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     projectSelectionRequired ||
     isComposerApprovalState ||
     activePendingIsResponding ||
-    activePendingProgress?.activeQuestion?.allowCustomAnswer === false;
+    isChoiceOnlyPendingQuestion;
   const speechInput = useEnvironmentSpeechInput({
     environmentId,
     projectId: activeProjectId,
@@ -2807,9 +2807,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     if (records.length === 0) return;
     if (questionAttachmentTarget !== null) {
       const canAnswer =
-        canOperateThread &&
-        !activePendingIsResponding &&
-        activePendingProgress?.activeQuestion?.allowCustomAnswer !== false;
+        canOperateThread && !activePendingIsResponding && !isChoiceOnlyPendingQuestion;
       const text = `${records
         .map((record) => formatInlineContextReference(threadContextReference(record)))
         .join(" ")} `;
@@ -3530,9 +3528,11 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                         : activePendingProgress
                           ? isChoiceOnlyPendingQuestion
                             ? "Choose an option above"
-                            : activePendingProgress.activeQuestion?.options.length === 0
-                              ? "Type your answer"
-                              : "Type your own answer, or leave this blank to use the selected option"
+                            : activePendingProgress.activeQuestion?.companionText
+                              ? activePendingProgress.activeQuestion.companionText.header
+                              : activePendingProgress.activeQuestion?.options.length === 0
+                                ? "Type your answer"
+                                : "Type your own answer, or leave this blank to use the selected option"
                           : showPlanFollowUpPrompt && activeProposedPlan
                             ? "Add feedback to refine the plan, or leave this blank to implement it"
                             : projectSelectionRequired

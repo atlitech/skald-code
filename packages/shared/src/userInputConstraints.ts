@@ -146,6 +146,39 @@ export function userInputAnswerError(
     : null;
 }
 
+/**
+ * Returns why any answer breaks its question's rules, a companion text included, or null when
+ * every answer is acceptable. Answers are keyed by question id and companion text id.
+ */
+export function userInputAnswersError(
+  questions: ReadonlyArray<
+    Pick<
+      OrchestrationV2UserInputQuestion,
+      | "id"
+      | "header"
+      | "options"
+      | "allowCustomAnswer"
+      | "multiSelect"
+      | "required"
+      | "constraints"
+      | "companionText"
+    >
+  >,
+  answers: Readonly<Record<string, string | ReadonlyArray<string> | undefined>>,
+): string | null {
+  const answer = (id: string) => (Object.hasOwn(answers, id) ? answers[id] : undefined);
+  for (const question of questions) {
+    const companion = question.companionText;
+    const error =
+      userInputAnswerError(question, answer(question.id)) ??
+      (companion === undefined
+        ? null
+        : userInputAnswerError({ ...companion, options: [] }, answer(companion.id)));
+    if (error !== null) return error;
+  }
+  return null;
+}
+
 /** Checks a string exactly as given against format and length rules, blank values included. */
 export function breaksTextConstraints(
   constraints: NonNullable<OrchestrationV2UserInputQuestion["constraints"]>,

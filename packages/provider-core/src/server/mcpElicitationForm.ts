@@ -165,9 +165,23 @@ function contentValue(field: Field, answer: unknown): McpElicitationContent[stri
   }
 }
 
+/** An optional plain text field: no choices, format or suggested value. */
+function isOptionalPlainText(key: string, field: Field, requiredKeys: ReadonlySet<string>) {
+  return (
+    field.type === "string" &&
+    !requiredKeys.has(key) &&
+    field.enum == null &&
+    field.oneOf == null &&
+    field.format == null &&
+    field.default == null
+  );
+}
+
 /**
  * Maps an MCP form elicitation onto user-input questions, or returns null when the
- * schema is not the flat form the MCP spec allows.
+ * schema is not the flat form the MCP spec allows. A single-select field directly followed by
+ * an optional plain text field is asked as one step, the text as its companion: MCP forms have
+ * no "pick one, add a note, or answer in your own words" field, so servers send the two.
  */
 export function mcpElicitationForm(input: {
   readonly requester?: string;
@@ -188,6 +202,10 @@ export function mcpElicitationForm(input: {
       : message
         ? `${input.requester} asks: ${message}`
         : `${input.requester} asks:`;
+  const describe = (field: Field, constraints = fieldConstraints(field)) =>
+    [text(field.description), constraints && describeUserInputConstraints(constraints)]
+      .filter(Boolean)
+      .join("\n\n");
   const questions: Array<OrchestrationV2UserInputQuestion> = [];
   for (const [index, [key, field]] of fields.entries()) {
     const options = fieldOptions(field);
@@ -200,13 +218,24 @@ export function mcpElicitationForm(input: {
     ) {
       return null;
     }
+    // A companion field is asked within the choice before it.
+    if (questions.at(-1)?.companionText?.id === key) continue;
     const required = requiredKeys.has(key) && !acceptsEmptyList(key, field);
     const header = text(field.title) ?? key;
     const constraints = fieldConstraints(field);
-    const hint = constraints && describeUserInputConstraints(constraints);
-    const prompt = [index === 0 ? lead : undefined, text(field.description), hint]
+    const prompt = [index === 0 ? lead : undefined, describe(field, constraints)]
       .filter(Boolean)
       .join("\n\n");
+    const next = fields[index + 1];
+    const companion =
+      field.type === "string" &&
+      options !== undefined &&
+      next !== undefined &&
+      isOptionalPlainText(next[0], next[1], requiredKeys)
+        ? next
+        : undefined;
+    const companionConstraints = companion && fieldConstraints(companion[1]);
+    const companionDescription = companion && describe(companion[1], companionConstraints);
     const initialAnswer =
       options === undefined &&
       (typeof field.default === "string" || typeof field.default === "number")
@@ -222,6 +251,17 @@ export function mcpElicitationForm(input: {
       ...(initialAnswer === undefined ? {} : { initialAnswer }),
       required,
       ...(constraints === undefined ? {} : { constraints }),
+      ...(companion === undefined
+        ? {}
+        : {
+            companionText: {
+              id: companion[0],
+              header: `${text(companion[1].title) ?? companion[0]} (optional)`,
+              ...(companionDescription ? { description: companionDescription } : {}),
+              required: false,
+              ...(companionConstraints === undefined ? {} : { constraints: companionConstraints }),
+            },
+          }),
     });
   }
   if (fields.length === 0) {

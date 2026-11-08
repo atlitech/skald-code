@@ -119,6 +119,35 @@ describe("pending user input question progress", () => {
   });
 });
 
+it("asks a choice and its companion text as one step", () => {
+  const paired = {
+    ...singleSelectQuestion,
+    allowCustomAnswer: false,
+    required: false,
+    companionText: { id: "note", header: "Your own answer (optional)", required: false },
+  };
+  const drafts = { scope: { selectedOptionValues: ["Orchestration-first"], customAnswer: "Soon" } };
+  expect(derivePendingUserInputProgress([paired], drafts, 0)).toMatchObject({
+    questionIndex: 0,
+    selectedOptionValues: ["Orchestration-first"],
+    customAnswer: "Soon",
+    resolvedAnswer: "Orchestration-first",
+    usingCustomAnswer: false,
+    answeredQuestionCount: 1,
+    isLastQuestion: true,
+    isComplete: true,
+    canAdvance: true,
+  });
+  expect(buildPendingUserInputAnswers([paired], drafts)).toEqual({
+    scope: "Orchestration-first",
+    note: "Soon",
+  });
+  // Text alone is a complete answer too.
+  expect(
+    derivePendingUserInputProgress([paired], { scope: { customAnswer: "Mine" } }, 0),
+  ).toMatchObject({ customAnswer: "Mine", isLastQuestion: true, isComplete: true });
+});
+
 it("lets optional questions stay blank without skipping required ones", () => {
   const questions = [
     { ...singleSelectQuestion, required: false },
