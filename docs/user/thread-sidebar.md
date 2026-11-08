@@ -76,8 +76,9 @@ to its children. Un-settling affects only the selected thread, so resuming a par
 leaves completed children settled. Move a child to the top level before acting on
 the parent if you want to keep it separate.
 The parent stays with its children and appears once. A group with an approval,
-question, or finished result to review stays in the main list. Otherwise, if any
-member is working, the group appears in Working when that section is enabled.
+question, or plan to review stays in the main list. Otherwise, while any member is
+working, the group appears in Working when that section is enabled. Finished
+children return the group to the main list once the rest of the group stops working.
 Pinned parents stay pinned. Once the children settle, the parent returns to the
 section for its own state. Automatic settlement still applies to each thread separately.
 Collapsing a group keeps its activity summary visible and does not change its section.

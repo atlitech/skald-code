@@ -95,33 +95,38 @@ export function resolveThreadGroupSections<
   workingShelfEnabled = true,
 ): ReadonlyMap<string, ThreadGroupSection> {
   const result = new Map(sections);
-  const visit = (thread: T): { review: boolean; working: boolean; active: boolean } => {
+  type GroupState = { blocked: boolean; finished: boolean; working: boolean; active: boolean };
+  const visit = (thread: T): GroupState => {
     const key = `${thread.environmentId}:${thread.id}`;
     const own = sections.get(key) ?? "active";
     const parked = own === "settled" || own === "snoozed";
     let working =
       own === "working" || (workingShelfEnabled && own === "pinned" && isThreadWorking(thread));
-    let review =
+    let blocked =
       !parked &&
       Boolean(
         thread.hasPendingApprovals ||
         thread.hasPendingUserInput ||
         thread.pendingSubagentRequest ||
         (thread.pendingGuestMessageCount ?? 0) > 0 ||
-        (!working && (thread.hasActionableProposedPlan || thread.latestRun?.completedAt)),
+        (!working && thread.hasActionableProposedPlan),
       );
+    let finished = !parked && !working && Boolean(thread.latestRun?.completedAt);
     let active = own === "active" || own === "pinned";
     const children = grouping.childrenByParent.get(key) ?? [];
     for (const child of children) {
       const state = visit(child);
-      review ||= state.review;
+      blocked ||= state.blocked;
+      finished ||= state.finished;
       working ||= state.working;
       active ||= state.active;
     }
     if (children.length > 0 && own !== "pinned") {
+      // A finished member waits for review only once the rest of the group stops working.
+      const review = blocked || (finished && !working);
       result.set(key, review ? "active" : working ? "working" : active ? "active" : own);
     }
-    return { review, working, active };
+    return { blocked, finished, working, active };
   };
   for (const root of grouping.roots) visit(root);
   return result;
