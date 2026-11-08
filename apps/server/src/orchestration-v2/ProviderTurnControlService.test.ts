@@ -223,6 +223,7 @@ it.effect(
           getThreadTitles: () => Effect.die("unused getThreadTitles"),
           listThreadGroupingParents: () => Effect.die("unused listThreadGroupingParents"),
           getThreadGroupingDescendants: () => Effect.die("unused getThreadGroupingDescendants"),
+          getThreadLinkMetadata: () => Effect.die("unused getThreadLinkMetadata"),
           findGuestShareThreadId: () => Effect.die("unused findGuestShareThreadId"),
           getThread: () => Ref.get(projection).pipe(Effect.map((state) => state.thread)),
           getSettlementCandidates: () => Effect.die("unused getSettlementCandidates"),
