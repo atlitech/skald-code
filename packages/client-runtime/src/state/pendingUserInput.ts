@@ -67,7 +67,7 @@ export function pendingUserInputTakesText(question: PendingUserInputQuestion): b
 }
 
 /** The companion text to submit, or null when the question has none or it is blank. */
-export function resolvePendingUserInputCompanionAnswer(
+function resolvePendingUserInputCompanionAnswer(
   question: PendingUserInputQuestion,
   draft: PendingUserInputDraftAnswer | undefined,
 ): string | null {
