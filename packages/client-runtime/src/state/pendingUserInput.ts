@@ -6,6 +6,10 @@ export interface PendingUserInputQuestion {
   readonly multiSelect?: boolean | undefined;
   readonly allowCustomAnswer?: boolean | undefined;
   readonly initialAnswer?: string | undefined;
+  /** Text typed in the same step, kept in the draft's customAnswer and sent under its own id. */
+  readonly companionText?:
+    | { readonly id: string; readonly required?: boolean | undefined }
+    | undefined;
 }
 
 export interface PendingUserInputDraftAnswer {
@@ -57,6 +61,19 @@ export function normalizeSelectedOptionValues(
   );
 }
 
+/** Whether the user types in this question's step: its custom answer or its companion text. */
+export function pendingUserInputTakesText(question: PendingUserInputQuestion): boolean {
+  return question.allowCustomAnswer !== false || question.companionText !== undefined;
+}
+
+/** The companion text to submit, or null when the question has none or it is blank. */
+export function resolvePendingUserInputCompanionAnswer(
+  question: PendingUserInputQuestion,
+  draft: PendingUserInputDraftAnswer | undefined,
+): string | null {
+  return question.companionText === undefined ? null : normalizeDraftAnswer(draft?.customAnswer);
+}
+
 /** The answer to submit for one question, or null while it is unanswered. */
 export function resolvePendingUserInputAnswer(
   question: PendingUserInputQuestion,
@@ -92,6 +109,14 @@ export function setPendingUserInputCustomAnswer(
   draft: PendingUserInputDraftAnswer | undefined,
   customAnswer: string,
 ): PendingUserInputDraftAnswer {
+  if (question.companionText !== undefined) {
+    // Companion text sits beside the chosen option instead of replacing it.
+    const selectedOptionValues = normalizeSelectedOptionValues(
+      question,
+      draft?.selectedOptionValues,
+    );
+    return { customAnswer, ...(selectedOptionValues.length > 0 ? { selectedOptionValues } : {}) };
+  }
   if (question.allowCustomAnswer === false) {
     return draft ?? {};
   }
@@ -134,6 +159,8 @@ export function togglePendingUserInputOptionSelection(
   if (resolvedOptionValue === null) {
     return draft ?? {};
   }
+  // An option replaces a custom answer, but companion text is kept beside it.
+  const customAnswer = question.companionText === undefined ? "" : (draft?.customAnswer ?? "");
 
   if (question.multiSelect) {
     const selectedOptionValues = normalizeSelectedOptionValues(
@@ -145,20 +172,32 @@ export function togglePendingUserInputOptionSelection(
       : [...selectedOptionValues, resolvedOptionValue];
 
     return {
-      customAnswer: "",
+      customAnswer,
       ...(nextSelectedOptionValues.length > 0
         ? { selectedOptionValues: nextSelectedOptionValues }
         : {}),
     };
   }
 
+  // With companion text the choice can be cleared, leaving the text as the whole answer.
+  if (
+    question.companionText !== undefined &&
+    normalizeSelectedOptionValues(question, draft?.selectedOptionValues).includes(
+      resolvedOptionValue,
+    )
+  ) {
+    return { customAnswer };
+  }
   return {
-    customAnswer: "",
+    customAnswer,
     selectedOptionValues: [resolvedOptionValue],
   };
 }
 
-/** Every question's answer keyed by question id, or null while any is unanswered. */
+/**
+ * Every question's answer keyed by question id, and each companion text by its own id, or null
+ * while any required one is unanswered.
+ */
 export function buildPendingUserInputAnswers(
   questions: ReadonlyArray<PendingUserInputQuestion>,
   draftAnswers: Record<string, PendingUserInputDraftAnswer>,
@@ -166,10 +205,17 @@ export function buildPendingUserInputAnswers(
   const entries: Array<[string, PendingUserInputAnswer]> = [];
 
   for (const question of questions) {
-    const answer = resolvePendingUserInputAnswer(question, draftAnswers[question.id]);
+    const draft = draftAnswers[question.id];
+    const answer = resolvePendingUserInputAnswer(question, draft);
     if (answer !== null) {
       entries.push([question.id, answer]);
-    } else if (question.required !== false || draftAnswers[question.id]?.attachmentsBlocked) {
+    } else if (question.required !== false || draft?.attachmentsBlocked) {
+      return null;
+    }
+    const companionAnswer = resolvePendingUserInputCompanionAnswer(question, draft);
+    if (companionAnswer !== null) {
+      entries.push([question.companionText!.id, companionAnswer]);
+    } else if (question.companionText?.required === true) {
       return null;
     }
   }

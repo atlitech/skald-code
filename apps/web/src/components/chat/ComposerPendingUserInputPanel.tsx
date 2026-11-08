@@ -96,7 +96,9 @@ const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard(
   // Keep question identity stable for its shortcut listener.
   const progress = derivePendingUserInputProgress(prompt.questions, answers, questionIndex);
   const activeQuestion = progress.activeQuestion;
-  const customAnswerActive = progress.customAnswer.trim().length > 0;
+  // Companion text sits beside the chosen option; a custom answer replaces it.
+  const companionText = activeQuestion?.companionText;
+  const customAnswerActive = companionText === undefined && progress.customAnswer.trim().length > 0;
   // Read before later hooks to preserve the question's compiler cache.
   const draftSelectedOptions = activeQuestion?.options.map(
     (option) =>
@@ -129,7 +131,9 @@ const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard(
 
   const handleOptionSelection = (questionId: string, optionValue: string) => {
     if (disabled || isResponding) return;
-    if (activeQuestion?.multiSelect) {
+    // The companion text is typed after picking, so that step waits for an explicit submit, and
+    // picking the chosen option again clears it.
+    if (activeQuestion?.multiSelect || companionText !== undefined) {
       onToggleOption(questionId, optionValue);
       return;
     }
@@ -326,6 +330,14 @@ const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard(
                 );
               })}
             </div>
+            {companionText?.description ? (
+              <p
+                className={cn("mt-1 pb-1 text-secondary-label text-2xs", questionTextAlign)}
+                dir={markdownProseDirection(companionText.description)}
+              >
+                {companionText.description}
+              </p>
+            ) : null}
           </ComposerBanner.Body>
         </ComposerBanner.Scroll>
       </CollapsiblePanel>

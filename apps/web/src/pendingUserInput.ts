@@ -4,6 +4,7 @@ import { formatThreadLink } from "@t3tools/shared/threadLinks";
 import {
   buildPendingUserInputAnswers,
   normalizeSelectedOptionValues,
+  pendingUserInputTakesText,
   resolvePendingUserInputAnswer,
   type PendingUserInputAnswer,
   type PendingUserInputDraftAnswer,
@@ -107,8 +108,11 @@ export function derivePendingUserInputProgress(
   const resolvedAnswer = activeQuestion
     ? resolvePendingUserInputAnswer(activeQuestion, activeDraft)
     : null;
+  // A choice's companion text is typed in the composer like a custom answer.
   const customAnswer =
-    activeQuestion?.allowCustomAnswer === false ? "" : (activeDraft?.customAnswer ?? "");
+    activeQuestion && pendingUserInputTakesText(activeQuestion)
+      ? (activeDraft?.customAnswer ?? "")
+      : "";
   const answeredQuestionCount = countAnsweredPendingUserInputQuestions(questions, draftAnswers);
   const isLastQuestion =
     questions.length === 0 ? true : normalizedQuestionIndex >= questions.length - 1;
@@ -123,6 +127,7 @@ export function derivePendingUserInputProgress(
     customAnswer,
     resolvedAnswer,
     usingCustomAnswer:
+      activeQuestion?.companionText === undefined &&
       (activeQuestion?.initialAnswer !== undefined ? customAnswer : customAnswer.trim()).length > 0,
     answeredQuestionCount,
     isLastQuestion,

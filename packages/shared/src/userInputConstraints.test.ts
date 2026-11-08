@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import { parseUserInputNumber, userInputAnswerError } from "./userInputConstraints.ts";
+import {
+  parseUserInputNumber,
+  userInputAnswerError,
+  userInputAnswersError,
+} from "./userInputConstraints.ts";
 
 const question = (constraints: Parameters<typeof userInputAnswerError>[0]["constraints"]) => ({
   header: "Field",
@@ -74,5 +78,24 @@ describe("userInputAnswerError", () => {
     );
     expect(userInputAnswerError(choice, ["pro", "Pro"])).toBe("Plan: Choose one option.");
     expect(userInputAnswerError(question({ type: "integer" }), ["3"])).not.toBeNull();
+  });
+
+  it("checks a choice's companion text under its own id", () => {
+    const paired = {
+      id: "option",
+      header: "Your answer",
+      options: [{ label: "Follow-up", description: "Follow-up" }],
+      allowCustomAnswer: false,
+      required: false,
+      companionText: { id: "other", header: "Note", constraints: { maxLength: 5 } },
+    };
+    expect(userInputAnswersError([paired], { option: "Follow-up", other: "Soon" })).toBeNull();
+    expect(userInputAnswersError([paired], { other: "Later" })).toBeNull();
+    expect(userInputAnswersError([paired], { option: "Follow-up", other: "Much later" })).toBe(
+      "Note: Enter text of at most 5 characters.",
+    );
+    expect(userInputAnswersError([paired], { option: "Something else" })).toBe(
+      "Your answer: Choose one of the listed options.",
+    );
   });
 });

@@ -1892,11 +1892,12 @@ describe("AcpAdapterV2", () => {
           options: [{ label: "Pro", description: "Pro", value: "pro" }],
           allowCustomAnswer: false,
           required: true,
+          // The optional note after the choice is asked in the same step.
+          companionText: { id: "note", header: "Note (optional)", required: false },
         },
-        { id: "note", header: "Note (optional)", question: "Note", options: [], required: false },
       ],
-      answers: { count: "3", plan: "pro" },
-      result: { action: "accept", content: { count: 3, plan: "pro" } },
+      answers: { count: "3", plan: "pro", note: "Yearly" },
+      result: { action: "accept", content: { count: 3, plan: "pro", note: "Yearly" } },
     },
   ])("Droid elicitation $scenario", ({ schema, questions, answers, result, withAttachments }) =>
     Effect.gen(function* () {

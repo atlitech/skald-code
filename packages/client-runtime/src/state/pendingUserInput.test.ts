@@ -183,6 +183,41 @@ describe("buildPendingUserInputAnswers", () => {
       compat: "Keep the current envelope for one release window",
     });
   });
+
+  it("sends a paired choice and its companion text under their own ids", () => {
+    const paired = {
+      ...singleSelectQuestion,
+      allowCustomAnswer: false,
+      required: false,
+      companionText: { id: "note", required: false },
+    };
+    const picked = togglePendingUserInputOptionSelection(paired, undefined, "Node.js");
+    const noted = setPendingUserInputCustomAnswer(paired, picked, "  Behind a flag ");
+    // The note keeps the picked option, and picking another keeps the note.
+    expect(noted).toEqual({ customAnswer: "  Behind a flag ", selectedOptionValues: ["Node.js"] });
+    expect(togglePendingUserInputOptionSelection(paired, noted, "Orchestration-first")).toEqual({
+      customAnswer: "  Behind a flag ",
+      selectedOptionValues: ["Orchestration-first"],
+    });
+    expect(buildPendingUserInputAnswers([paired], { scope: picked })).toEqual({
+      scope: "Node.js",
+    });
+    expect(buildPendingUserInputAnswers([paired], { scope: noted })).toEqual({
+      scope: "Node.js",
+      note: "Behind a flag",
+    });
+    // Picking the chosen option again clears it, leaving the text as the whole answer.
+    const textOnly = togglePendingUserInputOptionSelection(paired, noted, "Node.js");
+    expect(buildPendingUserInputAnswers([paired], { scope: textOnly })).toEqual({
+      note: "Behind a flag",
+    });
+    expect(buildPendingUserInputAnswers([paired], { scope: { customAnswer: " " } })).toEqual({});
+    expect(
+      buildPendingUserInputAnswers([{ ...paired, companionText: { id: "note", required: true } }], {
+        scope: picked,
+      }),
+    ).toBeNull();
+  });
 });
 
 it.each([

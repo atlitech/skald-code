@@ -27,6 +27,7 @@ import { useStableCallback } from "../../hooks/useStableCallback";
 import { getUploadedAttachments, useAttachmentUploadStore } from "../../lib/attachmentUploadQueue";
 import {
   buildPendingUserInputAnswers,
+  pendingUserInputTakesText,
   setPendingUserInputCustomAnswer,
   togglePendingUserInputOptionSelection,
   type PendingUserInputDraftAnswer,
@@ -93,7 +94,7 @@ function makePendingCustomAnswerSetter(input: {
       return;
     }
     const question = activePendingUserInput.questions.find((entry) => entry.id === questionId);
-    if (!question || question.allowCustomAnswer === false) {
+    if (!question || !pendingUserInputTakesText(question)) {
       return;
     }
     input.writePrompt(value);
@@ -397,9 +398,16 @@ export function usePendingThreadRequests(input: {
     if (!activePendingUserInput) {
       return;
     }
+    const selectedQuestion = activePendingUserInput.questions.find(
+      (entry) => entry.id === questionId,
+    );
+    // A companion text stays beside the option, so the composer keeps it.
+    const keepsText = selectedQuestion?.companionText !== undefined;
     // The option replaces the custom answer. Anything typed there is the
     // user's text, so it goes back to the thread draft instead of vanishing.
-    const displacedAnswer = activePendingAnswerDrafts[questionId]?.customAnswer;
+    const displacedAnswer = keepsText
+      ? undefined
+      : activePendingAnswerDrafts[questionId]?.customAnswer;
     const currentPrompt =
       useComposerDraftStore.getState().getComposerDraft(composerDraftTarget)?.prompt ?? "";
     const nextPrompt = carryDisplacedCustomAnswerIntoPrompt(currentPrompt, displacedAnswer);
@@ -450,6 +458,7 @@ export function usePendingThreadRequests(input: {
         },
       };
     });
+    if (keepsText) return;
     promptRef.current = "";
     composerRef.current?.resetCursorState({ cursor: 0 });
   };

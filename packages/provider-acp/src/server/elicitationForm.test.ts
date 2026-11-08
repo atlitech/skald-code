@@ -71,11 +71,22 @@ it("preserves optional fields, defaults, constraints, and empty required lists",
     constraints: { type: "integer", minimum: 1 },
   });
   assert.strictEqual(form.questions[1]?.options[0]?.value, "pro");
+  // The optional note after the choice is asked in its step and answered under its own id.
+  assert.strictEqual(form.questions[1]?.companionText?.id, "note");
+  assert.deepStrictEqual(
+    form.questions.map((question) => question.id),
+    ["count", "plan", "tags"],
+  );
   assert.strictEqual(form.questions[2]?.required, false);
-  assert.strictEqual(form.questions[3]?.required, false);
   assert.deepStrictEqual(form.content({ count: "3", plan: "pro" }), {
     count: 3,
     plan: "pro",
+    tags: [],
+  });
+  assert.deepStrictEqual(form.content({ count: "3", plan: "pro", note: "Soon" }), {
+    count: 3,
+    plan: "pro",
+    note: "Soon",
     tags: [],
   });
   assert.deepStrictEqual(form.content({ count: "bad", plan: "pro" }), undefined);

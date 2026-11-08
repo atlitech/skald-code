@@ -237,6 +237,91 @@ describe("mcpElicitationForm", () => {
     expect(form?.content({ confirm: "Continue" })).toEqual({});
   });
 
+  const choiceWithNote = {
+    type: "object",
+    properties: {
+      option: {
+        type: "string",
+        title: "Your answer",
+        oneOf: [
+          { const: "opt-1", title: "Follow-up" },
+          { const: "opt-2", title: "Isolate now" },
+        ],
+      },
+      other: {
+        type: "string",
+        title: "Your own answer",
+        description: "Add a note, or answer in your own words.",
+        maxLength: 50,
+      },
+    },
+    required: [],
+  };
+
+  it("asks a choice and the optional text field after it as one step", () => {
+    const form = mcpElicitationForm({
+      requester: "Skald",
+      message: "Should the sandbox isolate files?",
+      requestedSchema: choiceWithNote,
+    });
+    expect(form?.questions).toEqual([
+      {
+        id: "option",
+        header: "Your answer (optional)",
+        question: "Skald asks: Should the sandbox isolate files?",
+        options: [
+          { label: "Follow-up", description: "Follow-up" },
+          { label: "Isolate now", description: "Isolate now" },
+        ],
+        allowCustomAnswer: false,
+        required: false,
+        companionText: {
+          id: "other",
+          header: "Your own answer (optional)",
+          description:
+            "Add a note, or answer in your own words.\n\nEnter text of at most 50 characters.",
+          required: false,
+          constraints: { maxLength: 50 },
+        },
+      },
+    ]);
+  });
+
+  it("sends a paired choice and its text under their own keys", () => {
+    const form = mcpElicitationForm({ message: "Isolate?", requestedSchema: choiceWithNote });
+    expect(form?.content({ option: "Isolate now" })).toEqual({ option: "opt-2" });
+    expect(form?.content({ option: "Isolate now", other: "  In a second PR " })).toEqual({
+      option: "opt-2",
+      other: "  In a second PR ",
+    });
+    expect(form?.content({ other: "Do both" })).toEqual({ other: "Do both" });
+    expect(form?.content({ other: " " })).toEqual({});
+    expect(form?.content({})).toEqual({});
+  });
+
+  it("keeps separate questions when the text is required, not adjacent, or follows a list", () => {
+    const choice = { type: "string", oneOf: [{ const: "a", title: "A" }] };
+    const list = { type: "array", items: { enum: ["a", "b"] } };
+    for (const requestedSchema of [
+      {
+        type: "object",
+        properties: { option: choice, note: { type: "string" } },
+        required: ["note"],
+      },
+      {
+        type: "object",
+        properties: { option: choice, count: { type: "integer" }, note: { type: "string" } },
+      },
+      { type: "object", properties: { option: list, note: { type: "string" } } },
+    ]) {
+      const form = mcpElicitationForm({ message: "Hi", requestedSchema });
+      expect(form?.questions.map((question) => question.id)).toEqual(
+        Object.keys(requestedSchema.properties),
+      );
+      expect(form?.questions.some((question) => question.companionText)).toBe(false);
+    }
+  });
+
   it("rejects schemas outside the flat MCP form subset", () => {
     for (const schema of [
       undefined,

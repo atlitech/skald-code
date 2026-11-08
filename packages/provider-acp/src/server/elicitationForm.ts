@@ -190,6 +190,8 @@ export function parseElicitationForm(
   );
   const mcpForm = mcpElicitationForm({ requestedSchema, message });
   const questionMetadata = new Map(mcpForm?.questions.map((question) => [question.id, question]));
+  // A companion text field is asked within its choice, and answered under its own id.
+  const companionIds = new Set(mcpForm?.questions.flatMap((q) => q.companionText?.id ?? []));
   const fields = new Map<string, Field>();
   const questions: OrchestrationV2UserInputQuestion[] = [];
   for (const [id, value] of Object.entries(unknownRecord(schema?.properties) ?? {})) {
@@ -198,6 +200,7 @@ export function parseElicitationForm(
     // Question ids must survive the contract's trim to round-trip answers.
     if (property === undefined || parsed === undefined || text(id) !== id) return undefined;
     fields.set(id, parsed.field);
+    if (companionIds.has(id)) continue;
     questions.push({
       id,
       header: text(property.title) ?? `Question ${questions.length + 1}`,

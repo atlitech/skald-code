@@ -288,7 +288,15 @@ export function PendingUserInputCard(props: PendingUserInputCardProps) {
                   );
                 })}
               </View>
-              {question.allowCustomAnswer !== false ? (
+              {question.companionText?.description ? (
+                <Text
+                  className="font-sans text-sm leading-5 text-foreground-muted"
+                  style={proseDirectionStyle(question.companionText.description, setDirection)}
+                >
+                  {question.companionText.description}
+                </Text>
+              ) : null}
+              {question.allowCustomAnswer !== false || question.companionText ? (
                 <QuestionAttachments
                   key={`${props.pendingUserInput.requestId}:${question.id}`}
                   requestId={props.pendingUserInput.requestId}

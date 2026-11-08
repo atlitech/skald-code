@@ -41,6 +41,8 @@ export function QuestionAttachments(props: {
 }) {
   const { selectedThread } = useThreadSelection();
   const navigation = useNavigation();
+  // A choice's companion text is typed here and sent under its own id, without attachments.
+  const companion = props.question.companionText;
   const [previewFile, setPreviewFile] = useState<FilePreviewSource | null>(null);
   const [previewVideo, setPreviewVideo] = useState<VideoPreviewSource | null>(null);
   const configs = useServerConfigs();
@@ -97,7 +99,13 @@ export function QuestionAttachments(props: {
   };
   const paste = useNativePaste((uris) => {
     const scope = pickerScope.current;
-    if (!selectedThread || props.disabled || !configs.get(selectedThread.environmentId)) return;
+    if (
+      !selectedThread ||
+      props.disabled ||
+      companion !== undefined ||
+      !configs.get(selectedThread.environmentId)
+    )
+      return;
     const key = questionAttachmentDraftKey(
       selectedThread.environmentId,
       selectedThread.id,
@@ -126,10 +134,11 @@ export function QuestionAttachments(props: {
       )
       .finally(() => changeQuestionAttachmentPreparation(key, -1));
   });
-  if (!selectedThread || props.question.allowCustomAnswer === false) return null;
+  if (!selectedThread || (props.question.allowCustomAnswer === false && companion === undefined))
+    return null;
   const { environmentId, id: threadId } = selectedThread;
   const capabilities = configs.get(environmentId)?.environment.capabilities;
-  const canAttach = capabilities !== undefined;
+  const canAttach = capabilities !== undefined && companion === undefined;
   const key = questionAttachmentDraftKey(
     environmentId,
     threadId,
@@ -225,7 +234,11 @@ export function QuestionAttachments(props: {
             onInputFocusChange?.(false);
           }}
           placeholder={
-            props.question.options.length === 0 ? "Type your answer" : "Or type a custom answer"
+            companion
+              ? companion.header
+              : props.question.options.length === 0
+                ? "Type your answer"
+                : "Or type a custom answer"
           }
           className="min-h-[54px] rounded-2xl border border-input-border bg-input px-3.5 py-3 font-sans text-base text-foreground"
         />
