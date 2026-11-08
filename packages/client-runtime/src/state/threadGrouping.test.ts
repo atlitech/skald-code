@@ -150,8 +150,11 @@ it("promotes nested work and review, then restores the settled group without cha
   expect(resolve(leaf).get("local:parent")).toBe("working");
   expect(resolve(leaf).get("local:middle")).toBe("working");
   sections.set("local:leaf", "active");
-  expect(resolve(completed).get("local:parent")).toBe("active");
+  expect(resolve(completed).get("local:parent")).toBe("working");
   expect(resolve(completed).get("local:middle")).toBe("active");
+  sections.set("local:worker", "active");
+  expect(resolve(completed).get("local:parent")).toBe("active");
+  sections.set("local:worker", "working");
   sections.set("local:leaf", "settled");
   expect(resolve(completed).get("local:parent")).toBe("working");
   sections.set("local:worker", "settled");
