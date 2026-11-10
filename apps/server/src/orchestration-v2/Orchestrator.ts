@@ -587,6 +587,25 @@ function isThreadGroupCommand(command: OrchestrationV2ServerCommand): command is
   }
 }
 
+/** Nested threads already where a group action leads would refuse it, failing the whole group. */
+function groupCommandAppliesTo(
+  type: OrchestrationV2ServerCommand["type"],
+  shell: OrchestrationV2ThreadShell | null,
+): boolean {
+  if (shell === null) return true;
+  switch (type) {
+    case "thread.unarchive":
+      return shell.archivedAt !== null;
+    case "thread.archive":
+    case "thread.settle":
+    case "thread.snooze":
+    case "thread.unsnooze":
+      return shell.archivedAt === null;
+    default:
+      return true;
+  }
+}
+
 function commandThreadId(command: OrchestrationV2ServerCommand): ThreadId {
   switch (command.type) {
     case "thread.create":
@@ -14405,7 +14424,15 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       }
       const primary = yield* dispatchOnce(command, sideChatIds);
       if (!isThreadGroupCommand(command) || groupedThreadIds.length === 0) return primary;
-      const children = yield* Effect.forEach(groupedThreadIds, (threadId) => {
+      const shells = yield* Effect.forEach(groupedThreadIds, (threadId) =>
+        projectionStore
+          .getThreadShell(threadId)
+          .pipe(Effect.mapError((cause) => new OrchestratorProjectionError({ threadId, cause }))),
+      );
+      const pendingThreadIds = groupedThreadIds.filter((_, index) =>
+        groupCommandAppliesTo(command.type, shells[index] ?? null),
+      );
+      const children = yield* Effect.forEach(pendingThreadIds, (threadId) => {
         const childCommand = {
           ...command,
           threadId,
