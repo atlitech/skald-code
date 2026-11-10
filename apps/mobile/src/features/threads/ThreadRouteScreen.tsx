@@ -351,8 +351,7 @@ function ThreadRouteContent(
     readonly selectedThreadDetailState: ReturnType<typeof useSelectedThreadDetailState>;
   },
 ) {
-  const { fileInspector, layout, panes, showInspector, toggleAuxiliaryPane } =
-    useAdaptiveWorkspaceLayout();
+  const { layout, panes, showInspector, toggleAuxiliaryPane } = useAdaptiveWorkspaceLayout();
   const { connectionState } = useRemoteConnectionStatus();
   const { onReconnectEnvironment } = useRemoteConnections();
   const {
@@ -625,13 +624,6 @@ function ThreadRouteContent(
     navigation.setParams({ inspector: undefined });
     setChosenInspectorMode(props.renderInspector === undefined ? "files" : "route");
     showInspector();
-  };
-  const handleToggleInspector = () => {
-    if (inspectorMode === null) {
-      handleOpenFilesInspector();
-      return;
-    }
-    toggleAuxiliaryPane();
   };
   const handleSelectInspectorFile = (path: string) => {
     if (selectedThread === null) {
@@ -1035,9 +1027,7 @@ function ThreadRouteContent(
                 subtitle={headerSubtitle}
                 gitControls={threadGitControlProps}
                 hasThreadCwd={selectedThreadCwd !== null}
-                fileInspectorSupported={fileInspector.supported}
                 inspectorMode={inspectorMode}
-                onToggleInspector={handleToggleInspector}
                 onOpenFilesInspector={handleOpenFilesInspector}
                 onReturnToThread={props.onReturnToThread}
                 threadActions={threadRouteActions}
@@ -1136,7 +1126,6 @@ function ThreadRouteContent(
           offersSideChat={composer.sideChatUnavailableReason === null}
           onReconnectEnvironment={handleReconnectEnvironment}
           canSwitchThreadProvider={composer.canSwitchThreadProvider}
-          onUpdateThreadInteractionMode={composer.onUpdateInteractionMode}
           onRespondToApproval={requests.onRespondToApproval}
           onSelectUserInputOption={requests.onSelectUserInputOption}
           onChangeUserInputCustomAnswer={requests.onChangeUserInputCustomAnswer}

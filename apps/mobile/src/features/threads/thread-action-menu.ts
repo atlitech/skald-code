@@ -83,12 +83,12 @@ export function buildThreadActionMenu(state: ThreadActionMenuState): MenuAction[
             subactions: [
               {
                 id: "auto-settle:enabled",
-                title: "Enabled",
+                title: "Follow settings",
                 state: state.autoSettleEnabled ? "on" : "off",
               },
               {
                 id: "auto-settle:disabled",
-                title: "Disabled",
+                title: "Never",
                 state: state.autoSettleEnabled ? "off" : "on",
               },
             ],
