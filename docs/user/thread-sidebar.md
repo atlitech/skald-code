@@ -71,7 +71,8 @@ Grouping is saved on the server and follows you across devices.
 
 Deleting, settling, archiving, snoozing, or stopping a parent applies to all nested
 children, including deeper descendants. Unarchiving and waking a parent also apply
-to its children. Un-settling affects only the selected thread, so resuming a parent
+to its children. A child that is already archived is left as it is when you settle,
+archive, snooze, or wake the parent, so it never blocks the action. Un-settling affects only the selected thread, so resuming a parent
 leaves completed children settled. Move a child to the top level before acting on
 the parent if you want to keep it separate.
 The parent stays with its children and appears once. A group with an approval,

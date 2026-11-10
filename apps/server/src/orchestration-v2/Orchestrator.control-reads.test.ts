@@ -1959,6 +1959,33 @@ it.effect(
         onlyIfUnused: true,
       });
       assert.isNull((yield* projections.getThread(parentId)).deletedAt);
+      for (const [leafAction, groupAction] of [
+        ["thread.archive", "thread.archive"],
+        ["thread.unarchive", "thread.unarchive"],
+        ["thread.archive", "thread.settle"],
+      ] as const) {
+        yield* orchestrator.dispatch({
+          type: leafAction,
+          commandId: CommandId.make(`leaf-before-group:${groupAction}`),
+          threadId: siblingId,
+        });
+        const leafArchivedAt = (yield* projections.getThread(siblingId)).archivedAt;
+        const result = yield* orchestrator.dispatch({
+          type: groupAction,
+          commandId: CommandId.make(`group-with-leaf-done:${groupAction}`),
+          threadId: parentId,
+        });
+        const touched = new Set(result.storedEvents.map(({ event }) => event.threadId));
+        assert.isTrue(touched.has(parentId));
+        assert.isFalse(touched.has(siblingId));
+        assert.deepEqual((yield* projections.getThread(siblingId)).archivedAt, leafArchivedAt);
+        if (groupAction !== "thread.settle") {
+          assert.deepEqual(
+            (yield* projections.getThread(childId)).archivedAt,
+            (yield* projections.getThread(parentId)).archivedAt,
+          );
+        }
+      }
       yield* orchestrator.dispatch({
         type: "thread.archive",
         commandId: CommandId.make("archive-child-before-group-delete"),
