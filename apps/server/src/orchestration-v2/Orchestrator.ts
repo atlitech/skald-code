@@ -5055,9 +5055,9 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
             settledOverride: "settled",
             settledAt: alreadySettled ? thread.settledAt : (command.settledAt ?? now),
             // Settled threads refuse recovery, so an armed resume would stay hidden until un-settled.
-            limitRecovery: thread.limitRecovery
-              ? { ...thread.limitRecovery, autoResume: false, snooze: false }
-              : thread.limitRecovery,
+            ...(thread.limitRecovery
+              ? { limitRecovery: { ...thread.limitRecovery, autoResume: false, snooze: false } }
+              : {}),
             pullRequests: thread.pullRequests?.map((link) => withPullRequestWatch(link, undefined)),
             unsettledAt: null,
             pinnedAt: null,
@@ -7181,7 +7181,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       const owner = projection.providerThreads.find((thread) => thread.id === ownerId);
       if (
         owner === undefined ||
-        owner.providerInstanceId !== projection.thread.providerInstanceId ||
+        owner.providerInstanceId !== projection.thread.modelSelection.instanceId ||
         (projection.thread.activeProviderThreadId !== null &&
           projection.thread.activeProviderThreadId !== ownerId)
       ) {
