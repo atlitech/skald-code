@@ -7,7 +7,7 @@ import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 import * as NodeProcess from "node:process";
 import * as NodeUtil from "node:util";
-import { setTimeout as wait } from "node:timers/promises";
+import * as NodeTimersPromises from "node:timers/promises";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 import { decodeReleaseManifestJson } from "./fork-release-manifest.ts";
@@ -416,6 +416,7 @@ async function prepare(platform: Platform, sha: string, tag: string, out: string
   await write(out, platformIntent);
 }
 
+const decodeArtifact = Schema.decodeUnknownSync(ActionsArtifact);
 const decodeArtifactPages = Schema.decodeUnknownSync(
   Schema.Array(Schema.Struct({ artifacts: Schema.Array(ActionsArtifact) })),
 );
@@ -433,7 +434,7 @@ async function nativeArtifact(reference: GitHubNativeBuild, allowExpired = false
       if (artifactLookupHttpStatus(error) === 404) return undefined;
       throw error;
     }
-    const artifact = Schema.decodeUnknownSync(ActionsArtifact)(json(response));
+    const artifact = decodeArtifact(json(response));
     if (artifact.name !== reference.artifactName || String(artifact.id) !== reference.artifactId)
       throw new Error("Native artifact identity differs from the retained build.");
     return selectNativeArtifact([artifact], reference, allowExpired);
@@ -676,7 +677,11 @@ async function registerNative(
   if (artifactId && baseline.github.artifactId && artifactId !== baseline.github.artifactId)
     throw new Error("Uploaded artifact ID differs from the retained build.");
   const reference = { ...baseline.github, ...(artifactId ? { artifactId } : {}) };
-  const artifact = await waitForNativeArtifact(reference, () => nativeArtifact(reference), wait);
+  const artifact = await waitForNativeArtifact(
+    reference,
+    () => nativeArtifact(reference),
+    NodeTimersPromises.setTimeout,
+  );
   const stored = { ...baseline, github: { ...baseline.github, artifactId: String(artifact.id) } };
   await record({
     schemaVersion: 1,
