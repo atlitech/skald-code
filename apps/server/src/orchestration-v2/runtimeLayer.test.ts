@@ -4863,8 +4863,9 @@ it.layer(layerTest)("OrchestrationV2LayerLive lifecycle", (it) => {
       );
 
       const reactor = yield* PullRequestWatchReactor.make.pipe(
-        Effect.provide(host),
-        Effect.provide(ServerSettings.layerTest({ enablePullRequestWatch: true })),
+        Effect.provide(
+          Layer.merge(host, ServerSettings.layerTest({ enablePullRequestWatch: true })),
+        ),
       );
       yield* reactor.sweep;
       yield* worker.drain();
@@ -4879,8 +4880,9 @@ it.layer(layerTest)("OrchestrationV2LayerLive lifecycle", (it) => {
       assert.deepEqual(yield* summaries, []);
 
       const restarted = yield* PullRequestWatchReactor.make.pipe(
-        Effect.provide(host),
-        Effect.provide(ServerSettings.layerTest({ enablePullRequestWatch: true })),
+        Effect.provide(
+          Layer.merge(host, ServerSettings.layerTest({ enablePullRequestWatch: true })),
+        ),
       );
       yield* restarted.sweep;
       yield* worker.drain();
@@ -5270,8 +5272,9 @@ it.layer(layerTest)("OrchestrationV2LayerLive lifecycle", (it) => {
       );
 
       const reactor = yield* PullRequestWatchReactor.make.pipe(
-        Effect.provide(host),
-        Effect.provide(ServerSettings.layerTest({ enablePullRequestWatch: true })),
+        Effect.provide(
+          Layer.merge(host, ServerSettings.layerTest({ enablePullRequestWatch: true })),
+        ),
       );
       yield* reactor.sweep;
       yield* worker.drain();
@@ -5288,8 +5291,9 @@ it.layer(layerTest)("OrchestrationV2LayerLive lifecycle", (it) => {
       );
       // The fresh reactor reloads the nonempty obligation from the persisted watch.
       const restarted = yield* PullRequestWatchReactor.make.pipe(
-        Effect.provide(host),
-        Effect.provide(ServerSettings.layerTest({ enablePullRequestWatch: true })),
+        Effect.provide(
+          Layer.merge(host, ServerSettings.layerTest({ enablePullRequestWatch: true })),
+        ),
       );
       yield* restarted.sweep;
       yield* worker.drain();
@@ -5430,8 +5434,9 @@ it.layer(layerTest)("OrchestrationV2LayerLive lifecycle", (it) => {
         ({ messages }) => messages.flatMap((message) => message.notification?.summary ?? []),
       );
       const reactor = yield* PullRequestWatchReactor.make.pipe(
-        Effect.provide(host),
-        Effect.provide(ServerSettings.layerTest({ enablePullRequestWatch: true })),
+        Effect.provide(
+          Layer.merge(host, ServerSettings.layerTest({ enablePullRequestWatch: true })),
+        ),
       );
       yield* reactor.sweep;
       const ended = yield* watchOf;
@@ -5530,8 +5535,9 @@ it.layer(layerTest)("OrchestrationV2LayerLive lifecycle", (it) => {
           ),
       );
       const reactor = yield* PullRequestWatchReactor.make.pipe(
-        Effect.provide(host),
-        Effect.provide(ServerSettings.layerTest({ enablePullRequestWatch: true })),
+        Effect.provide(
+          Layer.merge(host, ServerSettings.layerTest({ enablePullRequestWatch: true })),
+        ),
       );
       const anHourOfSweeps = Effect.gen(function* () {
         for (let pass = 0; pass < 6; pass++) {
@@ -5763,8 +5769,9 @@ it.layer(layerTest)("OrchestrationV2LayerLive lifecycle", (it) => {
           ),
       );
       const reactor = yield* PullRequestWatchReactor.make.pipe(
-        Effect.provide(host),
-        Effect.provide(ServerSettings.layerTest({ enablePullRequestWatch: true })),
+        Effect.provide(
+          Layer.merge(host, ServerSettings.layerTest({ enablePullRequestWatch: true })),
+        ),
       );
       const worker = yield* EffectWorker.OrchestrationEffectWorkerV2;
       const sweep = reactor.sweep.pipe(Effect.andThen(worker.drain()));
@@ -6159,8 +6166,9 @@ it.layer(layerTest)("OrchestrationV2LayerLive lifecycle", (it) => {
         }),
       );
       const reactor = yield* PullRequestWatchReactor.make.pipe(
-        Effect.provide(host),
-        Effect.provide(ServerSettings.layerTest({ enablePullRequestWatch: true })),
+        Effect.provide(
+          Layer.merge(host, ServerSettings.layerTest({ enablePullRequestWatch: true })),
+        ),
       );
       yield* reactor.sweep;
       yield* worker.drain();
@@ -6174,8 +6182,9 @@ it.layer(layerTest)("OrchestrationV2LayerLive lifecycle", (it) => {
       const persisted = (yield* orchestrator.getThreadShell(threadId))?.pullRequests?.[0]?.watch;
       assert.equal(persisted?.mergeQueueRemovalId, "first");
       const restarted = yield* PullRequestWatchReactor.make.pipe(
-        Effect.provide(host),
-        Effect.provide(ServerSettings.layerTest({ enablePullRequestWatch: true })),
+        Effect.provide(
+          Layer.merge(host, ServerSettings.layerTest({ enablePullRequestWatch: true })),
+        ),
       );
       yield* restarted.sweep;
       yield* worker.drain();
@@ -6288,7 +6297,6 @@ it.layer(layerTest)("OrchestrationV2LayerLive lifecycle", (it) => {
       let recovering = false;
       let pagesRead = 0;
       const reactor = yield* PullRequestWatchReactor.make.pipe(
-        Effect.provide(ServerSettings.layerTest({ enablePullRequestWatch: true })),
         Effect.provide(
           Layer.mergeAll(
             NodeServices.layer,
@@ -6814,8 +6822,9 @@ it.layer(layerTest)("OrchestrationV2LayerLive lifecycle", (it) => {
         }),
       );
       const reactor = yield* PullRequestWatchReactor.make.pipe(
-        Effect.provide(host),
-        Effect.provide(ServerSettings.layerTest({ enablePullRequestWatch: true })),
+        Effect.provide(
+          Layer.merge(host, ServerSettings.layerTest({ enablePullRequestWatch: true })),
+        ),
       );
       yield* reactor.sweep;
       assert.equal(yield* readHead(21), "abc1234def");

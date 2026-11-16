@@ -294,22 +294,21 @@ it.layer(NodeServices.layer)("runServicePreflight", (it) => {
   );
 });
 
-// regression: #34502 every installed launcher was protocol 3, so protocol 4 blocked every remote update
-it.each([3, SERVICE_LAUNCHER_PROTOCOL])(
-  "is ready under launcher protocol %i and reports it back",
-  (launcherProtocol) => {
-    // A released server accepts a ready result only when it names that server's own protocol.
-    expect(
-      runServicePreflight({
-        databasePath: "/missing/state.sqlite",
-        launcherProtocol,
-        version: "9.8.7",
-      }),
-    ).toEqual({ status: "ready", version: "9.8.7", launcherProtocol });
-  },
-);
-
 it.layer(NodeServices.layer)("service preflight database", (it) => {
+  // regression: #34502 every installed launcher was protocol 3, so protocol 4 blocked every remote update
+  it.effect.each([3, SERVICE_LAUNCHER_PROTOCOL])(
+    "is ready under launcher protocol %i and reports it back",
+    (launcherProtocol) =>
+      Effect.gen(function* () {
+        const result = yield* runServicePreflight({
+          databasePath: "/missing/state.sqlite",
+          launcherProtocol,
+          version: "9.8.7",
+        });
+        expect(result).toEqual({ status: "ready", version: "9.8.7", launcherProtocol });
+      }),
+  );
+
   it.effect("keeps a fixed snapshot while another connection writes between backup pages", () =>
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
@@ -397,17 +396,13 @@ it.layer(NodeServices.layer)("service preflight database", (it) => {
 
       // Startup reconciles this V2 preview history, so it must not block an update.
       const preview = path.join(path.dirname(databasePath), "preview.sqlite");
+      yield* seedOlderDatabase(preview, Effect.void, 56);
       const previewDb = new NodeSqlite.DatabaseSync(preview);
-      previewDb.exec(
-        "CREATE TABLE effect_sql_migrations (migration_id INTEGER PRIMARY KEY, name TEXT)",
-      );
-      const insertPreview = previewDb.prepare("INSERT INTO effect_sql_migrations VALUES (?, ?)");
-      for (const [id, name] of migrationManifest.filter(([id]) => id < 53)) {
-        insertPreview.run(id, name);
-      }
-      insertPreview.run(53, "PullRequestFilesViewed");
-      insertPreview.run(54, "OrchestrationV2");
-      insertPreview.run(55, "RemoveRedundantProjectionIndexes");
+      previewDb.exec(`
+        DELETE FROM effect_sql_migrations WHERE migration_id = 54;
+        UPDATE effect_sql_migrations SET migration_id = 54 WHERE migration_id = 55;
+        UPDATE effect_sql_migrations SET migration_id = 55 WHERE migration_id = 56;
+      `);
       previewDb.close();
       expect(
         (yield* runServicePreflight({
