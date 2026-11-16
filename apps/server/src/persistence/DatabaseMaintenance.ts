@@ -68,9 +68,17 @@ export class DatabaseMissingError extends Schema.TaggedError<DatabaseMissingErro
 
 export class DatabaseInUseError extends Schema.TaggedError<DatabaseInUseError>()(
   "DatabaseInUseError",
-  { path: Schema.String, cause: Schema.Defect() },
+  {
+    path: Schema.String,
+    cause: Schema.Defect(),
+    pid: Schema.optional(Schema.Int),
+    serviceManaged: Schema.optional(Schema.Boolean),
+  },
 ) {
   override get message() {
+    if (this.pid !== undefined) {
+      return `Stop T3 Code server process ${this.pid}${this.serviceManaged ? "" : ", which the background service did not start,"} before repairing the database.`;
+    }
     return "Stop the T3 Code server and desktop app, including any version before 0.1.0, before repairing the database.";
   }
 }
@@ -111,6 +119,8 @@ export class DiskSpaceCheckError extends Schema.TaggedError<DiskSpaceCheckError>
   }
 }
 
+export type DatabaseCompactStep = "prune-events" | "vacuum" | "rebuild-search" | "checkpoint";
+
 export class DatabaseMaintenance extends Context.Service<
   DatabaseMaintenance,
   {
@@ -148,6 +158,7 @@ export class DatabaseMaintenance extends Context.Service<
     readonly compact: (
       databasePath: string,
       options?: { readonly pruneEventsNow?: boolean },
+      onStep?: (step: DatabaseCompactStep) => Effect.Effect<void>,
     ) => Effect.Effect<
       {
         readonly beforeBytes: number;
@@ -312,7 +323,11 @@ const make = Effect.gen(function* () {
   );
 
   const compact = Effect.fn("DatabaseMaintenance.compact")(
-    function* (databasePath: string, options?: { readonly pruneEventsNow?: boolean }) {
+    function* (
+      databasePath: string,
+      options?: { readonly pruneEventsNow?: boolean },
+      onStep: (step: DatabaseCompactStep) => Effect.Effect<void> = () => Effect.void,
+    ) {
       yield* locate(databasePath);
       const beforeBytes = Number((yield* fs.stat(databasePath)).size);
       const result = yield* Effect.gen(function* () {
@@ -335,16 +350,20 @@ const make = Effect.gen(function* () {
             elapsedSeconds: Number(now - started) / 1e9,
           });
         });
+        yield* onStep("prune-events");
         const summary = yield* maintenance.pruneEventStore(reportProgress, {
           skipRetention: options?.pruneEventsNow ?? false,
         });
         yield* Effect.logInfo("Event compaction complete; rebuilding database", summary);
+        yield* onStep("vacuum");
         // VACUUM is required to enable incremental auto_vacuum on existing databases.
         yield* sql`PRAGMA auto_vacuum = INCREMENTAL`;
         yield* sql`VACUUM`;
         yield* Effect.logInfo("Database rebuilt; rebuilding message search");
+        yield* onStep("rebuild-search");
         yield* rebuildMessageSearch(sql);
         yield* Effect.logInfo("Message search rebuilt; checkpointing database");
+        yield* onStep("checkpoint");
         yield* sql`PRAGMA wal_checkpoint(TRUNCATE)`;
         return summary;
       }).pipe(

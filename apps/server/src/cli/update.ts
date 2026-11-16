@@ -26,12 +26,16 @@ import {
   ADMITTED_ARCHIVE_MISMATCH_STEP,
   ensurePinnedRuntimeInstalled,
   isPinnedRuntimeInstalled,
+  findPosixLauncher,
+  launcherOwnsVersionsDir,
   pinnedRuntimeCommand,
   isUnpublishedRelease,
   PinnedRuntimeInstallError,
   prunePinnedRuntimes,
-  repointPinnedRuntimeLauncher,
+  recordPinnedRuntimeLauncher,
+  resolveLauncherPath,
   windowsShimTarget,
+  writePosixLauncher,
 } from "../cloud/pinnedRuntime.ts";
 import { PRE_ADMISSION_FORK_VERSIONS, verifyReleaseAdmission } from "../cloud/releaseAdmission.ts";
 import {
@@ -49,6 +53,7 @@ import * as CliService from "./service.ts";
 
 export class CliUpdateError extends Schema.TaggedError<CliUpdateError>()("CliUpdateError", {
   reason: Schema.String,
+  cause: Schema.optional(Schema.Defect()),
 }) {
   override get message(): string {
     return this.reason;
@@ -155,36 +160,46 @@ export const repointLauncher = Effect.fn("cli.update.repoint_launcher")(function
 }) {
   const platform = yield* HostProcess.Platform;
   if (input.launchedAs === undefined) return Option.none<string>();
-  const launcher =
-    platform === "win32" ? yield* findWindowsShim(input.launchedAs) : input.launchedAs;
+  const versionsDir = pinnedRuntimeVersionsDir(path, input.baseDir);
+  const ownsTarget = (candidate: string) => launcherOwnsVersionsDir(path, versionsDir, candidate);
+  const remember = (launcher: string) =>
+    recordPinnedRuntimeLauncher({ baseDir: input.baseDir, launcher }).pipe(
+      Effect.mapError(
+        () => new CliUpdateError({ reason: `Could not record the t3 launcher at ${launcher}.` }),
+      ),
+    );
+
+  if (platform === "win32") {
+    const shimPath = yield* findWindowsShim(input.launchedAs);
+    if (shimPath === undefined) return Option.none<string>();
+    const current = yield* fs.readFileString(shimPath).pipe(Effect.option);
+    const quoted = Option.isSome(current) ? windowsShimTarget(current.value) : undefined;
+    if (quoted === undefined || !ownsTarget(quoted)) return Option.none<string>();
+    yield* remember(shimPath);
+    yield* fs
+      .writeFileString(shimPath, `@echo off\r\n"${input.targetEntryPath}" %*`)
+      .pipe(
+        Effect.mapError(
+          () => new CliUpdateError({ reason: `Could not rewrite the t3 launcher at ${shimPath}.` }),
+        ),
+      );
+    return Option.some(shimPath);
+  }
+
+  const launcher = yield* findPosixLauncher({ launchedAs: input.launchedAs, versionsDir });
   if (launcher === undefined) return Option.none<string>();
-  return yield* repointPinnedRuntimeLauncher({ ...input, launcher }).pipe(
+  yield* remember(launcher);
+  yield* writePosixLauncher({
+    launcher,
+    executable: input.targetEntryPath,
+    exclusive: false,
+  }).pipe(
     Effect.mapError(
-      () => new CliUpdateError({ reason: `Could not repoint the t3 launcher at ${launcher}.` }),
+      (cause) =>
+        new CliUpdateError({ reason: `Could not repoint the t3 launcher at ${launcher}.`, cause }),
     ),
   );
-});
-
-/** Node preserves argv0's spelling; resolve bare names on PATH to find the launcher symlink. */
-export const resolveLauncherPath = Effect.gen(function* () {
-  const path = yield* Path.Path;
-  const fs = yield* FileSystem.FileSystem;
-  const invokedAs = yield* HostProcess.InvokedAs;
-  const cwd = yield* HostProcess.WorkingDirectory;
-  const environment = yield* HostProcess.Environment;
-  const platform = yield* HostProcess.Platform;
-  if (invokedAs.includes("/") || invokedAs.includes("\\")) {
-    return path.resolve(cwd, invokedAs);
-  }
-  const delimiter = platform === "win32" ? ";" : ":";
-  for (const directory of (environment["PATH"] ?? "").split(delimiter)) {
-    if (directory.length === 0) continue;
-    const candidate = path.join(directory, invokedAs);
-    if (yield* fs.exists(candidate).pipe(Effect.orElseSucceed(() => false))) {
-      return candidate;
-    }
-  }
-  return undefined;
+  return Option.some(launcher);
 });
 
 /** Windows executables see their own path, so find the installer shim by matching t3.cmd targets on PATH. */
@@ -678,7 +693,7 @@ export const runUpdate = Effect.fn("cli.update.run")(function* (input: {
   }
   if (servicePlan?.handedOff === true) {
     yield* Console.log(
-      `  Background service switching to ${targetVersion} from a separate systemd unit, since this session runs inside it and disconnects when it restarts. Result: ${servicePlan.logPath}`,
+      `  Background service switching to ${targetVersion} outside this session, since this session runs inside it and disconnects when it restarts. Result: ${servicePlan.logPath}`,
     );
   } else if (servicePlan !== undefined && restartService) {
     yield* Console.log(`  Background service restarted on ${targetVersion}`);
