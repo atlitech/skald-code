@@ -219,6 +219,9 @@ it.effect.each([
             yield* Fiber.join(cancelled);
           }
         }
+        if (resolution === "SDK abort" || resolution === "SDK abort after response") {
+          yield* Fiber.join(requestSettled);
+        }
         yield* worker.drain();
         const sdkResponse = yield* Fiber.join(response);
         const adapterCancelled =

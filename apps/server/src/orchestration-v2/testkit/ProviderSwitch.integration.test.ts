@@ -4818,7 +4818,6 @@ describe("orchestration v2 provider switching", () => {
                 attachments: [],
                 createdBy: "user",
                 creationSource: "web",
-                modelSelection: CODEX_MODEL_SELECTION,
                 dispatchMode: { type: "queue_after_active" },
                 ...extra,
               });

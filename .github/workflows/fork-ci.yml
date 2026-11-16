@@ -74,10 +74,7 @@ jobs:
 
       - name: Typecheck failure details
         if: failure() && steps.typecheck.outcome == 'failure'
-        run: |
-          vp run --last-details || true
-          cd apps/server
-          ../../node_modules/.bin/effect-tsgo diagnostics --project tsconfig.json --format text --severity error,warning
+        run: vp run --last-details
 
       - name: Save task results
         if: success() && (github.event_name != 'workflow_dispatch' || inputs.use-cache) && steps.task_cache.outputs.cache-hit != 'true'
