@@ -5050,7 +5050,7 @@ describe("orchestration v2 provider switching", () => {
                 (entry) => entry.id === staleProviderThreadId,
               );
               assert.isDefined(staleOwner);
-              assert.notEqual(staleOwner?.providerInstanceId, targetSelection.instanceId);
+              assert.equal(staleOwner?.providerInstanceId, CODEX_MODEL_SELECTION.instanceId);
               const discarded = yield* dispatch("stale-native-accept", {
                 createdBy: "agent",
                 creationSource: "provider",
@@ -5068,15 +5068,7 @@ describe("orchestration v2 provider switching", () => {
                 discarded.storedEvents.map(({ event }) => event.type),
                 ["thread.metadata-updated"],
               );
-              assert.equal(
-                unchanged.runs.length,
-                runCount,
-                JSON.stringify(
-                  unchanged.runs.filter(
-                    (run) => !delivered.runs.some((prior) => prior.id === run.id),
-                  ),
-                ),
-              );
+              assert.equal(unchanged.runs.length, runCount);
               assert.deepEqual(unchanged.thread.modelSelection, targetSelection);
             }
           }).pipe(

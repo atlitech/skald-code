@@ -1050,7 +1050,7 @@ function isNativeQueuedNotification(message: OrchestrationV2ConversationMessage 
   return message?.notification !== undefined && message.creationSource === "provider";
 }
 
-// Delegated completions, monitor notifications and unpinned scheduled deliveries never choose a
+// Delegated completions, app-owned notifications and unpinned scheduled deliveries never choose a
 // model, so a queued one runs on the thread's current pick rather than the one frozen at queue time.
 function followsCurrentConversation(
   message:
@@ -1067,6 +1067,7 @@ function followsCurrentConversation(
   return (
     message?.delegatedCompletion !== undefined ||
     message?.followsThreadSelection === true ||
+    (message?.notification !== undefined && message.creationSource === "server") ||
     (message?.notification?.source.kind === "monitor" && !isBufferedProviderNotification(message))
   );
 }
