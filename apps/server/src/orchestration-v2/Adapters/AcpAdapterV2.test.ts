@@ -1969,7 +1969,7 @@ describe("AcpAdapterV2", () => {
       questions: [
         {
           id: "name",
-          header: "Question 1",
+          header: "name (optional)",
           question: "Your answer?",
           options: [],
           required: false,

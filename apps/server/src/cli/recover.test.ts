@@ -19,6 +19,7 @@ import { HttpClient } from "effect/http";
 import * as TestConsole from "effect/testing/TestConsole";
 import * as HostProcess from "@t3tools/shared/HostProcess";
 
+import { readPosixLauncherTarget } from "../cloud/pinnedRuntime.ts";
 import * as BootService from "../cloud/bootService.ts";
 import { verifySnapshot } from "../cloud/recoveryPoint.ts";
 import { seedLegacyRecoveryPoint as createRecoveryPoint } from "../cloud/testkit/legacyRecoveryPoint.ts";
@@ -308,7 +309,7 @@ const assertSwapped = Effect.fn("test.assert_swapped")(function* (home: Home) {
   assert.deepEqual(yield* fs.readFile(path.join(displaced, "statev2.sqlite")), home.liveBytes);
   assert.equal(yield* fs.readFileString(path.join(displaced, "statev2.sqlite-wal")), "wal");
   assert.equal(yield* fs.readFileString(path.join(displaced, "statev2.sqlite-shm")), "shm");
-  assert.equal(yield* fs.readLink(home.launcher), home.fromEntry);
+  assert.equal(yield* readPosixLauncherTarget(home.launcher), home.fromEntry);
 });
 
 /** Nothing moved: the live database, its journal, and the launcher are as the update left them. */

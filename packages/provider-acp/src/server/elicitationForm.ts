@@ -226,17 +226,18 @@ export function parseElicitationForm(
   for (const { id, property, options } of parsedFields) {
     if (folded.has(id) || companionIds.has(id)) continue;
     const kind = fields.get(id)?.kind;
+    const metadata = { ...questionMetadata.get(id) };
+    if (companions.has(id)) delete metadata.companionText;
     questions.push({
       id,
       header: text(property.title) ?? `Question ${questions.length + 1}`,
       question: text(property.description) ?? message,
       required: required.has(id),
-      ...questionMetadata.get(id),
+      ...metadata,
       ...(companions.has(id)
         ? {
             header: text(property.title) ?? `Question ${questions.length + 1}`,
             allowCustomAnswer: true,
-            companionText: undefined,
           }
         : {}),
       options,

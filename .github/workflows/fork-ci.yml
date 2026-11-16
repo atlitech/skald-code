@@ -69,7 +69,14 @@ jobs:
         run: vp check
 
       - name: Typecheck
-        run: vpr typecheck
+        run: |
+          if vpr typecheck; then
+            exit 0
+          else
+            result=$?
+            vp run --last-details
+            exit "$result"
+          fi
 
       - name: Save task results
         if: success() && (github.event_name != 'workflow_dispatch' || inputs.use-cache) && steps.task_cache.outputs.cache-hit != 'true'

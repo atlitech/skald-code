@@ -58,7 +58,7 @@ console.log([record.prior.version, record.prior.archive, record.home.path.replac
 fi
 
 # The launcher's target, re-rooted from the drill's home to the extracted one.
-launcher_target="$(readlink "$launcher" || true)"
+launcher_target="$(node "$here/launcher-target.ts" "$launcher" || true)"
 in_home() {
   local path="$1" under="$2"
   if [[ -n "$recorded_home" && "$path" == "$recorded_home"/* ]]; then

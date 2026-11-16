@@ -305,19 +305,28 @@ const readVerification = (out: string) =>
   };
 
 describe("runVerification", () => {
-  it.effect("re-observes an uploaded home at another path and passes it", () =>
-    Effect.gen(function* () {
-      const dir = scratch();
-      try {
-        const files = makeDrilledHome(dir, { restoredDiffers: false });
-        yield* runVerification(files);
-        const verification = readVerification(files.out);
-        assert.isTrue(verification.passed);
-        assert.isTrue(verification.checks.every((check) => check.passed));
-      } finally {
-        NodeFS.rmSync(dir, { recursive: true, force: true });
-      }
-    }).pipe(Effect.provide(Layer.mergeAll(NodeServices.layer, NodeCryptoServices.layer))),
+  it.effect.each(["symlink", "script"] as const)(
+    "re-observes an uploaded home with a %s launcher",
+    (launcherKind) =>
+      Effect.gen(function* () {
+        const dir = scratch();
+        try {
+          const files = makeDrilledHome(dir, { restoredDiffers: false });
+          if (launcherKind === "script") {
+            const target = NodeFS.readlinkSync(files.launcher);
+            NodeFS.unlinkSync(files.launcher);
+            NodeFS.writeFileSync(files.launcher, `#!/bin/sh\nexec '${target}' "$@"\n`, {
+              mode: 0o755,
+            });
+          }
+          yield* runVerification(files);
+          const verification = readVerification(files.out);
+          assert.isTrue(verification.passed);
+          assert.isTrue(verification.checks.every((check) => check.passed));
+        } finally {
+          NodeFS.rmSync(dir, { recursive: true, force: true });
+        }
+      }).pipe(Effect.provide(Layer.mergeAll(NodeServices.layer, NodeCryptoServices.layer))),
   );
 
   it.effect("writes the failed checks and fails when the live database is not the point's", () =>
