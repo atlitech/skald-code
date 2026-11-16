@@ -1459,8 +1459,8 @@ type PendingCodexRuntimeRequest =
 function codexUserInputQuestions(
   questions: ReadonlyArray<CodexSchema.ToolRequestUserInputParams__ToolRequestUserInputQuestion>,
 ): ReadonlyArray<OrchestrationV2UserInputQuestion> {
-  return questions.map((question, index) => ({
-    id: nonEmptyText(question.id, `question-${index + 1}`),
+  return questions.map((question) => ({
+    id: question.id,
     header: nonEmptyText(question.header, "Question"),
     question: nonEmptyText(question.question, "Choose an answer."),
     options:

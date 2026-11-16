@@ -88,6 +88,7 @@ it.effect.each([
             }),
           forkSession: () => Effect.die("unused"),
           subagentLaunchToolUseId: () => Effect.succeed(null),
+          subagentModel: () => Effect.succeed(null),
           assertComplete: Effect.void,
         },
       });
@@ -165,7 +166,7 @@ it.effect.each([
         assert.equal(item.prompt, "Allow this app to access your files?");
         assert.deepEqual(
           item.options?.map((option) => option.decision),
-          ["cancel", "decline", "accept"],
+          ["cancel", "decline", "acceptForSession", "accept"],
         );
 
         const settled = yield* watch(
@@ -360,6 +361,7 @@ it.effect.each(["answer", "dismiss"] as const)(
               }),
             forkSession: () => Effect.die("unused"),
             subagentLaunchToolUseId: () => Effect.succeed(null),
+            subagentModel: () => Effect.succeed(null),
             assertComplete: Effect.void,
           },
         });
