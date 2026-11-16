@@ -75,6 +75,8 @@ describe("parseElicitationForm", () => {
       ),
       [true, true],
     );
+    assert(form.questions.every((question) => question.allowCustomAnswer === true));
+    assert(form.questions.every((question) => question.companionText === undefined));
     assert.deepStrictEqual(form.content({ q0: "Yes", q1: "Only on Fridays" }), {
       q0: "Yes",
       q1__other: "Only on Fridays",
@@ -95,7 +97,7 @@ describe("parseElicitationForm", () => {
     assert.deepStrictEqual(
       multi.questions.map((question) => [question.id, question.required]),
       [
-        ["q0", undefined],
+        ["q0", false],
         ["q0__other", false],
       ],
     );

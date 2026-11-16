@@ -36,7 +36,7 @@ it("undoes group settlement without reopening children that were already settled
   ]);
   expect(plans.map(({ thread }) => thread.id)).toEqual(["parent", "active", "grandchild"]);
   expect(plans.find(({ thread }) => thread.id === "active")?.plan).toEqual([
-    { action: "unsettle" },
+    { action: "unsettle", restoreUnsettledAt: null },
     { action: "pin", orderKey: "a0" },
   ]);
 });

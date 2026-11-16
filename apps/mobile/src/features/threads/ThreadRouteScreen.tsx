@@ -569,6 +569,7 @@ function ThreadRouteContent(
     }
   };
   const routeFocused = useIsFocused();
+  const { panes } = useWorkspacePaneState();
   const threadActions = useThreadListActions(handleThreadActionCompleted);
   const threadMenuNow = useThreadListNow(selectedThread ? [selectedThread] : []);
   const snoozeGateExpiry =

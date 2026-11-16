@@ -232,6 +232,13 @@ export function parseElicitationForm(
       question: text(property.description) ?? message,
       required: required.has(id),
       ...questionMetadata.get(id),
+      ...(companions.has(id)
+        ? {
+            header: text(property.title) ?? `Question ${questions.length + 1}`,
+            allowCustomAnswer: true,
+            companionText: undefined,
+          }
+        : {}),
       options,
       ...(kind === "text" || kind === "number" || companions.has(id)
         ? {}

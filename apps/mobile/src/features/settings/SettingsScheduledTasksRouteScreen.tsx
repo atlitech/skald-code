@@ -753,7 +753,9 @@ function TaskForm({
     // Bound tasks retain this legacy field without requiring its provider to remain installed.
     const modelSelection = followsThreadModel
       ? (draft.task?.modelSelection ?? draft.modelSelection)
-      : withImplicitFastModeSelection(draft.modelSelection, config?.providers ?? []);
+      : draft.modelSelection
+        ? withImplicitFastModeSelection(draft.modelSelection, config?.providers ?? [])
+        : null;
     const schedule = scheduleFromDraft(
       draft.schedule.mode === "webhook" && liveTask?.schedule.type === "webhook"
         ? { ...draft.schedule, signature: liveTask.schedule.signature }
