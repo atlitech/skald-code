@@ -2,7 +2,9 @@ import type { EnvironmentThreadShell } from "@t3tools/client-runtime/state/shell
 import { CommandId, type ThreadId } from "@t3tools/contracts";
 import { useAtomValue } from "@effect/atom-react";
 import { useState } from "react";
-import { FlatList, Pressable, TextInput, View } from "react-native";
+import { LegendList } from "@legendapp/list/react-native";
+import { NativeScrollView } from "../../native/NativeScrollViewMarker";
+import { Pressable, TextInput, View } from "react-native";
 
 import { AppText } from "../../components/ui/AppText";
 import { Button } from "../../components/ui/Button";
@@ -57,7 +59,9 @@ export function ThreadParentSheet(props: {
   };
   return (
     <Sheet title="Move under thread" onClose={props.onClose} dismissDisabled={pending}>
-      <FlatList
+      <LegendList
+        renderScrollComponent={NativeScrollView}
+        extraData={{ pending, allowed, move }}
         data={candidates}
         keyExtractor={(thread) => thread.id}
         contentInsetAdjustmentBehavior="automatic"

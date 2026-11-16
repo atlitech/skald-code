@@ -200,8 +200,10 @@ export function toMcpElicitationResponse(
     return { action: decision };
   }
 
+  // T3 cannot answer these itself. `decline` reads as the user's refusal, and Codex's browser
+  // plugin saves it as a thread-wide site denial; `cancel` leaves no saved decision.
   if (payload.mode === "url") {
-    return { action: "decline" };
+    return { action: "cancel" };
   }
 
   const persist =
@@ -230,7 +232,7 @@ export function toMcpElicitationResponse(
   }
 
   if (form?.required?.some((key) => !Object.hasOwn(content, key))) {
-    return { action: "decline" };
+    return { action: "cancel" };
   }
 
   return {

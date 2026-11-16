@@ -9,9 +9,10 @@ import * as FileSystem from "effect/FileSystem";
 import * as Fiber from "effect/Fiber";
 import * as Path from "effect/Path";
 import * as PlatformError from "effect/PlatformError";
+import * as Stream from "effect/Stream";
 import * as NodePath from "node:path";
 import * as TestClock from "effect/testing/TestClock";
-import { HttpClient, HttpClientResponse } from "effect/http";
+import { HttpClient, HttpClientError, HttpClientResponse } from "effect/http";
 import * as ChildProcess from "effect/process/ChildProcess";
 import * as ChildProcessSpawner from "effect/process/ChildProcessSpawner";
 
@@ -29,6 +30,8 @@ import {
   type PinnedRuntimeProgress,
   prunePinnedRuntimes,
   syncPinnedRuntimeLaunchers,
+  posixLauncherScript,
+  readPosixLauncherTarget,
 } from "./pinnedRuntime.ts";
 import { SERVICE_LAUNCHER_PROTOCOL } from "./serviceProtocol.ts";
 
@@ -615,7 +618,127 @@ it.layer(NodeServices.layer)("ensurePinnedRuntimeInstalled", (it) => {
           validate: () => Effect.die("must not validate a missing archive"),
         }).pipe(Effect.flip);
       assert.isTrue(isUnpublishedRelease(yield* failsWith(404)));
-      assert.isFalse(isUnpublishedRelease(yield* failsWith(500)));
+      assert.isFalse(isUnpublishedRelease(yield* failsWith(403)));
+    }),
+  );
+
+  it.effect("retries a release download that GitHub answers with a gateway timeout", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const baseDir = yield* fs.makeTempDirectoryScoped({ prefix: "t3-pinned-retry-" });
+      const checksums = yield* validChecksums;
+      const requests: string[] = [];
+      const gatewayTimeoutServed = yield* Deferred.make<void>();
+      const install = yield* ensurePinnedRuntimeInstalled({
+        baseDir,
+        version,
+        fs,
+        path,
+        platform: "linux",
+        arch: "x64",
+        httpClient: HttpClient.make((request) => {
+          requests.push(request.url);
+          const isChecksums = request.url.endsWith("/SHA256SUMS");
+          if (requests.length === 1) {
+            Deferred.doneUnsafe(gatewayTimeoutServed, Effect.void);
+            return Effect.succeed(
+              HttpClientResponse.fromWeb(request, new Response("", { status: 504 })),
+            );
+          }
+          return Effect.succeed(
+            HttpClientResponse.fromWeb(
+              request,
+              new Response(isChecksums ? checksums : archiveBytes),
+            ),
+          );
+        }),
+        runner: extractingRunner(fs, path),
+        validate: () => Effect.void,
+      }).pipe(Effect.forkScoped);
+      yield* Deferred.await(gatewayTimeoutServed);
+      yield* TestClock.adjust(Duration.seconds(2));
+      const paths = yield* Fiber.join(install);
+      assert.equal(yield* fs.readFileString(paths.sentinelPath), `${version}\n`);
+      assert.equal(requests.filter((url) => url.endsWith("/SHA256SUMS")).length, 2);
+    }),
+  );
+
+  it.effect("retries a release archive whose body fails after the host answered", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const baseDir = yield* fs.makeTempDirectoryScoped({ prefix: "t3-pinned-retry-body-" });
+      const checksums = yield* validChecksums;
+      let archiveRequests = 0;
+      const archiveRequested = yield* Deferred.make<void>();
+      const install = yield* ensurePinnedRuntimeInstalled({
+        baseDir,
+        version,
+        fs,
+        path,
+        platform: "linux",
+        arch: "x64",
+        httpClient: HttpClient.make((request) => {
+          const isChecksums = request.url.endsWith("/SHA256SUMS");
+          const response = HttpClientResponse.fromWeb(
+            request,
+            new Response(isChecksums ? checksums : archiveBytes),
+          );
+          if (isChecksums || ++archiveRequests > 1) return Effect.succeed(response);
+          const failingBody = Stream.concat(
+            Stream.make(archiveBytes.slice(0, 4)),
+            Stream.fail(
+              new HttpClientError.HttpClientError({
+                reason: new HttpClientError.DecodeError({ request, response }),
+              }),
+            ),
+          );
+          Deferred.doneUnsafe(archiveRequested, Effect.void);
+          // TestClock follows the work a woken sleep starts, so one adjust reaches the retry wait.
+          return Effect.sleep("1 second").pipe(
+            Effect.as<HttpClientResponse.HttpClientResponse>(
+              Object.create(response, { stream: { value: failingBody } }),
+            ),
+          );
+        }),
+        runner: extractingRunner(fs, path),
+        validate: () => Effect.void,
+      }).pipe(Effect.forkScoped);
+      yield* Deferred.await(archiveRequested);
+      yield* TestClock.adjust(Duration.seconds(3));
+      const paths = yield* Fiber.join(install);
+      assert.equal(yield* fs.readFileString(paths.sentinelPath), `${version}\n`);
+      assert.equal(archiveRequests, 2);
+    }),
+  );
+
+  it.effect("fails at once when the release host cannot be reached", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const baseDir = yield* fs.makeTempDirectoryScoped({ prefix: "t3-pinned-offline-" });
+      let requests = 0;
+      const error = yield* ensurePinnedRuntimeInstalled({
+        baseDir,
+        version,
+        fs,
+        path,
+        platform: "linux",
+        arch: "x64",
+        httpClient: HttpClient.make((request) => {
+          requests += 1;
+          return Effect.fail(
+            new HttpClientError.HttpClientError({
+              reason: new HttpClientError.TransportError({ request }),
+            }),
+          );
+        }),
+        runner: extractingRunner(fs, path),
+        validate: () => Effect.die("must not validate without a download"),
+      }).pipe(Effect.flip);
+      assert.instanceOf(error, PinnedRuntimeInstallError);
+      assert.equal(requests, 1);
     }),
   );
 
@@ -965,6 +1088,97 @@ it.layer(NodeServices.layer)("prunePinnedRuntimes", (it) => {
   );
 
   it.effect.each([
+    { name: "its directory is on PATH", onPath: true, recorded: false, linkedHome: false },
+    {
+      name: "an earlier prune recorded its entry as a launcher",
+      onPath: false,
+      recorded: true,
+      linkedHome: false,
+    },
+    {
+      name: "its real directory in a symlinked home is on PATH",
+      onPath: true,
+      recorded: false,
+      linkedHome: true,
+    },
+  ])("removes a runtime only its own entry names when $name", ({ onPath, recorded, linkedHome }) =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const { baseDir, versionsDir } = yield* setup(["1.0.0", "1.1.0"]);
+      const binDir = path.join(baseDir, "bin");
+      yield* fs.makeDirectory(binDir);
+      yield* fs.symlink(path.join(versionsDir, "1.1.0", "t3"), path.join(binDir, "t3"));
+      const ownDir = path.join(versionsDir, "1.0.0");
+      if (recorded) {
+        yield* fs.writeFileString(
+          path.join(baseDir, "runtime", "launchers"),
+          `${path.join(ownDir, "t3")}\n`,
+        );
+      }
+
+      const home = linkedHome
+        ? path.join(yield* fs.makeTempDirectoryScoped({ prefix: "t3-pinned-link-" }), "home")
+        : baseDir;
+      if (linkedHome) yield* fs.symlink(baseDir, home);
+
+      // The launch agent puts the running runtime's own directory on PATH.
+      const removed = yield* prunePinnedRuntimes({ baseDir: home, keep: ["2.0.0"] }).pipe(
+        Effect.provideService(
+          ProcessRunner.ProcessRunner,
+          lsofRunner("p1\nftxt\nn/sbin/launchd\n"),
+        ),
+        Effect.provideService(HostProcess.Platform, "darwin"),
+        Effect.provideService(HostProcess.Environment, {
+          T3CODE_INSTALL_BIN_DIR: binDir,
+          PATH: onPath ? `${ownDir}:/usr/bin:/bin` : "/usr/bin:/bin",
+        }),
+      );
+      assert.deepEqual(removed, ["1.0.0"]);
+    }),
+  );
+
+  it.effect.each([
+    { name: "a launcher inside the versions directory", via: "bin" as const },
+    { name: "a PATH directory linked to its version directory", via: "linked dir" as const },
+    {
+      name: "a PATH directory in the versions directory linked to its version directory",
+      via: "linked versions dir" as const,
+    },
+  ])("keeps a runtime $name names", ({ via }) =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const { baseDir, versionsDir } = yield* setup(["1.0.0", "1.1.0"]);
+      let pathDirs = "/usr/bin:/bin";
+      if (via === "bin") {
+        // The installer accepts any bin directory, including one under the versions directory.
+        const binDir = path.join(versionsDir, "bin");
+        yield* fs.makeDirectory(binDir);
+        yield* fs.symlink(path.join(versionsDir, "1.0.0", "t3"), path.join(binDir, "t3"));
+        yield* fs.writeFileString(
+          path.join(baseDir, "runtime", "launchers"),
+          `${path.join(binDir, "t3")}\n`,
+        );
+      } else {
+        const linkedDir = path.join(via === "linked dir" ? baseDir : versionsDir, "current");
+        yield* fs.symlink(path.join(versionsDir, "1.0.0"), linkedDir);
+        pathDirs = `${linkedDir}:${pathDirs}`;
+      }
+
+      const removed = yield* prunePinnedRuntimes({ baseDir, keep: ["2.0.0"] }).pipe(
+        Effect.provideService(
+          ProcessRunner.ProcessRunner,
+          lsofRunner("p1\nftxt\nn/sbin/launchd\n"),
+        ),
+        Effect.provideService(HostProcess.Platform, "darwin"),
+        Effect.provideService(HostProcess.Environment, { PATH: pathDirs }),
+      );
+      assert.deepEqual(removed, ["1.1.0"]);
+    }),
+  );
+
+  it.effect.each([
     // An interrupted append cut this record short.
     { name: "an unterminated launcher record", recorded: "/opt/t", cut: "" },
     // Another process's append is cut short after prune reads the records.
@@ -1091,9 +1305,13 @@ it.layer(NodeServices.layer)("prunePinnedRuntimes", (it) => {
 });
 
 it.layer(NodeServices.layer)("syncPinnedRuntimeLaunchers", (it) => {
-  it.effect.each(["linux", "win32"] as const)(
-    "continues past an unwritable launcher and preserves foreign installs on %s",
-    (platform) =>
+  it.effect.each([
+    { platform: "linux", script: false },
+    { platform: "linux", script: true },
+    { platform: "win32", script: false },
+  ] as const)(
+    "continues past an unwritable launcher and preserves foreign installs on $platform (script: $script)",
+    ({ platform, script }) =>
       Effect.gen(function* () {
         const fs = yield* FileSystem.FileSystem;
         const path = yield* Path.Path;
@@ -1121,7 +1339,9 @@ it.layer(NodeServices.layer)("syncPinnedRuntimeLaunchers", (it) => {
           yield* fs.makeDirectory(path.dirname(launcher));
           yield* platform === "win32"
             ? fs.writeFileString(launcher, `@echo off\r\n"${target}" %*`)
-            : fs.symlink(target, launcher);
+            : script
+              ? fs.writeFileString(launcher, posixLauncherScript(target))
+              : fs.symlink(target, launcher);
         }
         yield* fs.makeDirectory(path.dirname(copy));
         yield* fs.writeFileString(copy, "a standalone executable");
@@ -1155,7 +1375,9 @@ it.layer(NodeServices.layer)("syncPinnedRuntimeLaunchers", (it) => {
             ? fs
                 .readFileString(launcher)
                 .pipe(Effect.map((contents) => /^"([^"]+)"/m.exec(contents)?.[1]))
-            : fs.readLink(launcher);
+            : script
+              ? readPosixLauncherTarget(launcher)
+              : fs.readLink(launcher);
         assert.equal(yield* targetOf(blocked), old.entryPath);
         assert.equal(yield* targetOf(registered), current.entryPath);
         assert.equal(yield* targetOf(discovered), current.entryPath);

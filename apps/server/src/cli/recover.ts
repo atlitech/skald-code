@@ -13,6 +13,7 @@ import * as BootService from "../cloud/bootService.ts";
 import {
   isPinnedRuntimeInstalled,
   pinnedRuntimePaths,
+  resolveLauncherPath,
   pinnedRuntimeVersionsDir,
 } from "../cloud/pinnedRuntime.ts";
 import {
@@ -31,7 +32,7 @@ import * as ProcessRunner from "../processRunner.ts";
 import { isProcessAlive, readPersistedServerRuntimeStateStrict } from "../serverRuntimeState.ts";
 import { projectLocationFlags, resolveCliAuthConfig } from "./config.ts";
 import * as CliService from "./service.ts";
-import { findForegroundServer, repointLauncher, resolveLauncherPath } from "./update.ts";
+import { findForegroundServer, repointLauncher } from "./update.ts";
 
 export class CliRecoverError extends Schema.TaggedError<CliRecoverError>()("CliRecoverError", {
   reason: Schema.String,

@@ -73,6 +73,7 @@ it.effect.each([
                 messages: Stream.fromQueue(sdkMessages),
                 offer: () => Effect.void,
                 setModel: () => Effect.void,
+                renameSession: () => Effect.void,
                 applyFlagSettings: () => Effect.void,
                 setPermissionMode: () => Effect.void,
                 backgroundTasks: () => Effect.succeed(false),
@@ -87,6 +88,7 @@ it.effect.each([
             }),
           forkSession: () => Effect.die("unused"),
           subagentLaunchToolUseId: () => Effect.succeed(null),
+          subagentModel: () => Effect.succeed(null),
           assertComplete: Effect.void,
         },
       });
@@ -164,9 +166,20 @@ it.effect.each([
         assert.equal(item.prompt, "Allow this app to access your files?");
         assert.deepEqual(
           item.options?.map((option) => option.decision),
-          ["cancel", "decline", "accept"],
+          ["cancel", "decline", "acceptForSession", "accept"],
         );
 
+        const requestSettled = yield* watch(
+          (event) =>
+            event.type === "runtime-request.updated" &&
+            event.payload.id === request.id &&
+            event.payload.status ===
+              (resolution === "SDK abort" ||
+              resolution === "SDK abort after response" ||
+              resolution === "interrupt"
+                ? "cancelled"
+                : "resolved"),
+        );
         const settled = yield* watch(
           (event) =>
             event.type === "turn-item.updated" &&
@@ -206,6 +219,9 @@ it.effect.each([
             yield* Fiber.join(cancelled);
           }
         }
+        if (resolution === "SDK abort" || resolution === "SDK abort after response") {
+          yield* Fiber.join(requestSettled);
+        }
         yield* worker.drain();
         const sdkResponse = yield* Fiber.join(response);
         const adapterCancelled =
@@ -214,6 +230,7 @@ it.effect.each([
           resolution === "interrupt";
         assert.equal(sdkResponse?.action, adapterCancelled ? "cancel" : resolution);
         yield* Fiber.join(settled);
+        yield* Fiber.join(requestSettled);
         const after = yield* orchestrator.getThreadProjection(threadId);
         const resolved = after.runtimeRequests.find((candidate) => candidate.id === request.id)!;
         assert.equal(resolved.status, adapterCancelled ? "cancelled" : "resolved");
@@ -256,7 +273,7 @@ it.effect.each([
         assert.equal(staleResponse._tag, "OrchestratorDispatchError");
         if (resolution === "SDK abort after response") {
           const finished = yield* watch(
-            (event) => event.type === "run.updated" && event.payload.status === "waiting",
+            (event) => event.type === "run-attempt.updated" && event.payload.status === "completed",
           );
           yield* Queue.offer(sdkMessages, {
             type: "result",
@@ -344,6 +361,7 @@ it.effect.each(["answer", "dismiss"] as const)(
                   messages: Stream.fromQueue(sdkMessages),
                   offer: () => Effect.void,
                   setModel: () => Effect.void,
+                  renameSession: () => Effect.void,
                   applyFlagSettings: () => Effect.void,
                   setPermissionMode: () => Effect.void,
                   backgroundTasks: () => Effect.succeed(false),
@@ -358,6 +376,7 @@ it.effect.each(["answer", "dismiss"] as const)(
               }),
             forkSession: () => Effect.die("unused"),
             subagentLaunchToolUseId: () => Effect.succeed(null),
+            subagentModel: () => Effect.succeed(null),
             assertComplete: Effect.void,
           },
         });

@@ -3,7 +3,7 @@
 # scratch T3 home, upgrades between two admitted fork releases, declares the
 # upgrade failed after it wrote new work, recovers with `t3 recover`, and
 # writes RECOVERY.json (record.ts) and the drilled home as it stood right
-# after the recovery (drilled-home.tar.gz, which keeps the launcher symlink).
+# after the recovery (drilled-home.tar.gz, which keeps the launcher).
 #
 #   1. The target's ADMISSION.json names the prior. Both archives are
 #      downloaded and verified with their SHA256SUMS, and the prior's

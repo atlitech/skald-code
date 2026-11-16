@@ -150,7 +150,7 @@ describe("Codex MCP elicitation approvals", () => {
     } satisfies EffectCodexSchema.McpServerElicitationRequestParams;
 
     NodeAssert.deepStrictEqual(toMcpElicitationResponse(inputRequest, "accept"), {
-      action: "decline",
+      action: "cancel",
     });
   });
 
@@ -206,7 +206,7 @@ describe("Codex MCP elicitation approvals", () => {
     } satisfies EffectCodexSchema.McpServerElicitationRequestParams;
 
     NodeAssert.deepStrictEqual(toMcpElicitationResponse(urlRequest, "accept"), {
-      action: "decline",
+      action: "cancel",
     });
   });
 

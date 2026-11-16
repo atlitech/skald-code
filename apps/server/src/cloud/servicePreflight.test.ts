@@ -295,6 +295,20 @@ it.layer(NodeServices.layer)("runServicePreflight", (it) => {
 });
 
 it.layer(NodeServices.layer)("service preflight database", (it) => {
+  // regression: #34502 every installed launcher was protocol 3, so protocol 4 blocked every remote update
+  it.effect.each([3, SERVICE_LAUNCHER_PROTOCOL])(
+    "is ready under launcher protocol %i and reports it back",
+    (launcherProtocol) =>
+      Effect.gen(function* () {
+        const result = yield* runServicePreflight({
+          databasePath: "/missing/state.sqlite",
+          launcherProtocol,
+          version: "9.8.7",
+        });
+        expect(result).toEqual({ status: "ready", version: "9.8.7", launcherProtocol });
+      }),
+  );
+
   it.effect("keeps a fixed snapshot while another connection writes between backup pages", () =>
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
@@ -367,6 +381,35 @@ it.layer(NodeServices.layer)("service preflight database", (it) => {
         runServicePreflight({ databasePath, launcherProtocol: SERVICE_LAUNCHER_PROTOCOL });
 
       expect(databaseMigrationHead(databasePath)).toBe(BUILD_MIGRATION_HEAD);
+
+      db.prepare("UPDATE effect_sql_migrations SET name = ? WHERE migration_id = ?").run(
+        "ForkMigration",
+        BUILD_MIGRATION_HEAD,
+      );
+      const conflict = yield* preflight();
+      expect(conflict.status).toBe("blocked");
+      expect(conflict.status === "blocked" ? conflict.reason : "").toContain("ForkMigration");
+      db.prepare("UPDATE effect_sql_migrations SET name = ? WHERE migration_id = ?").run(
+        migrationManifest.at(-1)![1],
+        BUILD_MIGRATION_HEAD,
+      );
+
+      // Startup reconciles this V2 preview history, so it must not block an update.
+      const preview = path.join(path.dirname(databasePath), "preview.sqlite");
+      yield* seedOlderDatabase(preview, Effect.void, 56);
+      const previewDb = new NodeSqlite.DatabaseSync(preview);
+      previewDb.exec(`
+        DELETE FROM effect_sql_migrations WHERE migration_id = 54;
+        UPDATE effect_sql_migrations SET migration_id = 54 WHERE migration_id = 55;
+        UPDATE effect_sql_migrations SET migration_id = 55 WHERE migration_id = 56;
+      `);
+      previewDb.close();
+      expect(
+        (yield* runServicePreflight({
+          databasePath: preview,
+          launcherProtocol: SERVICE_LAUNCHER_PROTOCOL,
+        })).status,
+      ).toBe("ready");
 
       const newerId = Math.max(...migrationManifest.map(([id]) => id)) + 1;
       insert.run(newerId, "FromNightly");

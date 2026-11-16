@@ -89,6 +89,9 @@ export function resolvePendingUserInputAnswer(
   if (customAnswer !== null && customAnswer.length > 0) {
     return customAnswer;
   }
+  if (question.required === false && question.options.length === 0) {
+    return "";
+  }
 
   const selectedOptionValues = normalizeSelectedOptionValues(question, draft?.selectedOptionValues);
   if (question.multiSelect) {

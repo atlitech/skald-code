@@ -56,6 +56,15 @@ function stubT3(config: StubConfig) {
     crypto.createHash("sha256").update(fs.readFileSync(file)).digest("hex");
   const compactUtc = () => new Date("2026-10-01T12:00:00.000Z").toISOString().replace(/[-:.]/g, "");
   const repoint = (version: string) => {
+    const registry = path.join(home, "runtime", "launchers");
+    if (fs.existsSync(registry)) {
+      for (const launcher of fs.readFileSync(registry, "utf8").trim().split("\n")) {
+        fs.writeFileSync(
+          launcher,
+          `#!/bin/sh\nexec '${path.join(versions, version, "t3")}' "$@"\n`,
+        );
+      }
+    }
     if (fs.lstatSync(self).isSymbolicLink()) {
       fs.rmSync(self);
       fs.symlinkSync(path.join(versions, version, "t3"), self);
@@ -483,16 +492,16 @@ describe.runIf(hostPlatform === "linux" || hostPlatform === "darwin")("recovery 
       expect(record.recoveryPoint.record.from.version).toBe(PRIOR);
       expect(record.readbacks.restored.environmentId).toBe(record.preUpgradeEnvironmentId);
       expect(record.displacedPath.startsWith(`${record.home.path}/recovery/displaced/`)).toBe(true);
-      expect(await NodeFSP.readlink(NodePath.join(fixture.root, "work/drill/bin/t3"))).toBe(
-        NodePath.join(home(fixture), "runtime/versions", PRIOR, "t3"),
-      );
-      // The drilled home keeps the launcher as a symlink.
+      expect(
+        await NodeFSP.readFile(NodePath.join(fixture.root, "work/drill/bin/t3"), "utf8"),
+      ).toContain(NodePath.join(home(fixture), "runtime/versions", PRIOR, "t3"));
+      // The drilled home keeps the executable launcher.
       const listing = NodeChildProcess.execFileSync(
         "tar",
         ["-tvzf", NodePath.join(fixture.root, "out/drilled-home.tar.gz")],
         { encoding: "utf8" },
       );
-      expect(listing).toMatch(/^l.* bin\/t3 -> /m);
+      expect(listing).toMatch(/^-rwx.* bin\/t3$/m);
       expect(listing).toContain("home/userdata/statev2.sqlite");
 
       // A fresh verify run re-observes that home and passes the record.

@@ -273,6 +273,8 @@ export const ScheduledTaskListResult = Schema.Struct({
   tasks: ForwardCompatibleArray(ScheduledTask),
   /** Bound tasks follow the thread's model; absent on servers that use the saved model. */
   followsThreadModelSelection: Schema.optionalKey(Schema.Boolean),
+  /** The server's IANA zone for fixed-time schedules. Absent from older servers. */
+  timeZone: Schema.optional(TrimmedNonEmptyString),
 });
 export type ScheduledTaskListResult = typeof ScheduledTaskListResult.Type;
 

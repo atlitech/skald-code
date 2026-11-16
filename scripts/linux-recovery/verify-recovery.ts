@@ -21,6 +21,7 @@ import * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
 import { Command, Flag } from "effect/cli";
 
+import { readLauncherTarget } from "./launcher-target.ts";
 import { POST_UPGRADE_THREAD_ID } from "./post-upgrade-thread.ts";
 import {
   actionProblems,
@@ -319,7 +320,7 @@ export const runVerification = Effect.fn("runVerification")(function* (options: 
   const pointRecordText = yield* text(path.join(pointDir, "recovery.json"));
   const pointRecord =
     pointRecordText === undefined ? undefined : yield* attempt(decodeJson(pointRecordText));
-  const launcherTarget = yield* attempt(fs.readLink(options.launcher));
+  const launcherTarget = yield* Effect.sync(() => readLauncherTarget(options.launcher));
   const launcherFile = launcherTarget === undefined ? undefined : inHome(launcherTarget);
   const displacedDir = inHome(record.displacedPath);
   const readbackText = yield* text(options.readback);
