@@ -7,6 +7,7 @@ import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 import * as NodeProcess from "node:process";
 import * as NodeUtil from "node:util";
+import * as NodeTimersPromises from "node:timers/promises";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 import { decodeReleaseManifestJson } from "./fork-release-manifest.ts";
@@ -33,11 +34,11 @@ import {
 } from "./lib/fork-mobile-eas.ts";
 
 import {
-  ActionsArtifact,
   LocalBuildMetadata,
   assertLocalBuild,
   assertRetainedNative,
-  selectNativeArtifact,
+  lookupNativeArtifact,
+  waitForNativeArtifact,
   shouldUploadToApple,
 } from "./lib/fork-mobile-local.ts";
 
@@ -413,28 +414,22 @@ async function prepare(platform: Platform, sha: string, tag: string, out: string
   await write(out, platformIntent);
 }
 
-const decodeArtifactPages = Schema.decodeUnknownSync(
-  Schema.Array(Schema.Struct({ artifacts: Schema.Array(ActionsArtifact) })),
-);
 const decodeBaseline = Schema.decodeUnknownSync(NativeBaseline);
 const decodeLocalMetadata = Schema.decodeUnknownSync(LocalBuildMetadata);
 async function output(name: string, value: string) {
   await NodeFSP.appendFile(required("GITHUB_OUTPUT"), `${name}=${value}\n`);
 }
 async function nativeArtifact(reference: GitHubNativeBuild, allowExpired = false) {
-  const pages = decodeArtifactPages(
-    json(
-      await run("gh", [
-        "api",
-        `${repoPath}/actions/runs/${reference.runId}/artifacts?per_page=100`,
-        "--paginate",
-        "--slurp",
-      ]),
-    ),
-  );
-  return selectNativeArtifact(
-    pages.flatMap((page) => page.artifacts),
+  return lookupNativeArtifact(
     reference,
+    async (path, paginate) =>
+      json(
+        await run("gh", [
+          "api",
+          `${repoPath}/${path}`,
+          ...(paginate ? ["--paginate", "--slurp"] : []),
+        ]),
+      ),
     allowExpired,
   );
 }
@@ -648,14 +643,23 @@ async function registerNative(
   dir: string,
   intentFile?: string,
   publishedAt?: string,
+  artifactId?: string,
 ) {
   const baseline = decodeBaseline(
     json(await NodeFSP.readFile(NodePath.join(dir, "baseline.json"), "utf8")),
   );
   if (!baseline.github || baseline.sourceSha !== sha || baseline.releaseTag !== tag)
     throw new Error("Invalid local build provenance.");
-  const artifact = await nativeArtifact(baseline.github);
-  if (!artifact) throw new Error("Verified native artifact has not been retained by GitHub.");
+  if (artifactId && !/^[1-9]\d*$/.test(artifactId))
+    throw new Error("Invalid uploaded artifact ID.");
+  if (artifactId && baseline.github.artifactId && artifactId !== baseline.github.artifactId)
+    throw new Error("Uploaded artifact ID differs from the retained build.");
+  const reference = { ...baseline.github, ...(artifactId ? { artifactId } : {}) };
+  const artifact = await waitForNativeArtifact(
+    reference,
+    () => nativeArtifact(reference),
+    NodeTimersPromises.setTimeout,
+  );
   const stored = { ...baseline, github: { ...baseline.github, artifactId: String(artifact.id) } };
   await record({
     schemaVersion: 1,
@@ -1253,6 +1257,7 @@ async function main() {
       values.dir!,
       values.intent,
       release.publishedAt,
+      NodeProcess.env.NATIVE_ARTIFACT_ID,
     );
   } else if (command === "deliver")
     await deliver(decodePlatform(values.platform), tag, values.dir!, values["rebuild-native"]!);

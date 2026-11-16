@@ -491,6 +491,7 @@ jobs:
         run: node scripts/fork-mobile-release.ts android --sha "$SHA" --tag "$TAG" --intent "$RUNNER_TEMP/mobile-intent.json" --dir "$RUNNER_TEMP/release-android"
 
       - name: Retain verified native bytes
+        id: retained-native
         if: steps.native.outputs.upload-native == 'true'
         uses: actions/upload-artifact@v7
         with:
@@ -503,6 +504,8 @@ jobs:
 
       - name: Record durable native provenance
         if: steps.native.outputs.native == 'true'
+        env:
+          NATIVE_ARTIFACT_ID: ${{ steps.retained-native.outputs.artifact-id }}
         run: node scripts/fork-mobile-release.ts register-native --platform android --sha "$SHA" --tag "$TAG" --dir "$RUNNER_TEMP/release-android" --intent "$RUNNER_TEMP/mobile-intent.json"
 
       - name: Upload newly verified APK

@@ -507,6 +507,13 @@ describe("fork mobile delivery and retry", () => {
     expect(runsOn(job("mobile-plan"))).toContain("'blacksmith-8vcpu-ubuntu-2404'");
     expect(job("mobile-plan").join("\n")).toContain('prepare --platform "$PLATFORM"');
     expect(job("build-android").join("\n")).toContain("register-native --platform android");
+    for (const nativeJob of [delivery, job("build-android").join("\n")]) {
+      expect(nativeJob).toContain("id: retained-native");
+      expect(nativeJob).toContain(
+        "NATIVE_ARTIFACT_ID: ${{ steps.retained-native.outputs.artifact-id }}",
+      );
+      expect(nativeJob).not.toContain("--artifact-id");
+    }
     expect(jobMap(job("build-android"), "permissions").get("actions")).toBe("read");
   });
 

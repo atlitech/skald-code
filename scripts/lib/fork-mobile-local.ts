@@ -186,3 +186,76 @@ export function assertRetainedNative(
     throw new Error("Native artifact digest mismatch.");
   }
 }
+
+export function artifactLookupHttpStatus(error: unknown): number | undefined {
+  if (typeof error !== "object" || error === null || !("stderr" in error)) return undefined;
+  const stderr = String(error.stderr);
+  const status = /HTTP (\d{3})/.exec(stderr)?.[1];
+  return status === undefined ? undefined : Number(status);
+}
+
+export async function waitForNativeArtifact(
+  reference: GitHubNativeBuild,
+  lookup: () => Promise<ActionsArtifact | undefined>,
+  wait: (milliseconds: number) => Promise<unknown>,
+): Promise<ActionsArtifact> {
+  const delays = [2_000, 4_000, 8_000, 16_000, 30_000];
+  for (let attempt = 0; attempt <= delays.length; attempt++) {
+    try {
+      const artifact = await lookup();
+      if (artifact !== undefined) return artifact;
+    } catch (error) {
+      const status = artifactLookupHttpStatus(error);
+      const rateLimited =
+        status === 403 &&
+        typeof error === "object" &&
+        error !== null &&
+        "stderr" in error &&
+        /rate limit/i.test(String(error.stderr));
+      if (
+        status !== 404 &&
+        status !== 429 &&
+        !(status !== undefined && status >= 500 && status <= 599) &&
+        !rateLimited
+      )
+        throw error;
+    }
+    if (attempt < delays.length) await wait(delays[attempt]!);
+  }
+  throw new Error(
+    `GitHub artifact ${reference.artifactId ?? reference.artifactName} in run ${reference.runId} was unavailable after 6 attempts over 60 seconds of backoff. Re-run failed jobs to recover the retained build; do not rebuild or allocate another native version.`,
+  );
+}
+
+const decodeArtifact = Schema.decodeUnknownSync(ActionsArtifact);
+const decodeArtifactPages = Schema.decodeUnknownSync(
+  Schema.Array(Schema.Struct({ artifacts: Schema.Array(ActionsArtifact) })),
+);
+
+export async function lookupNativeArtifact(
+  reference: GitHubNativeBuild,
+  request: (path: string, paginate: boolean) => Promise<unknown>,
+  allowExpired = false,
+) {
+  if (reference.artifactId) {
+    let response: unknown;
+    try {
+      response = await request(`actions/artifacts/${reference.artifactId}`, false);
+    } catch (error) {
+      if (artifactLookupHttpStatus(error) === 404) return undefined;
+      throw error;
+    }
+    const artifact = decodeArtifact(response);
+    if (artifact.name !== reference.artifactName || String(artifact.id) !== reference.artifactId)
+      throw new Error("Native artifact identity differs from the retained build.");
+    return selectNativeArtifact([artifact], reference, allowExpired);
+  }
+  const pages = decodeArtifactPages(
+    await request(`actions/runs/${reference.runId}/artifacts?per_page=100`, true),
+  );
+  return selectNativeArtifact(
+    pages.flatMap((page) => page.artifacts),
+    reference,
+    allowExpired,
+  );
+}
