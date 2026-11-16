@@ -506,7 +506,7 @@ jobs:
         if: steps.native.outputs.native == 'true'
         env:
           NATIVE_ARTIFACT_ID: ${{ steps.retained-native.outputs.artifact-id }}
-        run: node scripts/fork-mobile-release.ts register-native --platform android --sha "$SHA" --tag "$TAG" --dir "$RUNNER_TEMP/release-android" --intent "$RUNNER_TEMP/mobile-intent.json" --artifact-id "$NATIVE_ARTIFACT_ID"
+        run: node scripts/fork-mobile-release.ts register-native --platform android --sha "$SHA" --tag "$TAG" --dir "$RUNNER_TEMP/release-android" --intent "$RUNNER_TEMP/mobile-intent.json"
 
       - name: Upload newly verified APK
         if: steps.native.outputs.native == 'true'

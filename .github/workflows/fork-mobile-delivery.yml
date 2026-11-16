@@ -122,9 +122,10 @@ jobs:
 
       - name: Record durable native provenance
         if: matrix.platform == 'ios' && steps.native.outputs.native == 'true'
+        # Older release checkouts ignore this variable; a new CLI flag would break retries.
         env:
           NATIVE_ARTIFACT_ID: ${{ steps.retained-native.outputs.artifact-id }}
-        run: node scripts/fork-mobile-release.ts register-native --platform ios --tag "$TAG" --dir "$RUNNER_TEMP/mobile-native" --artifact-id "$NATIVE_ARTIFACT_ID"
+        run: node scripts/fork-mobile-release.ts register-native --platform ios --tag "$TAG" --dir "$RUNNER_TEMP/mobile-native"
 
       - name: Upload exact IPA and reconcile TestFlight availability
         if: matrix.platform == 'ios'

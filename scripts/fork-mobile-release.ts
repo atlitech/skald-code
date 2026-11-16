@@ -34,12 +34,10 @@ import {
 } from "./lib/fork-mobile-eas.ts";
 
 import {
-  ActionsArtifact,
   LocalBuildMetadata,
   assertLocalBuild,
   assertRetainedNative,
-  selectNativeArtifact,
-  artifactLookupHttpStatus,
+  lookupNativeArtifact,
   waitForNativeArtifact,
   shouldUploadToApple,
 } from "./lib/fork-mobile-local.ts";
@@ -416,42 +414,22 @@ async function prepare(platform: Platform, sha: string, tag: string, out: string
   await write(out, platformIntent);
 }
 
-const decodeArtifact = Schema.decodeUnknownSync(ActionsArtifact);
-const decodeArtifactPages = Schema.decodeUnknownSync(
-  Schema.Array(Schema.Struct({ artifacts: Schema.Array(ActionsArtifact) })),
-);
 const decodeBaseline = Schema.decodeUnknownSync(NativeBaseline);
 const decodeLocalMetadata = Schema.decodeUnknownSync(LocalBuildMetadata);
 async function output(name: string, value: string) {
   await NodeFSP.appendFile(required("GITHUB_OUTPUT"), `${name}=${value}\n`);
 }
 async function nativeArtifact(reference: GitHubNativeBuild, allowExpired = false) {
-  if (reference.artifactId) {
-    let response: string;
-    try {
-      response = await run("gh", ["api", `${repoPath}/actions/artifacts/${reference.artifactId}`]);
-    } catch (error) {
-      if (artifactLookupHttpStatus(error) === 404) return undefined;
-      throw error;
-    }
-    const artifact = decodeArtifact(json(response));
-    if (artifact.name !== reference.artifactName || String(artifact.id) !== reference.artifactId)
-      throw new Error("Native artifact identity differs from the retained build.");
-    return selectNativeArtifact([artifact], reference, allowExpired);
-  }
-  const pages = decodeArtifactPages(
-    json(
-      await run("gh", [
-        "api",
-        `${repoPath}/actions/runs/${reference.runId}/artifacts?per_page=100`,
-        "--paginate",
-        "--slurp",
-      ]),
-    ),
-  );
-  return selectNativeArtifact(
-    pages.flatMap((page) => page.artifacts),
+  return lookupNativeArtifact(
     reference,
+    async (path, paginate) =>
+      json(
+        await run("gh", [
+          "api",
+          `${repoPath}/${path}`,
+          ...(paginate ? ["--paginate", "--slurp"] : []),
+        ]),
+      ),
     allowExpired,
   );
 }
@@ -1219,7 +1197,6 @@ async function main() {
       dir: { type: "string" },
       platform: { type: "string" },
       force: { type: "string", default: "none" },
-      "artifact-id": { type: "string" },
       "rebuild-native": { type: "boolean", default: false },
     },
   });
@@ -1280,7 +1257,7 @@ async function main() {
       values.dir!,
       values.intent,
       release.publishedAt,
-      values["artifact-id"],
+      NodeProcess.env.NATIVE_ARTIFACT_ID,
     );
   } else if (command === "deliver")
     await deliver(decodePlatform(values.platform), tag, values.dir!, values["rebuild-native"]!);

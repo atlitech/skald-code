@@ -512,7 +512,7 @@ describe("fork mobile delivery and retry", () => {
       expect(nativeJob).toContain(
         "NATIVE_ARTIFACT_ID: ${{ steps.retained-native.outputs.artifact-id }}",
       );
-      expect(nativeJob).toContain('--artifact-id "$NATIVE_ARTIFACT_ID"');
+      expect(nativeJob).not.toContain("--artifact-id");
     }
     expect(jobMap(job("build-android"), "permissions").get("actions")).toBe("read");
   });

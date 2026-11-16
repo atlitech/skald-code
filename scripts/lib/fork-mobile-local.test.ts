@@ -1,10 +1,11 @@
-import { assert, it } from "@effect/vitest";
+import { assert, expect, it } from "@effect/vitest";
 import {
   publicLocalMetadata,
   assertLocalBuild,
   assertRetainedNative,
   selectNativeArtifact,
   waitForNativeArtifact,
+  lookupNativeArtifact,
   shouldUploadToApple,
 } from "./fork-mobile-local.ts";
 
@@ -301,4 +302,106 @@ it("does not retry invalid provenance, expired artifacts, or permission failures
     assert.equal(calls, 1);
     assert.equal(waits, 0);
   }
+});
+
+it("fetches an uploaded artifact by ID and uses paginated listing only for legacy references", async () => {
+  const reference = { runId: "42", runAttempt: "1", workflowSha, artifactName: "native" };
+  const artifact = {
+    id: 77,
+    name: "native",
+    expired: false,
+    workflow_run: { id: 42, head_sha: workflowSha },
+  };
+  const requests: Array<[string, boolean]> = [];
+  const direct = await lookupNativeArtifact(
+    { ...reference, artifactId: "77" },
+    async (path, paginate) => {
+      requests.push([path, paginate]);
+      return artifact;
+    },
+  );
+  assert.deepEqual(direct, artifact);
+  assert.deepEqual(requests, [["actions/artifacts/77", false]]);
+  requests.length = 0;
+  const legacy = await lookupNativeArtifact(reference, async (path, paginate) => {
+    requests.push([path, paginate]);
+    return [{ artifacts: [] }, { artifacts: [artifact] }];
+  });
+  assert.deepEqual(legacy, artifact);
+  assert.deepEqual(requests, [["actions/runs/42/artifacts?per_page=100", true]]);
+});
+
+it("validates direct artifact responses and never falls back after an identity mismatch", async () => {
+  const reference = {
+    runId: "42",
+    runAttempt: "1",
+    workflowSha,
+    artifactName: "native",
+    artifactId: "77",
+  };
+  const artifact = {
+    id: 77,
+    name: "native",
+    expired: false,
+    workflow_run: { id: 42, head_sha: workflowSha },
+  };
+  for (const response of [
+    { ...artifact, id: 78 },
+    { ...artifact, name: "other" },
+    { ...artifact, workflow_run: { id: 43, head_sha: workflowSha } },
+    { ...artifact, workflow_run: { id: 42, head_sha: sourceSha } },
+    { ...artifact, expired: true },
+    { id: "77" },
+  ]) {
+    let calls = 0;
+    await expect(
+      lookupNativeArtifact(reference, async () => {
+        calls++;
+        return response;
+      }),
+    ).rejects.toThrow();
+    assert.equal(calls, 1);
+  }
+  assert.isUndefined(
+    await lookupNativeArtifact(reference, async () => ({ ...artifact, expired: true }), true),
+  );
+});
+
+it("retries direct endpoint visibility and propagates permanent lookup failures", async () => {
+  const reference = {
+    runId: "42",
+    runAttempt: "1",
+    workflowSha,
+    artifactName: "native",
+    artifactId: "77",
+  };
+  const artifact = {
+    id: 77,
+    name: "native",
+    expired: false,
+    workflow_run: { id: 42, head_sha: workflowSha },
+  };
+  const requests: string[] = [];
+  const delays: number[] = [];
+  const result = await waitForNativeArtifact(
+    reference,
+    () =>
+      lookupNativeArtifact(reference, async (path) => {
+        requests.push(path);
+        if (requests.length === 1) throw { stderr: "gh: Not Found (HTTP 404)" };
+        return artifact;
+      }),
+    async (delay) => {
+      delays.push(delay);
+    },
+  );
+  assert.deepEqual(result, artifact);
+  assert.deepEqual(requests, ["actions/artifacts/77", "actions/artifacts/77"]);
+  assert.deepEqual(delays, [2000]);
+  const denied = { stderr: "gh: Forbidden (HTTP 403)" };
+  await expect(
+    lookupNativeArtifact(reference, async () => {
+      throw denied;
+    }),
+  ).rejects.toBe(denied);
 });
