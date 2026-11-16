@@ -10034,6 +10034,14 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
             detail: buffered?.detail ?? null,
             ...(notification === null ? {} : { notification }),
             clearIfCurrent: retire,
+            dispatchIfCurrent: (dispatch) =>
+              sdkMessageLock.withPermits(1)(
+                Effect.gen(function* () {
+                  const current = (yield* Ref.get(requestedContinuations)).get(nativeThreadId);
+                  if (current?.token !== token || current.retired !== null) return Option.none();
+                  return Option.some(yield* dispatch);
+                }),
+              ),
             onRunEndedWithoutStarting: retire,
           });
         });

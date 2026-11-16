@@ -3921,7 +3921,7 @@ describe("ClaudeAdapterV2 background wake turns", () => {
           assert.equal(card.turnItem.appName, mcpApproval.title);
           assert.deepEqual(
             card.turnItem.options?.map((option) => option.decision),
-            ["cancel", "decline", "accept"],
+            ["cancel", "decline", "acceptForSession", "accept"],
           );
           const node = harness.events.find(
             (event) => event.type === "node.updated" && event.node.id === card.turnItem.nodeId,
@@ -4126,7 +4126,7 @@ describe("ClaudeAdapterV2 background wake turns", () => {
   );
 
   it.effect(
-    "declines unsupported MCP input and idle callbacks without creating approval cards",
+    "cancels unsupported MCP input and idle callbacks without creating approval cards",
     () =>
       Effect.scoped(
         Effect.gen(function* () {
@@ -4152,7 +4152,7 @@ describe("ClaudeAdapterV2 background wake turns", () => {
                   signal: new AbortController().signal,
                 }),
               ),
-              { action: "decline" },
+              { action: "cancel" },
             );
           }
           // @effect-diagnostics-next-line abortControllerInEffect:off - The fixture drives SDK cancellation independently of the test fiber.
@@ -4173,7 +4173,7 @@ describe("ClaudeAdapterV2 background wake turns", () => {
                 signal: new AbortController().signal,
               }),
             ),
-            { action: "decline" },
+            { action: "cancel" },
           );
           assert.isFalse(harness.events.some((event) => event.type === "runtime_request.updated"));
         }).pipe(
@@ -7664,11 +7664,11 @@ describe("ClaudeAdapterV2 background wake turns", () => {
       }).pipe(Effect.scoped, Effect.provide(testLayer)),
     );
 
-    it.effect("declines URL requests without a card and asks value forms as questions", () =>
+    it.effect("cancels URL requests without a card and asks value forms as questions", () =>
       Effect.gen(function* () {
         const { harness, elicit, awaitCard, runtimeRequests } = yield* startElicitationTurn();
         const url = { ...approvalOnly, mode: "url", url: "https://example.com/auth" } as const;
-        assert.deepEqual(yield* Fiber.join(yield* elicit(url)), { action: "decline" });
+        assert.deepEqual(yield* Fiber.join(yield* elicit(url)), { action: "cancel" });
         assert.isEmpty(runtimeRequests());
 
         const answer = yield* elicit({

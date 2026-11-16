@@ -270,7 +270,7 @@ it.effect.each([
         assert.equal(staleResponse._tag, "OrchestratorDispatchError");
         if (resolution === "SDK abort after response") {
           const finished = yield* watch(
-            (event) => event.type === "run.updated" && event.payload.status === "completed",
+            (event) => event.type === "run-attempt.updated" && event.payload.status === "completed",
           );
           yield* Queue.offer(sdkMessages, {
             type: "result",

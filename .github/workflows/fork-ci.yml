@@ -77,7 +77,7 @@ jobs:
         run: |
           vp run --last-details || true
           cd apps/server
-          ../../node_modules/.bin/effect-tsgo tsrs --noEmit --pretty false
+          ../../node_modules/.bin/effect-tsgo diagnostics --project tsconfig.json --format text --severity error,warning
 
       - name: Save task results
         if: success() && (github.event_name != 'workflow_dispatch' || inputs.use-cache) && steps.task_cache.outputs.cache-hit != 'true'
