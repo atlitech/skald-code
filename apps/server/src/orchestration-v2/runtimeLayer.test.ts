@@ -4676,7 +4676,6 @@ it.layer(layerTest)("OrchestrationV2LayerLive lifecycle", (it) => {
       );
       let hostReads = 0;
       const reactor = yield* PullRequestWatchReactor.make.pipe(
-        Effect.provide(ServerSettings.layerTest({ enablePullRequestWatch: true })),
         Effect.provide(
           Layer.mergeAll(
             NodeServices.layer,

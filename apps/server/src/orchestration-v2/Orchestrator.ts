@@ -1079,7 +1079,7 @@ function queuedRunModelSelection(
   // Portable app-owned deliveries follow the thread. Native wakes are checked
   // for owner changes first; a model/options change keeps that owner valid.
   return isNativeQueuedNotification(message) ||
-    message?.scheduledTaskId !== undefined ||
+    message?.followsThreadSelection === true ||
     message?.delegatedCompletion !== undefined ||
     (message?.notification !== undefined && message.creationSource === "server")
     ? projection.thread.modelSelection
