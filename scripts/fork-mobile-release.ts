@@ -7,6 +7,7 @@ import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 import * as NodeProcess from "node:process";
 import * as NodeUtil from "node:util";
+import { setTimeout as wait } from "node:timers/promises";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 import { decodeReleaseManifestJson } from "./fork-release-manifest.ts";
@@ -38,6 +39,8 @@ import {
   assertLocalBuild,
   assertRetainedNative,
   selectNativeArtifact,
+  artifactLookupHttpStatus,
+  waitForNativeArtifact,
   shouldUploadToApple,
 } from "./lib/fork-mobile-local.ts";
 
@@ -422,6 +425,19 @@ async function output(name: string, value: string) {
   await NodeFSP.appendFile(required("GITHUB_OUTPUT"), `${name}=${value}\n`);
 }
 async function nativeArtifact(reference: GitHubNativeBuild, allowExpired = false) {
+  if (reference.artifactId) {
+    let response: string;
+    try {
+      response = await run("gh", ["api", `${repoPath}/actions/artifacts/${reference.artifactId}`]);
+    } catch (error) {
+      if (artifactLookupHttpStatus(error) === 404) return undefined;
+      throw error;
+    }
+    const artifact = Schema.decodeUnknownSync(ActionsArtifact)(json(response));
+    if (artifact.name !== reference.artifactName || String(artifact.id) !== reference.artifactId)
+      throw new Error("Native artifact identity differs from the retained build.");
+    return selectNativeArtifact([artifact], reference, allowExpired);
+  }
   const pages = decodeArtifactPages(
     json(
       await run("gh", [
@@ -648,14 +664,19 @@ async function registerNative(
   dir: string,
   intentFile?: string,
   publishedAt?: string,
+  artifactId?: string,
 ) {
   const baseline = decodeBaseline(
     json(await NodeFSP.readFile(NodePath.join(dir, "baseline.json"), "utf8")),
   );
   if (!baseline.github || baseline.sourceSha !== sha || baseline.releaseTag !== tag)
     throw new Error("Invalid local build provenance.");
-  const artifact = await nativeArtifact(baseline.github);
-  if (!artifact) throw new Error("Verified native artifact has not been retained by GitHub.");
+  if (artifactId && !/^[1-9]\d*$/.test(artifactId))
+    throw new Error("Invalid uploaded artifact ID.");
+  if (artifactId && baseline.github.artifactId && artifactId !== baseline.github.artifactId)
+    throw new Error("Uploaded artifact ID differs from the retained build.");
+  const reference = { ...baseline.github, ...(artifactId ? { artifactId } : {}) };
+  const artifact = await waitForNativeArtifact(reference, () => nativeArtifact(reference), wait);
   const stored = { ...baseline, github: { ...baseline.github, artifactId: String(artifact.id) } };
   await record({
     schemaVersion: 1,
@@ -1193,6 +1214,7 @@ async function main() {
       dir: { type: "string" },
       platform: { type: "string" },
       force: { type: "string", default: "none" },
+      "artifact-id": { type: "string" },
       "rebuild-native": { type: "boolean", default: false },
     },
   });
@@ -1253,6 +1275,7 @@ async function main() {
       values.dir!,
       values.intent,
       release.publishedAt,
+      values["artifact-id"],
     );
   } else if (command === "deliver")
     await deliver(decodePlatform(values.platform), tag, values.dir!, values["rebuild-native"]!);

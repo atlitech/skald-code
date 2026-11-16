@@ -4,6 +4,7 @@ import {
   assertLocalBuild,
   assertRetainedNative,
   selectNativeArtifact,
+  waitForNativeArtifact,
   shouldUploadToApple,
 } from "./fork-mobile-local.ts";
 
@@ -177,5 +178,127 @@ it("checks the recovered bytes against the approved source and immutable binary 
     { ...approved, intent: { ...approved.intent, runtimeVersion: "different" } },
   ]) {
     assert.throws(() => assertRetainedNative(baseline, changed), /metadata/);
+  }
+});
+
+it("waits for an uploaded artifact to become visible without rebuilding", async () => {
+  const reference = {
+    runId: "42",
+    runAttempt: "1",
+    workflowSha,
+    artifactName: "native",
+    artifactId: "77",
+  };
+  const artifact = {
+    id: 77,
+    name: "native",
+    expired: false,
+    workflow_run: { id: 42, head_sha: workflowSha },
+  };
+  const delays: number[] = [];
+  let calls = 0;
+  const found = await waitForNativeArtifact(
+    reference,
+    async () => {
+      calls++;
+      if (calls === 1) return undefined;
+      if (calls === 2) throw { stderr: "gh: Not Found (HTTP 404)" };
+      if (calls === 3) throw { stderr: "gh: Bad Gateway (HTTP 502)" };
+      return selectNativeArtifact([artifact], reference);
+    },
+    async (delay) => {
+      delays.push(delay);
+    },
+  );
+  assert.equal(found, artifact);
+  assert.equal(calls, 4);
+  assert.deepEqual(delays, [2000, 4000, 8000]);
+});
+
+it("bounds retries for unavailable artifacts and GitHub rate limits", async () => {
+  const reference = {
+    runId: "42",
+    runAttempt: "1",
+    workflowSha,
+    artifactName: "native",
+    artifactId: "77",
+  };
+  for (const stderr of [
+    undefined,
+    "gh: Too Many Requests (HTTP 429)",
+    "gh: API rate limit exceeded (HTTP 403)",
+  ]) {
+    const delays: number[] = [];
+    let calls = 0;
+    try {
+      await waitForNativeArtifact(
+        reference,
+        async () => {
+          calls++;
+          if (stderr) throw { stderr };
+          return undefined;
+        },
+        async (delay) => {
+          delays.push(delay);
+        },
+      );
+      assert.fail("Expected artifact lookup to exhaust its retries");
+    } catch (error) {
+      assert.match(String(error), /artifact 77 in run 42.*6 attempts.*Re-run failed jobs/);
+    }
+    assert.equal(calls, 6);
+    assert.deepEqual(delays, [2000, 4000, 8000, 16000, 30000]);
+  }
+});
+
+it("does not retry invalid provenance, expired artifacts, or permission failures", async () => {
+  const reference = {
+    runId: "42",
+    runAttempt: "1",
+    workflowSha,
+    artifactName: "native",
+    artifactId: "77",
+  };
+  const artifact = {
+    id: 77,
+    name: "native",
+    expired: false,
+    workflow_run: { id: 42, head_sha: workflowSha },
+  };
+  const failures = [
+    () =>
+      selectNativeArtifact(
+        [{ ...artifact, workflow_run: { id: 42, head_sha: sourceSha } }],
+        reference,
+      ),
+    () => selectNativeArtifact([{ ...artifact, expired: true }], reference),
+    () => {
+      throw { stderr: "gh: Forbidden (HTTP 403)" };
+    },
+    () => {
+      throw { stderr: "gh: Unauthorized (HTTP 401)" };
+    },
+  ];
+  for (const lookup of failures) {
+    let calls = 0;
+    let waits = 0;
+    let failed = false;
+    try {
+      await waitForNativeArtifact(
+        reference,
+        async () => {
+          calls++;
+          return lookup();
+        },
+        async () => {
+          waits++;
+        },
+      );
+    } catch {
+      failed = true;
+    }
+    assert.isTrue(failed);
+    assert.equal(calls, 1);
+    assert.equal(waits, 0);
   }
 });

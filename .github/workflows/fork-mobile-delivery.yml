@@ -109,6 +109,7 @@ jobs:
           node scripts/fork-mobile-release.ts deliver --tag "$TAG" --platform "$PLATFORM" --dir "$RUNNER_TEMP/mobile-native" "${args[@]}"
 
       - name: Retain verified IPA
+        id: retained-native
         if: matrix.platform == 'ios' && steps.native.outputs.upload-native == 'true'
         uses: actions/upload-artifact@v7
         with:
@@ -121,7 +122,9 @@ jobs:
 
       - name: Record durable native provenance
         if: matrix.platform == 'ios' && steps.native.outputs.native == 'true'
-        run: node scripts/fork-mobile-release.ts register-native --platform ios --tag "$TAG" --dir "$RUNNER_TEMP/mobile-native"
+        env:
+          NATIVE_ARTIFACT_ID: ${{ steps.retained-native.outputs.artifact-id }}
+        run: node scripts/fork-mobile-release.ts register-native --platform ios --tag "$TAG" --dir "$RUNNER_TEMP/mobile-native" --artifact-id "$NATIVE_ARTIFACT_ID"
 
       - name: Upload exact IPA and reconcile TestFlight availability
         if: matrix.platform == 'ios'
