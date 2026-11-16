@@ -387,7 +387,7 @@ it.layer(NodeServices.layer)("service preflight database", (it) => {
         "ForkMigration",
         BUILD_MIGRATION_HEAD,
       );
-      const conflict = preflight();
+      const conflict = yield* preflight();
       expect(conflict.status).toBe("blocked");
       expect(conflict.status === "blocked" ? conflict.reason : "").toContain("ForkMigration");
       db.prepare("UPDATE effect_sql_migrations SET name = ? WHERE migration_id = ?").run(
@@ -410,8 +410,10 @@ it.layer(NodeServices.layer)("service preflight database", (it) => {
       insertPreview.run(55, "RemoveRedundantProjectionIndexes");
       previewDb.close();
       expect(
-        runServicePreflight({ databasePath: preview, launcherProtocol: SERVICE_LAUNCHER_PROTOCOL })
-          .status,
+        (yield* runServicePreflight({
+          databasePath: preview,
+          launcherProtocol: SERVICE_LAUNCHER_PROTOCOL,
+        })).status,
       ).toBe("ready");
 
       const newerId = Math.max(...migrationManifest.map(([id]) => id)) + 1;

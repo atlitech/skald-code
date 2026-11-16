@@ -72,7 +72,6 @@ import {
   resolveThreadListV2Status,
   resolveThreadListV2ProviderDrivers,
   resolveThreadListV2SwipeActions,
-  layoutThreadListV2RowMenuActions,
   threadListV2RowAccessibilityLabel,
   type ThreadListV2Status,
   type ThreadListV2Grouping,
@@ -795,14 +794,6 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
       : workingLabel) ?? (isUnread ? DONE_STATUS_LABEL : undefined);
   const childAttentionCount = props.grouping?.childAttentionCount ?? 0;
   const childWorkingCount = props.grouping?.childWorkingCount ?? 0;
-  const compactStatusLabel: StatusLabel | undefined = showsWoke
-    ? {
-        label: "Woke",
-        icon: "bell.badge",
-        className: "text-warning-foreground",
-        iconTintClassName: "accent-warning-foreground",
-      }
-    : statusLabel;
   const recede = shouldRecedeThreadRow({ status, selected });
   const isRegeneratingTitle = thread.titleRegeneration != null;
   const hasInlineGroupControl = (props.grouping?.childCount ?? 0) > 0;
@@ -810,22 +801,23 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
     props.grouping?.containsSelection && !props.grouping.childrenExpanded;
 
   const timeLabel = props.timeLabel;
-  const rowAccessibilityLabel = threadListV2RowAccessibilityLabel({
-    title: thread.title,
-    variant,
-    woke: showsWoke,
-    // Working and waiting rows show only an icon and a duration, so name them for speech.
-    statusLabel:
-      statusLabel && (statusLabel.label ?? (status === "waiting" ? "Waiting" : "Working")),
-    timeLabel,
-    snoozeWakeLabel: snoozedRow ? props.snoozeWakeLabelText : undefined,
-    providerNameLabel,
-    hasQueuedMessages: props.hasQueuedMessages === true,
-    regeneratingTitle: isRegeneratingTitle,
-  }) + `${hasInlineGroupControl ? `, ${props.grouping?.childCount} child threads, ${props.grouping?.childrenExpanded ? "expanded" : "collapsed"}${childWorkingCount > 0 ? `, ${childWorkingCount} children working` : ""}${childAttentionCount > 0 ? `, ${childAttentionCount} children need your attention` : ""}${containsHiddenSelection ? ", current thread inside" : ""}` : ""}`;
+  const rowAccessibilityLabel =
+    threadListV2RowAccessibilityLabel({
+      title: thread.title,
+      variant,
+      woke: showsWoke,
+      // Working and waiting rows show only an icon and a duration, so name them for speech.
+      statusLabel:
+        statusLabel && (statusLabel.label ?? (status === "waiting" ? "Waiting" : "Working")),
+      timeLabel,
+      snoozeWakeLabel: snoozedRow ? props.snoozeWakeLabelText : undefined,
+      providerNameLabel,
+      hasQueuedMessages: props.hasQueuedMessages === true,
+      regeneratingTitle: isRegeneratingTitle,
+    }) +
+    `${hasInlineGroupControl ? `, ${props.grouping?.childCount} child threads, ${props.grouping?.childrenExpanded ? "expanded" : "collapsed"}${childWorkingCount > 0 ? `, ${childWorkingCount} children working` : ""}${childAttentionCount > 0 ? `, ${childAttentionCount} children need your attention` : ""}${containsHiddenSelection ? ", current thread inside" : ""}` : ""}`;
 
   const visitThread = useAtomCommand(threadEnvironment.visit, { reportFailure: false });
-  const markThreadUnread = useAtomCommand(threadEnvironment.markUnread, { reportFailure: false });
   const handleAcknowledgeWoke = useCallback(() => {
     if (props.wokeAt === null) return;
     void visitThread({

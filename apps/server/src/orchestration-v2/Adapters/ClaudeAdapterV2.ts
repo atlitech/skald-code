@@ -5972,14 +5972,12 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
         const pendingSubagentFramesByToolUseId = yield* Ref.make(
           new Map<string, ReadonlyArray<SDKMessage>>(),
         );
-        let nextWakeGeneration = 0;
         // A gateway's relative reset counts from the result's arrival, not its replay.
         const bufferedResultArrivals = new WeakMap<SDKMessage, DateTime.Utc>();
         const wakeBuffers = yield* Ref.make(
           new Map<
             string,
             {
-              readonly generation: number;
               readonly messages: ReadonlyArray<SDKMessage>;
               readonly detail: string | null;
             }
@@ -9941,7 +9939,6 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
             const existing = current.get(wakeInput.nativeThreadId);
             const updated = new Map(current);
             updated.set(wakeInput.nativeThreadId, {
-              generation: existing?.generation ?? ++nextWakeGeneration,
               messages: [...(existing?.messages ?? []), message],
               detail: notificationSummary ?? existing?.detail ?? null,
             });
@@ -12420,7 +12417,10 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
             return { action: "cancel" } satisfies ElicitationResult;
           }
           const grantKey = `${request.serverName}\u0000${request.message}`;
-          if ((yield* Ref.get(mcpElicitationSessionGrants)).has(grantKey)) {
+          if (
+            acceptance !== undefined &&
+            (yield* Ref.get(mcpElicitationSessionGrants)).has(grantKey)
+          ) {
             return acceptance;
           }
           // The CLI waits on this answer, so a turn held for its prompt echo
@@ -12545,7 +12545,7 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
               runtimeRequest: { ...artifacts.request, status: "cancelled", resolvedAt: now },
             });
           }
-          if (resolved === "acceptForSession") {
+          if (resolved === "acceptForSession" && acceptance !== undefined) {
             yield* Ref.update(mcpElicitationSessionGrants, (current) =>
               new Set(current).add(grantKey),
             );
@@ -12553,7 +12553,7 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
           }
           // Never null: the SDK reads null as answered out of band and leaves
           // the server waiting.
-          return resolved === "accept"
+          return resolved === "accept" || resolved === "acceptForSession"
             ? accept(answers ?? {})
             : ({
                 action: resolved === "cancel" ? "cancel" : "decline",

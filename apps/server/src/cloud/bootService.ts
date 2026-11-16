@@ -507,6 +507,7 @@ function schtasksManager(input: {
   ];
   return {
     kind: "schtasks",
+    loaded: { command: "schtasks", args: ["/Query", ...task] },
     unitPath,
     render: (plan) =>
       renderBootServiceTask(plan, {
@@ -1506,12 +1507,7 @@ export const make = Effect.fn("cloud.boot_service.make")(function* (input: {
     yield* Effect.forEach(
       manager.stop,
       (entry) =>
-        runStep(
-          entry.step,
-          entry.command,
-          entry.args,
-          entry.timeout === undefined ? undefined : { timeout: entry.timeout },
-        ).pipe(
+        runSteps([{ ...entry, optional: false }]).pipe(
           Effect.asVoid,
           Effect.catch((error) =>
             entry.optional === true

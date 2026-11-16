@@ -196,7 +196,7 @@ export const runServicePreflight = Effect.fn("cloud.service_preflight.run")(func
   );
 });
 
-export function decodeServicePreflightResult(
+function decodeServicePreflightResult(
   value: unknown,
   launcherProtocol: SupportedLauncherProtocol,
 ): ServicePreflightResult | undefined {

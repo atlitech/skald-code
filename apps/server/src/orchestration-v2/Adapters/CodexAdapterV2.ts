@@ -4863,7 +4863,7 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
             updatedAt: createdAt,
             type: "user_input_request",
             requestId,
-            questions: [...input.questions],
+            questions,
             ...(input.responseMode === undefined ? {} : { responseMode: input.responseMode }),
           };
           return { node, request, turnItem, nativeQuestionIds };

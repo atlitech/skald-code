@@ -849,8 +849,8 @@ function threadTitle(input: {
 }
 
 function mcpThreadSettlement(
-  thread: OrchestrationV2ThreadShell,
-  findThread: (threadId: ThreadId) => OrchestrationV2ThreadShell | undefined,
+  thread: Parameters<typeof threadSettlement>[0],
+  findThread: Parameters<typeof threadSettlement>[1],
 ): Pick<OrchestratorMcpThreadListItem, "settled" | "settledAt" | "settledBy"> {
   const { settledBy, settledAt } = threadSettlement(thread, findThread);
   return {
@@ -943,7 +943,7 @@ function listedThreadStatus(shell: OrchestrationV2ThreadShell) {
 function listItemFromShell(
   scope: McpInvocationScope,
   shell: OrchestrationV2ThreadShell,
-  findThread: (threadId: ThreadId) => OrchestrationV2ThreadShell | undefined,
+  findThread: Parameters<typeof threadSettlement>[1],
   nowMs: number,
 ): OrchestratorMcpThreadListItem {
   return {
@@ -980,7 +980,7 @@ function threadDetail(
   projection: Pick<OrchestrationV2ThreadProjection, "thread" | "runs" | "runtimeRequests">,
   itemCount: number,
   shell: OrchestrationV2ThreadShell,
-  findThread: (threadId: ThreadId) => OrchestrationV2ThreadShell | undefined,
+  findThread: Parameters<typeof threadSettlement>[1],
   nowMs: number,
   firstPage: boolean,
 ): OrchestratorMcpThreadDetail {

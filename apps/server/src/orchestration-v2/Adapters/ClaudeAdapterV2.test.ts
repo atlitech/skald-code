@@ -9,7 +9,6 @@ import { beforeEach, vi } from "vite-plus/test";
 
 import type {
   ElicitationRequest,
-  ElicitationResult,
   Query as ClaudeQuery,
   SDKMessage,
   SDKResultMessage,

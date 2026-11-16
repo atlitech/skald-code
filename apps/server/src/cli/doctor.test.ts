@@ -147,7 +147,7 @@ it.effect("warns how long reclaiming can take and reports each step with its ela
                 Effect.ensuring(Effect.sync(() => output.push("<resume>"))),
               ),
           }),
-          Layer.succeed(DatabaseMaintenance, {
+          Layer.mock(DatabaseMaintenance)({
             inspect: () =>
               Effect.succeed({
                 databaseBytes: 12.8 * 1024 ** 3,

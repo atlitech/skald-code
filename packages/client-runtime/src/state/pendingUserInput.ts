@@ -10,7 +10,6 @@ export interface PendingUserInputQuestion {
   readonly companionText?:
     | { readonly id: string; readonly required?: boolean | undefined }
     | undefined;
-  readonly required?: boolean | undefined;
 }
 
 export interface PendingUserInputDraftAnswer {

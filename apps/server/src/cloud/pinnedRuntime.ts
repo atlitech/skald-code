@@ -635,7 +635,7 @@ export function isVersionExecutable(
 export const windowsShimTarget = (contents: string) => /^"([^"]+)"/m.exec(contents)?.[1];
 
 /** Repoint only installer-owned links and shims, recording them before the atomic replacement. */
-export const repointPinnedRuntimeLauncher = Effect.fn("cloud.pinned_runtime.repoint_launcher")(
+const repointPinnedRuntimeLauncher = Effect.fn("cloud.pinned_runtime.repoint_launcher")(
   function* (input: {
     readonly launcher: string;
     readonly baseDir: string;
@@ -648,8 +648,11 @@ export const repointPinnedRuntimeLauncher = Effect.fn("cloud.pinned_runtime.repo
     const realVersionsDir = yield* fs
       .realPath(versionsDir)
       .pipe(Effect.orElseSucceed(() => versionsDir));
+    const scriptTarget =
+      platform === "win32" ? undefined : yield* readPosixLauncherTarget(input.launcher);
     const current =
-      platform === "win32"
+      scriptTarget ??
+      (platform === "win32"
         ? yield* fs.readFileString(input.launcher).pipe(
             Effect.map(windowsShimTarget),
             Effect.orElseSucceed(() => undefined),
@@ -663,7 +666,7 @@ export const repointPinnedRuntimeLauncher = Effect.fn("cloud.pinned_runtime.repo
                 ),
             ),
             Effect.orElseSucceed(() => undefined),
-          );
+          ));
     if (
       current === undefined ||
       !(
@@ -676,7 +679,8 @@ export const repointPinnedRuntimeLauncher = Effect.fn("cloud.pinned_runtime.repo
     const realTarget = yield* fs
       .realPath(input.targetEntryPath)
       .pipe(Effect.orElseSucceed(() => input.targetEntryPath));
-    if (current === realTarget) return Option.none<string>();
+    const realCurrent = yield* fs.realPath(current).pipe(Effect.orElseSucceed(() => current));
+    if (realCurrent === realTarget) return Option.none<string>();
     const directory = yield* fs.makeTempDirectoryScoped({
       directory: path.dirname(input.launcher),
       prefix: ".t3-launcher-",
@@ -685,7 +689,11 @@ export const repointPinnedRuntimeLauncher = Effect.fn("cloud.pinned_runtime.repo
     yield* (
       platform === "win32"
         ? fs.writeFileString(temporary, `@echo off\r\n"${input.targetEntryPath}" %*`)
-        : fs.symlink(input.targetEntryPath, temporary)
+        : scriptTarget === undefined
+          ? fs.symlink(input.targetEntryPath, temporary)
+          : fs
+              .writeFileString(temporary, posixLauncherScript(input.targetEntryPath))
+              .pipe(Effect.andThen(fs.chmod(temporary, 0o755)))
     ).pipe(Effect.andThen(fs.rename(temporary, input.launcher)));
     return Option.some(input.launcher);
   },
@@ -826,7 +834,7 @@ const shellLaunchers = Effect.fn("cloud.pinned_runtime.shell_launcher_targets")(
     launcherOwnsVersionsDir(path, realVersionsDir, candidate);
   const unrecorded: Array<string> = [];
   const targets: Array<{ readonly launcher: string; readonly target: string }> = [];
-  for (const launcher of [...recorded, ...found]) {
+  for (const launcher of new Set([...recorded, ...found])) {
     const resolved =
       platform === "win32"
         ? yield* fs.readFileString(launcher).pipe(

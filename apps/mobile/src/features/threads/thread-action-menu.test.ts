@@ -58,6 +58,7 @@ describe("buildThreadActionMenu", () => {
           "pin",
           "settle",
           "snooze:custom",
+          "mark-unread",
           "rename",
           "regenerate-title",
           "auto-settle:enabled",
@@ -110,6 +111,7 @@ describe("buildThreadActionMenu", () => {
       "copy-thread",
       "copy-thread-id",
       "archive",
+      "mark-unread",
       "rename",
       "delete",
     ]);

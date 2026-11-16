@@ -96,6 +96,7 @@ export function buildThreadActionMenu(state: ThreadActionMenuState): MenuAction[
         ]
       : [];
   const title: MenuAction[] = [
+    { id: "mark-unread", title: "Mark unread", image: "envelope.badge" },
     { id: "rename", title: "Rename", image: "square.and.pencil" },
     ...buildThreadTitleRegenerationMenuItems({
       supported: state.titleRegenerationSupported,

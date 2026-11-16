@@ -30,6 +30,8 @@ import {
   type PinnedRuntimeProgress,
   prunePinnedRuntimes,
   syncPinnedRuntimeLaunchers,
+  posixLauncherScript,
+  readPosixLauncherTarget,
 } from "./pinnedRuntime.ts";
 import { SERVICE_LAUNCHER_PROTOCOL } from "./serviceProtocol.ts";
 
@@ -1303,9 +1305,13 @@ it.layer(NodeServices.layer)("prunePinnedRuntimes", (it) => {
 });
 
 it.layer(NodeServices.layer)("syncPinnedRuntimeLaunchers", (it) => {
-  it.effect.each(["linux", "win32"] as const)(
-    "continues past an unwritable launcher and preserves foreign installs on %s",
-    (platform) =>
+  it.effect.each([
+    { platform: "linux", script: false },
+    { platform: "linux", script: true },
+    { platform: "win32", script: false },
+  ] as const)(
+    "continues past an unwritable launcher and preserves foreign installs on $platform (script: $script)",
+    ({ platform, script }) =>
       Effect.gen(function* () {
         const fs = yield* FileSystem.FileSystem;
         const path = yield* Path.Path;
@@ -1333,7 +1339,9 @@ it.layer(NodeServices.layer)("syncPinnedRuntimeLaunchers", (it) => {
           yield* fs.makeDirectory(path.dirname(launcher));
           yield* platform === "win32"
             ? fs.writeFileString(launcher, `@echo off\r\n"${target}" %*`)
-            : fs.symlink(target, launcher);
+            : script
+              ? fs.writeFileString(launcher, posixLauncherScript(target))
+              : fs.symlink(target, launcher);
         }
         yield* fs.makeDirectory(path.dirname(copy));
         yield* fs.writeFileString(copy, "a standalone executable");
@@ -1367,7 +1375,9 @@ it.layer(NodeServices.layer)("syncPinnedRuntimeLaunchers", (it) => {
             ? fs
                 .readFileString(launcher)
                 .pipe(Effect.map((contents) => /^"([^"]+)"/m.exec(contents)?.[1]))
-            : fs.readLink(launcher);
+            : script
+              ? readPosixLauncherTarget(launcher)
+              : fs.readLink(launcher);
         assert.equal(yield* targetOf(blocked), old.entryPath);
         assert.equal(yield* targetOf(registered), current.entryPath);
         assert.equal(yield* targetOf(discovered), current.entryPath);

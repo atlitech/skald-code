@@ -490,6 +490,7 @@ export type ActiveThreadListEntry = Pick<
   | "projectId"
   | "title"
   | "lineage"
+  | "groupingParentThreadId"
   | "delegatedFrom"
   | "settledOverride"
   | "settledAt"
@@ -9076,6 +9077,7 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
       const rows = yield* sql<{
         readonly thread_id: string;
         readonly project_id: string;
+        readonly grouping_parent_thread_id: string | null;
         readonly title: string;
         readonly updated_at: string;
         readonly relationship_to_parent: string | null;
@@ -9093,6 +9095,7 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
           t.thread_id,
           t.project_id,
           t.title,
+          json_extract(t.payload_json, '$.groupingParentThreadId') AS grouping_parent_thread_id,
           t.updated_at,
           json_extract(t.payload_json, '$.lineage.relationshipToParent') AS relationship_to_parent,
           json_extract(t.payload_json, '$.lineage.parentThreadId') AS parent_thread_id,
@@ -9112,6 +9115,10 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
         id: ThreadId.make(row.thread_id),
         projectId: ProjectId.make(row.project_id),
         title: row.title,
+        groupingParentThreadId:
+          row.grouping_parent_thread_id === null
+            ? null
+            : ThreadId.make(row.grouping_parent_thread_id),
         lineage: shellIndexLineage(row),
         ...(row.delegated_from_environment_id === null || row.delegated_from_thread_id === null
           ? {}

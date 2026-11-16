@@ -11,7 +11,6 @@ import {
   AuthOrchestrationOperateScope,
   AuthOrchestrationReadScope,
   AuthSessionId,
-  AuthOrchestrationOperateScope,
   CommandId,
   ORCHESTRATION_V2_WS_METHODS,
   AuthSourceControlWriteScope,

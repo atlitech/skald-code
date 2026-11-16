@@ -77,6 +77,7 @@ export function useThreadActionMenu(input: {
     threadEnvironment.setParent.permissionAtom(thread?.environmentId ?? null),
   );
   const setParent = useAtomCommand(threadEnvironment.setParent);
+  const markUnread = useAtomCommand(threadEnvironment.markUnread, { reportFailure: false });
   const groupingSupported =
     thread !== null &&
     isListedThreadLineage(thread.lineage) &&
@@ -160,6 +161,9 @@ export function useThreadActionMenu(input: {
           return actions.moveThread?.(thread, "down");
         case "archive":
           return actions.archiveThread(thread);
+        case "mark-unread":
+          void markUnread({ environmentId: thread.environmentId, input: { threadId: thread.id } });
+          return;
         case "rename":
           return actions.renameThread(thread);
         case "regenerate-title":
@@ -203,6 +207,7 @@ export function useThreadActionMenu(input: {
     [
       thread,
       actions,
+      markUnread,
       state.canOperate,
       presets,
       input.snoozePresets,

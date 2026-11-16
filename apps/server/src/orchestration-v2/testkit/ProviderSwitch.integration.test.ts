@@ -20,7 +20,6 @@ import {
   ProviderSessionId,
   ProviderThreadId,
   ProviderTurnId,
-  ScheduledTaskId,
   ThreadId,
   TurnItemId,
   ProviderDriverKind,

@@ -43,6 +43,7 @@ it.layer(Layer.mergeAll(NodeServices.layer, NetService.layer))("t3 uninstall com
               logPath: "/home/me/.t3/userdata/logs/boot-service.log",
             }),
             withStopped: (operation) => operation,
+            stop: Effect.die("unexpected stop"),
             restart: Effect.die("unexpected restart"),
             install: () => Effect.die("unexpected install"),
             uninstall: Effect.sync(() => {

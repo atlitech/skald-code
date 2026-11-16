@@ -300,7 +300,7 @@ it.layer(NodeServices.layer)("server self update", (it) => {
       let failDownload = true;
       const downloadFailed = yield* Deferred.make<void>();
       const { selfUpdate, order, baseDir } = yield* makeHarness({
-        httpClient: releaseHttpClient([], []).pipe(
+        httpClient: releaseHttpClient([], [], "1.1.0").pipe(
           HttpClient.transform((response, request) => {
             if (!failDownload || request.url.endsWith("/SHA256SUMS") !== (asset === "checksums"))
               return response;

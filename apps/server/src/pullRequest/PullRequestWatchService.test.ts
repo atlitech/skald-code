@@ -202,7 +202,9 @@ describe("PullRequestWatchService", () => {
       });
       const disabled = yield* makeHarness({ enablePullRequestWatch: false });
       const disabledTarget = { url: "https://github.com/t3tools/t3code/pull/9" };
-      expect(yield* disabled.setWatching(true, disabledTarget).pipe(Effect.flip)).toMatchObject({ _tag: "PullRequestWatchDisabledError" });
+      expect(yield* disabled.setWatching(true, disabledTarget).pipe(Effect.flip)).toMatchObject({
+        _tag: "PullRequestWatchDisabledError",
+      });
       expect(yield* Ref.get(disabled.commands)).toEqual([]);
       yield* disabled.setWatching(false, disabledTarget);
       expect(yield* Ref.get(disabled.commands)).toMatchObject([{ watching: false }]);

@@ -29,6 +29,7 @@ import {
   findPosixLauncher,
   launcherOwnsVersionsDir,
   pinnedRuntimeCommand,
+  pinnedRuntimeVersionsDir,
   isUnpublishedRelease,
   PinnedRuntimeInstallError,
   prunePinnedRuntimes,
@@ -158,6 +159,8 @@ export const repointLauncher = Effect.fn("cli.update.repoint_launcher")(function
   readonly baseDir: string;
   readonly targetEntryPath: string;
 }) {
+  const path = yield* Path.Path;
+  const fs = yield* FileSystem.FileSystem;
   const platform = yield* HostProcess.Platform;
   if (input.launchedAs === undefined) return Option.none<string>();
   const versionsDir = pinnedRuntimeVersionsDir(path, input.baseDir);

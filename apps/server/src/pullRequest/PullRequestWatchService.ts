@@ -12,6 +12,7 @@ import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 
+import * as ServerSettings from "../serverSettings.ts";
 import * as Orchestrator from "../orchestration-v2/Orchestrator.ts";
 import * as ProjectService from "../project/ProjectService.ts";
 import * as PullRequestService from "./PullRequestService.ts";
@@ -44,6 +45,15 @@ export class PullRequestNotOpenError extends Schema.TaggedError<PullRequestNotOp
   }
 }
 
+export class PullRequestWatchDisabledError extends Schema.TaggedError<PullRequestWatchDisabledError>()(
+  "PullRequestWatchDisabledError",
+  {},
+) {
+  override get message(): string {
+    return "Pull request watching is turned off for this environment, so T3 Code will not wake you about this pull request. Follow whatever watching approach the user or your task specifies.";
+  }
+}
+
 export class PullRequestWatchFromSubagentError extends Schema.TaggedError<PullRequestWatchFromSubagentError>()(
   "PullRequestWatchFromSubagentError",
   {},
@@ -71,6 +81,7 @@ export class PullRequestWatchService extends Context.Service<
       readonly watching: boolean;
     }) => Effect.Effect<
       ResolvedTarget & { readonly watching: boolean; readonly wasWatching: boolean },
+      | PullRequestWatchDisabledError
       | PullRequestWatchFailedError
       | PullRequestNotOpenError
       | PullRequestWatchFromSubagentError
@@ -82,6 +93,7 @@ export class PullRequestWatchService extends Context.Service<
 >()("t3/pullRequest/PullRequestWatchService") {}
 
 const make = Effect.gen(function* () {
+  const settings = yield* ServerSettings.ServerSettingsService;
   const engine = yield* Orchestrator.OrchestratorV2;
   const projects = yield* ProjectService.ProjectService;
   const pullRequests = yield* PullRequestService.PullRequestService;
@@ -107,6 +119,12 @@ const make = Effect.gen(function* () {
   }) {
     const { watching } = input;
     const thread = yield* requireThread(input.threadId);
+    if (watching) {
+      const { enablePullRequestWatch } = yield* settings.getSettings.pipe(
+        Effect.mapError((cause) => new PullRequestWatchFailedError({ cause })),
+      );
+      if (!enablePullRequestWatch) return yield* new PullRequestWatchDisabledError();
+    }
     const project = yield* projects.getShell(thread.projectId).pipe(
       Effect.map(Option.getOrUndefined),
       Effect.mapError((cause) => new PullRequestWatchFailedError({ cause })),
