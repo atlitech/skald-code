@@ -2073,6 +2073,7 @@ it.effect("preserves the grouping parent when launching through RPC", () =>
       layerUnusedConfigRpcServices,
       Layer.mock(ServerRuntimeStartup.ServerRuntimeStartup)({ enqueueCommand: (effect) => effect }),
       Layer.mock(ThreadLaunchService.ThreadLaunchService)({
+        checkWorktreeBase: () => Effect.void,
         launch: (input) =>
           Queue.offer(parents, input.groupingParentThreadId).pipe(
             Effect.andThen(

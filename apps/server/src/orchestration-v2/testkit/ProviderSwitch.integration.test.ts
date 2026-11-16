@@ -5026,7 +5026,13 @@ describe("orchestration v2 provider switching", () => {
               assert.equal(providerThread.providerInstanceId, targetSelection.instanceId);
               assert.equal(attempt.providerThreadId, run.providerThreadId);
               assert.equal(node.providerThreadId, run.providerThreadId);
-              assert.equal(scope.providerThreadId, run.providerThreadId);
+              // Root scopes are shared across runs; checkpoints retain each run's ownership.
+              assert.equal(scope.threadId, queuedThreadId);
+              assert.equal(scope.cwd, cwd);
+              const checkpoint = delivered.checkpoints.find((entry) => entry.runId === run.id);
+              assert.isDefined(checkpoint);
+              assert.equal(checkpoint?.scopeId, scope.id);
+              assert.equal(checkpoint?.nodeId, node.id);
             }
             const turns = yield* Ref.get(capturedTurns);
             const nativeTurns = turns.filter((turn) => turn.text === "native-wake");
