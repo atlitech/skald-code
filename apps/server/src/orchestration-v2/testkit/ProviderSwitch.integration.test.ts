@@ -5045,7 +5045,13 @@ describe("orchestration v2 provider switching", () => {
             }
             if (switchProvider) {
               const runCount = delivered.runs.length;
-              yield* dispatch("stale-native-accept", {
+              const staleProviderThreadId = queued.runs[0]!.providerThreadId!;
+              const staleOwner = delivered.providerThreads.find(
+                (entry) => entry.id === staleProviderThreadId,
+              );
+              assert.isDefined(staleOwner);
+              assert.notEqual(staleOwner?.providerInstanceId, targetSelection.instanceId);
+              const discarded = yield* dispatch("stale-native-accept", {
                 createdBy: "agent",
                 creationSource: "provider",
                 modelSelection: undefined,
@@ -5054,11 +5060,23 @@ describe("orchestration v2 provider switching", () => {
                   outcome: "updated",
                   summary: "Late native output",
                 },
-                providerContinuation: { providerThreadId: queued.runs[0]!.providerThreadId! },
+                providerContinuation: { providerThreadId: staleProviderThreadId },
               });
               yield* worker.drain();
               const unchanged = yield* orchestrator.getThreadProjection(queuedThreadId);
-              assert.equal(unchanged.runs.length, runCount);
+              assert.deepEqual(
+                discarded.storedEvents.map(({ event }) => event.type),
+                ["thread.metadata-updated"],
+              );
+              assert.equal(
+                unchanged.runs.length,
+                runCount,
+                JSON.stringify(
+                  unchanged.runs.filter(
+                    (run) => !delivered.runs.some((prior) => prior.id === run.id),
+                  ),
+                ),
+              );
               assert.deepEqual(unchanged.thread.modelSelection, targetSelection);
             }
           }).pipe(
