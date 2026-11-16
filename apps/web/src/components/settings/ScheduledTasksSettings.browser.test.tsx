@@ -147,7 +147,7 @@ vi.mock(import("../../state/query"), async (original) => ({
     data:
       request === null || request === threadFamilyRead
         ? request
-        : { tasks: state.tasksLoaded ? [task] : [] },
+        : { tasks: state.tasksLoaded ? [task] : [], followsThreadModelSelection: true },
     error: null,
     isPending: false,
     refresh: vi.fn(),
@@ -259,8 +259,8 @@ describe("ScheduledTasksSettings", () => {
     );
     expect(enabledPicker).toBeNull();
     await expect
-      .element(page.getByRole("dialog").getByRole("button", { name: "gpt-5.5", exact: true }))
-      .toBeDisabled();
+      .element(page.getByRole("dialog").getByText("Uses this thread’s current provider and model."))
+      .toBeVisible();
   });
 
   it("keeps an editor the user opened when the linked task loads later", async () => {

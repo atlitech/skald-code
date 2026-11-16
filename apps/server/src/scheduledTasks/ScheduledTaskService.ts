@@ -1007,7 +1007,12 @@ export const layer = Layer.effect(
         // activeRuns serializes this check with dispatches for the same task.
         const queued = yield* Effect.exit(
           Effect.gen(function* () {
-            if (trigger !== "scheduled" || active.threadId === null) return false;
+            if (
+              trigger !== "scheduled" ||
+              active.schedule.type === "once" ||
+              active.threadId === null
+            )
+              return false;
             const { runs } = yield* threadManagement.getThreadRecords(active.threadId, ["runs"]);
             const messageIds = runs
               .filter((run) => run.status === "queued")
