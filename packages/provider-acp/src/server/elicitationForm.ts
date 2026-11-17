@@ -178,9 +178,11 @@ function typedAnswer(
 }
 
 // Decline unaskable forms; validate types and selection counts, leaving other constraints to the agent.
+// `allowOther` lets single choices take typed text, sent as the field's value.
 export function parseElicitationForm(
   requestedSchema: unknown,
   message: string,
+  { allowOther = false }: { readonly allowOther?: boolean } = {},
 ): ElicitationForm | undefined {
   const schema = unknownRecord(requestedSchema);
   const required = new Set(
@@ -243,7 +245,7 @@ export function parseElicitationForm(
       options,
       ...(kind === "text" || kind === "number" || companions.has(id)
         ? {}
-        : { allowCustomAnswer: false }),
+        : { allowCustomAnswer: allowOther && kind === "choice" }),
       ...(kind === "multiChoice" ? { multiSelect: true } : {}),
       ...(kind === "text" && !required.has(id) ? { required: false } : {}),
     });
@@ -263,7 +265,14 @@ export function parseElicitationForm(
             : typedAnswer(field, answer);
         const companionId = companions.get(id);
         if (typed !== undefined) entries.push([id, typed]);
-        else if (companionId !== undefined && typeof answer === "string") {
+        else if (
+          allowOther &&
+          field.kind === "choice" &&
+          typeof answer === "string" &&
+          answer.trim() !== ""
+        ) {
+          entries.push([id, answer]);
+        } else if (companionId !== undefined && typeof answer === "string") {
           entries.push([companionId, answer]);
         } else if (required.has(id)) return undefined;
       }

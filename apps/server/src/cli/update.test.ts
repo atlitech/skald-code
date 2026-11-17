@@ -170,8 +170,8 @@ it.layer(NodeServices.layer)("t3 update under a managed policy", (it) => {
     runUpdate({
       baseDir: "/unused",
       logsDir: "/unused",
+      databasePath: "/unused",
       serverRuntimeStatePath: "/unused",
-      dbPath: "/unused",
       channel: input.channel,
       requestedVersion: input.requestedVersion,
       allowDowngrade: false,
@@ -624,8 +624,8 @@ it.layer(NodeServices.layer)("t3 update with a background service", (it) => {
       const output = yield* runUpdate({
         baseDir,
         logsDir: baseDir,
+        databasePath: path.join(baseDir, "statev2.sqlite"),
         serverRuntimeStatePath: path.join(baseDir, "server-runtime.json"),
-        dbPath: path.join(baseDir, "statev2.sqlite"),
         allowUnadmitted: false,
         channel: undefined,
         requestedVersion: version,
@@ -773,7 +773,9 @@ const runFakeUpdate = Effect.fn("test.run_fake_update")(function* (options: {
               : {
                   status: "ready",
                   version: options.version,
-                  launcherProtocol: SERVICE_LAUNCHER_PROTOCOL,
+                  launcherProtocol: Number(
+                    input.args[input.args.indexOf("--launcher-protocol") + 1],
+                  ),
                 },
           ),
         );
@@ -858,7 +860,7 @@ const runFakeUpdate = Effect.fn("test.run_fake_update")(function* (options: {
     baseDir,
     logsDir: path.join(baseDir, "logs"),
     serverRuntimeStatePath: path.join(baseDir, "server-runtime.json"),
-    dbPath,
+    databasePath: dbPath,
     channel: undefined,
     requestedVersion: options.version,
     allowDowngrade: options.allowDowngrade ?? false,
@@ -1173,5 +1175,140 @@ it.layer(NodeServices.layer)("t3 update backup retention", (it) => {
         assert.equal(yield* fs.readFileString(points), "legacy recovery storage");
         assert.isFalse(run.commands.some(([command]) => command === "tar"));
       }).pipe(Effect.scoped, Effect.provide(TestConsole.layer)),
+  );
+});
+
+it.layer(NodeServices.layer)("t3 update checks the database before switching", (it) => {
+  const preflightOutput = (stdout: string, code = 0) => ({
+    stdout,
+    stderr: code === 0 ? "" : "Unknown command: __service-preflight",
+    code: ChildProcessSpawner.ExitCode(code),
+    timedOut: false,
+    stdoutTruncated: false,
+    stderrTruncated: false,
+    stdoutInvalidUtf8: false,
+    stderrInvalidUtf8: false,
+  });
+  const blockedReason = "This database has migrations that t3@0.1.8 does not know: 79_example.";
+
+  it.effect.each([
+    {
+      name: "installs an older target that accepts this database",
+      targetVersion: "0.1.8",
+      launcherProtocol: 3,
+      preflight: preflightOutput(
+        JSON.stringify({ status: "ready", version: "0.1.8", launcherProtocol: 3 }),
+      ),
+      failure: undefined,
+    },
+    {
+      name: "refuses an older target the database is too new for",
+      targetVersion: "0.1.8",
+      launcherProtocol: 3,
+      preflight: preflightOutput(
+        JSON.stringify({ status: "blocked", version: "0.1.8", reason: blockedReason }),
+      ),
+      failure: blockedReason,
+    },
+    {
+      name: "refuses an older target too old to check the database",
+      targetVersion: "0.1.8",
+      launcherProtocol: 3,
+      preflight: preflightOutput("", 1),
+      failure:
+        "t3@0.1.8 could not confirm it supports this database (its check exited with code 1), so t3 did not switch to it.",
+    },
+    {
+      // Newer builds keep accepting the current launcher protocol, which may drop 3.
+      name: "checks a newer target with the current launcher protocol",
+      targetVersion: "99.0.0",
+      launcherProtocol: SERVICE_LAUNCHER_PROTOCOL,
+      preflight: preflightOutput(
+        JSON.stringify({
+          status: "ready",
+          version: "99.0.0",
+          launcherProtocol: SERVICE_LAUNCHER_PROTOCOL,
+        }),
+      ),
+      failure: undefined,
+    },
+  ])("$name", ({ targetVersion, launcherProtocol, preflight, failure }) =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const baseDir = yield* fs.makeTempDirectoryScoped({ prefix: "t3-update-" });
+      const databasePath = path.join(baseDir, "userdata", "statev2.sqlite");
+      const runtime = pinnedRuntimePaths(path, baseDir, targetVersion, "linux");
+      yield* fs.makeDirectory(runtime.versionDir, { recursive: true });
+      yield* fs.writeFileString(runtime.entryPath, "");
+      yield* fs.writeFileString(runtime.sentinelPath, `${targetVersion}\n`);
+      const service = Layer.mock(BootService.BootService, {
+        status: Effect.succeed<BootService.BootServiceStatus>({
+          supported: true,
+          installed: false,
+          current: false,
+          unitPath: path.join(baseDir, "t3code.service"),
+          logPath: path.join(baseDir, "boot-service.log"),
+        }),
+      });
+      const preflightArgs: Array<ReadonlyArray<string>> = [];
+      const runner = ProcessRunner.ProcessRunner.of({
+        run: (input) => {
+          if (input.args?.includes("__service-preflight") === true) {
+            preflightArgs.push(input.args);
+            return Effect.succeed(preflight);
+          }
+          // A target's --version always answers, whatever its database support.
+          return input.args?.includes("--version") === true
+            ? Effect.succeed(preflightOutput(`t3 v${targetVersion}\n`))
+            : unrelatedLsof.run(input);
+        },
+      });
+
+      const exit = yield* runUpdate({
+        baseDir,
+        logsDir: baseDir,
+        databasePath,
+        serverRuntimeStatePath: path.join(baseDir, "server-runtime.json"),
+        channel: undefined,
+        requestedVersion: targetVersion,
+        allowDowngrade: true,
+        allowUnadmitted: false,
+        assumeYes: true,
+      }).pipe(
+        Effect.exit,
+        Effect.provide(
+          Layer.mergeAll(
+            service,
+            Layer.succeed(ProcessRunner.ProcessRunner, runner),
+            ManagedPolicy.layerTest(),
+            Layer.succeed(
+              HttpClient.HttpClient,
+              HttpClient.make(() => Effect.die("unexpected release lookup")),
+            ),
+            Layer.fresh(TestConsole.layer),
+          ),
+        ),
+      );
+
+      const error = Option.getOrUndefined(Exit.findErrorOption(exit));
+      assert.equal(
+        error?.message,
+        failure === undefined ? undefined : `Not switching to t3@${targetVersion}: ${failure}`,
+      );
+      assert.equal(Exit.isSuccess(exit), failure === undefined);
+      assert.deepEqual(preflightArgs, [
+        [
+          "__service-preflight",
+          "--database-path",
+          databasePath,
+          "--launcher-protocol",
+          String(launcherProtocol),
+        ],
+      ]);
+    }).pipe(
+      Effect.provideService(HostProcess.Platform, "linux"),
+      Effect.provideService(HostProcess.Environment, { PATH: "" }),
+    ),
   );
 });
