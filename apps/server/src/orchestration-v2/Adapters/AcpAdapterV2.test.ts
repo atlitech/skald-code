@@ -2096,7 +2096,9 @@ describe("AcpAdapterV2", () => {
         {
           id: "q0",
           header: "Fruit",
-          question: "Which fruit?",
+          question: "Your answer?\n\nWhich fruit?",
+          required: true,
+          allowCustomAnswer: true,
           options: [
             { label: "Apple", description: "Apple", value: "Apple" },
             { label: "Banana", description: "Banana", value: "Banana" },

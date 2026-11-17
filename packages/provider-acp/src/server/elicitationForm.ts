@@ -243,12 +243,9 @@ export function parseElicitationForm(
           }
         : {}),
       options,
-      ...(kind === "text" ||
-      kind === "number" ||
-      companions.has(id) ||
-      (allowOther && kind === "choice")
+      ...(kind === "text" || kind === "number" || companions.has(id)
         ? {}
-        : { allowCustomAnswer: false }),
+        : { allowCustomAnswer: allowOther && kind === "choice" }),
       ...(kind === "multiChoice" ? { multiSelect: true } : {}),
       ...(kind === "text" && !required.has(id) ? { required: false } : {}),
     });

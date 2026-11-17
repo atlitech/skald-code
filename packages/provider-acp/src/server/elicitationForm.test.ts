@@ -5,12 +5,13 @@ import { parseElicitationForm } from "./elicitationForm.ts";
 describe("parseElicitationForm", () => {
   for (const type of ["string", "array"] as const) {
     it.each([
-      { values: [" padded ", "", "plain"], labels: ["padded", '""', "plain"] },
-      { values: [" a", "a", "b"], labels: ['" a"', '"a"', "b"] },
+      { values: [" padded ", "", "plain"], labels: ["padded", '""', "plain"], allowOther: false },
+      { values: [" a", "a", "b"], labels: ['" a"', '"a"', "b"], allowOther: false },
       { values: [" a", "a", '"a"'], labels: ['" a"', '"a"', '"\\"a\\""'] },
+      { values: ["Apple", "Banana"], labels: ["Apple", "Banana"], allowOther: true },
     ])(
-      `preserves ${type} enum values with distinct readable labels: $values`,
-      ({ values, labels }) => {
+      `preserves ${type} enum values with distinct readable labels: $values (allowOther=$allowOther)`,
+      ({ values, labels, allowOther = false }) => {
         const form = parseElicitationForm(
           {
             type: "object",
@@ -23,6 +24,7 @@ describe("parseElicitationForm", () => {
             required: ["answer"],
           },
           "Choose",
+          { allowOther },
         );
         assert(form !== undefined);
         const question = form.questions[0];
@@ -35,8 +37,11 @@ describe("parseElicitationForm", () => {
           question.options.map((option) => option.value),
           values,
         );
-        assert.strictEqual(question.allowCustomAnswer, false);
+        assert.strictEqual(question.allowCustomAnswer, allowOther && type === "string");
         assert.strictEqual(question.multiSelect, type === "array" ? true : undefined);
+        if (allowOther && type === "string") {
+          assert.deepStrictEqual(form.content({ answer: "Mango" }), { answer: "Mango" });
+        }
         for (const value of values) {
           const answer = type === "array" ? [value] : value;
           assert.deepStrictEqual(form.content({ answer }), { answer });
