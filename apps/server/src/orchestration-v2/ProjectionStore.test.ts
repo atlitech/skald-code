@@ -153,6 +153,7 @@ const assertShellIndexCoversShells = Effect.fnUntraced(function* () {
       | "id"
       | "projectId"
       | "lineage"
+      | "groupingParentThreadId"
       | "settledOverride"
       | "settledAt"
       | "pinnedAt"
@@ -163,6 +164,7 @@ const assertShellIndexCoversShells = Effect.fnUntraced(function* () {
     id: row.id,
     projectId: row.projectId,
     lineage: row.lineage,
+    groupingParentThreadId: row.groupingParentThreadId ?? null,
     settledOverride: row.settledOverride,
     settledAt: iso(row.settledAt),
     pinnedAt: iso(row.pinnedAt),

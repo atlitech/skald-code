@@ -48,6 +48,7 @@ it.live("reports failure when the Windows cleanup shell cannot start", () =>
           }),
           withStopped: (operation) => operation,
           restart: Effect.die("unexpected restart"),
+          stop: Effect.die("unexpected stop"),
           install: () => Effect.die("unexpected install"),
           uninstall: Effect.die("unexpected uninstall"),
         }),

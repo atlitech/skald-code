@@ -5868,7 +5868,11 @@ it.layer(layerTest)("OrchestrationV2LayerLive lifecycle", (it) => {
               (message) => message.notification !== undefined && message.notification !== null,
             ),
         );
-        const reactor = yield* PullRequestWatchReactor.make.pipe(Effect.provide(host));
+        const reactor = yield* PullRequestWatchReactor.make.pipe(
+          Effect.provide(
+            Layer.merge(host, ServerSettings.layerTest({ enablePullRequestWatch: true })),
+          ),
+        );
         const worker = yield* EffectWorker.OrchestrationEffectWorkerV2;
         yield* reactor.start();
         // The first sweep listed watches before this one existed, so it cannot be the read below.
