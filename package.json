@@ -20,6 +20,7 @@
     "ios:personal": "node scripts/mobile-personal-ios.ts",
     "icons:export": "node scripts/export-brand-icons.ts",
     "icons:check": "node scripts/export-brand-icons.ts --check",
+    "i18n:check": "node scripts/i18n-check.ts",
     "licenses:sync": "node scripts/sync-third-party-license-notices.ts",
     "icons:export:android": "node scripts/export-android-icons.ts",
     "icons:export:skald": "node scripts/export-skald-icons.ts",

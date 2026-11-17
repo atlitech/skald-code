@@ -32,6 +32,7 @@ import {
   pinnedRuntimeVersionsDir,
   isUnpublishedRelease,
   PinnedRuntimeInstallError,
+  PinnedRuntimePreflightBlockedError,
   prunePinnedRuntimes,
   recordPinnedRuntimeLauncher,
   resolveLauncherPath,
@@ -43,7 +44,11 @@ import {
   runStagedServicePreflight,
   SERVICE_PREFLIGHT_UNSUPPORTED_STEP,
 } from "../cloud/servicePreflight.ts";
-import { compareExactServiceVersions, isExactServiceVersion } from "../cloud/serviceProtocol.ts";
+import {
+  compareExactServiceVersions,
+  isExactServiceVersion,
+  SERVICE_LAUNCHER_PROTOCOL,
+} from "../cloud/serviceProtocol.ts";
 import * as ManagedPolicy from "../policy/ManagedPolicy.ts";
 import { managedUpdateMirror, managedUpdateRefusal } from "../policy/managedUpdates.ts";
 import * as ProcessRunner from "../processRunner.ts";
@@ -279,8 +284,8 @@ export const updateCommand = Command.make("update", {
       return yield* runUpdate({
         baseDir: config.baseDir,
         logsDir: config.logsDir,
+        databasePath: config.dbPath,
         serverRuntimeStatePath: config.serverRuntimeStatePath,
-        dbPath: config.dbPath,
         channel: Option.getOrUndefined(flags.channel),
         requestedVersion: Option.getOrUndefined(flags.version),
         allowDowngrade: flags.allowDowngrade,
@@ -392,8 +397,8 @@ const belongsToBootService = Effect.fn("cli.update.belongs_to_boot_service")(fun
 export const runUpdate = Effect.fn("cli.update.run")(function* (input: {
   readonly baseDir: string;
   readonly logsDir: string;
+  readonly databasePath: string;
   readonly serverRuntimeStatePath: string;
-  readonly dbPath: string;
   readonly channel: CliReleaseChannel | undefined;
   readonly requestedVersion: string | undefined;
   readonly allowDowngrade: boolean;
@@ -569,11 +574,12 @@ export const runUpdate = Effect.fn("cli.update.run")(function* (input: {
     releaseBaseUrl,
     admittedArchiveSha256,
     requirePublishedRelease: mirror !== undefined,
-    validate: (paths) =>
-      runner
+    validate: (runtime) => {
+      const command = pinnedRuntimeCommand(runtime);
+      return runner
         .run({
-          command: pinnedRuntimeCommand(paths).command,
-          args: [...pinnedRuntimeCommand(paths).args, "--version"],
+          command: command.command,
+          args: [...command.args, "--version"],
           timeout: Duration.seconds(30),
         })
         .pipe(
@@ -591,14 +597,13 @@ export const runUpdate = Effect.fn("cli.update.run")(function* (input: {
                   }),
                 ),
           ),
-          // Migrates a copy of this home's database with the new runtime, so a
-          // version that cannot read the data is refused before anything moves.
           Effect.andThen(
             runStagedServicePreflight({
               runner,
-              runtime: paths,
-              databasePath: input.dbPath,
+              runtime,
               targetVersion,
+              databasePath: input.databasePath,
+              launcherProtocol: isDowngrade ? 3 : SERVICE_LAUNCHER_PROTOCOL,
             }).pipe(
               Effect.catchIf(
                 (error) =>
@@ -610,10 +615,21 @@ export const runUpdate = Effect.fn("cli.update.run")(function* (input: {
                     "The downgrade target has no update preflight; its database check was skipped.",
                   ).pipe(Effect.annotateLogs({ targetVersion })),
               ),
+              Effect.catchTags({
+                PinnedRuntimeInstallError: (error) =>
+                  Effect.fail(
+                    error.exitCode === undefined
+                      ? error
+                      : new PinnedRuntimePreflightBlockedError({
+                          version: targetVersion,
+                          reason: `t3@${targetVersion} could not confirm it supports this database (its check exited with code ${error.exitCode}), so t3 did not switch to it.`,
+                        }),
+                  ),
+              }),
             ),
           ),
-          Effect.asVoid,
-        ),
+        );
+    },
   }).pipe(
     Effect.ensuring(Effect.sync(progress.finish)),
     Effect.mapError((error) => {
