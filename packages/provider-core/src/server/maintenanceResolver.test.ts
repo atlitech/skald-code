@@ -622,6 +622,175 @@ it.layer(
     });
   });
 
+  it.effect.each([
+    {
+      command: "claude",
+      provider: "claudeAgent",
+      packageName: "@anthropic-ai/claude-code",
+      install: "native",
+    },
+    { command: "codex", provider: "codex", packageName: "@openai/codex", install: "native" },
+    {
+      command: "claude",
+      provider: "claudeAgent",
+      packageName: "@anthropic-ai/claude-code",
+      install: "npm",
+    },
+    { command: "codex", provider: "codex", packageName: "@openai/codex", install: "npm" },
+  ])(
+    "updates the $install $command installation behind an account wrapper",
+    (fixture, { skip }) => {
+      if (windowsHost || !symlinksSupported) skip();
+      return Effect.gen(function* () {
+        const tempDir = yield* makeTempDir("t3-account-wrapper");
+        yield* Effect.addFinalizer(() =>
+          Effect.sync(() => NodeFS.rmSync(tempDir, { recursive: true, force: true })),
+        );
+        const installHome = NodePath.join(
+          tempDir,
+          fixture.command === "claude" ? "cli" : "CLI home",
+        );
+        const realBinary =
+          fixture.install === "npm"
+            ? NodePath.join(
+                installHome,
+                "lib/node_modules",
+                fixture.packageName,
+                "bin",
+                `${fixture.command}.js`,
+              )
+            : fixture.command === "claude"
+              ? NodePath.join(installHome, ".local/share/claude/versions/2.1.325")
+              : NodePath.join(installHome, "packages/standalone/releases/0.1.0/bin/codex");
+        writeExecutable(realBinary);
+        const target = NodePath.join(installHome, "bin", fixture.command);
+        NodeFS.mkdirSync(NodePath.dirname(target), { recursive: true });
+        NodeFS.symlinkSync(realBinary, target);
+        const wrapper = NodePath.join(tempDir, `${fixture.command}-hub`);
+        writeExecutable(wrapper);
+        const config =
+          fixture.command === "claude"
+            ? "export CLAUDE_CONFIG_DIR=/home/me/.claude-hub"
+            : "export CODEX_HOME=/home/me/.codex-hub\nCLIPROXY_API_KEY=$(cat /missing/access-key)\nexport CLIPROXY_API_KEY";
+        const targetWord = fixture.command === "claude" ? target : `"${target}"`;
+        const script = `#!/bin/sh\nset -eu\n${config}\nexec ${targetWord} "$@"\n`;
+        NodeFS.writeFileSync(wrapper, script);
+        const resolver = makePackageManagedProviderMaintenanceResolver({
+          provider: driver(fixture.provider),
+          npmPackageName: fixture.packageName,
+          nativeUpdate: {
+            args: ["update"],
+            requiresCommandPath: true,
+            isCommandPath: (commandPath) =>
+              commandPath === realBinary && fixture.install === "native",
+            ...(fixture.command === "codex"
+              ? {
+                  env: (context: { realCommandPath: string }) => ({
+                    CODEX_HOME: context.realCommandPath.split("/packages/standalone/")[0],
+                  }),
+                }
+              : {}),
+          },
+        });
+        const capabilities = yield* resolveProviderMaintenanceCapabilitiesEffect(resolver, {
+          binaryPath: wrapper,
+          env: { PATH: "" },
+        }).pipe(Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, noSpawn));
+
+        expect(capabilities.update).toMatchObject(
+          fixture.install === "npm"
+            ? {
+                executable: "npm",
+                args: [
+                  "install",
+                  "-g",
+                  "--prefix",
+                  installHome,
+                  `--allow-scripts=${fixture.packageName}`,
+                  `${fixture.packageName}@latest`,
+                ],
+              }
+            : {
+                executable: target,
+                args: ["update"],
+                lockKey: `${fixture.provider}-native`,
+                ...(fixture.command === "codex" ? { env: { CODEX_HOME: installHome } } : {}),
+              },
+        );
+        expect(
+          createProviderVersionAdvisory({
+            driver: driver(fixture.provider),
+            currentVersion: "1.0.0",
+            latestVersion: "1.1.0",
+            maintenanceCapabilities: capabilities,
+          }).canUpdate,
+        ).toBe(true);
+        expect(NodeFS.readFileSync(wrapper, "utf8")).toBe(script);
+      });
+    },
+  );
+
+  it.effect.each([
+    { name: "conditional execution", setup: "if true; then", invocation: 'exec TARGET "$@"\nfi' },
+    { name: "a PATH override", setup: "export PATH=/other/bin", invocation: 'exec TARGET "$@"' },
+    { name: "an unknown setup command", setup: "prepare-provider", invocation: 'exec TARGET "$@"' },
+    { name: "a dynamic target", setup: "", invocation: 'exec "$(which codex)" "$@"' },
+    { name: "extra arguments", setup: "", invocation: 'exec TARGET --profile hub "$@"' },
+    {
+      name: "a command after an assignment",
+      setup: "export CODEX_HOME=/tmp; prepare-provider",
+      invocation: 'exec TARGET "$@"',
+    },
+    {
+      name: "an arbitrary command substitution",
+      setup: "OPENAI_API_KEY=$(prepare-provider)",
+      invocation: 'exec TARGET "$@"',
+    },
+    { name: "a relative target", setup: "", invocation: 'exec ./codex "$@"' },
+    { name: "a missing target", setup: "", invocation: 'exec /missing/bin/codex "$@"' },
+    {
+      name: "another provider's executable",
+      setup: "",
+      invocation: 'exec OTHER "$@"',
+    },
+    {
+      name: "an oversized script",
+      setup: `# ${"x".repeat(16 * 1024)}`,
+      invocation: 'exec TARGET "$@"',
+    },
+  ])("keeps an account wrapper with $name manual-only", (fixture, { skip }) => {
+    if (windowsHost) skip();
+    return Effect.gen(function* () {
+      const tempDir = yield* makeTempDir("t3-unsupported-account-wrapper");
+      yield* Effect.addFinalizer(() =>
+        Effect.sync(() => NodeFS.rmSync(tempDir, { recursive: true, force: true })),
+      );
+      const target = NodePath.join(tempDir, "packages/standalone/bin/codex");
+      writeExecutable(target);
+      writeExecutable(NodePath.join(NodePath.dirname(target), "claude"));
+      const wrapper = NodePath.join(tempDir, "codex-hub");
+      writeExecutable(wrapper);
+      NodeFS.writeFileSync(
+        wrapper,
+        `#!/bin/sh\n${fixture.setup}\n${fixture.invocation.replace("TARGET", target).replace("OTHER", NodePath.join(NodePath.dirname(target), "claude"))}\n`,
+      );
+      const capabilities = yield* resolveProviderMaintenanceCapabilitiesEffect(
+        makePackageManagedProviderMaintenanceResolver({
+          provider: driver("codex"),
+          npmPackageName: "@openai/codex",
+          nativeUpdate: {
+            args: ["update"],
+            requiresCommandPath: true,
+            isCommandPath: (commandPath) => commandPath.includes("/packages/standalone/"),
+          },
+        }),
+        { binaryPath: wrapper, env: { PATH: "" } },
+      ).pipe(Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, noSpawn));
+      expect(capabilities.update).toBeNull();
+      expect(capabilities.installPath).toBe(wrapper);
+    });
+  });
+
   it("offers the update when an owned install is behind", () => {
     expect(
       createProviderVersionAdvisory({

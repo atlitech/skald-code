@@ -788,7 +788,9 @@ export const resolvePackageManagedProviderMaintenance = Effect.fn(
       packageName: definition.npmPackageName,
     });
   }
-  const context = yield* followVitePlusSystemFirstShim(configuredContext);
+  const context = yield* followAccountWrapper(definition.provider, configuredContext).pipe(
+    Effect.flatMap(followVitePlusSystemFirstShim),
+  );
   const manual = makeManualOnlyProviderMaintenanceCapabilities({
     provider: definition.provider,
     packageName: definition.npmPackageName,
@@ -1076,6 +1078,58 @@ const readWrapperScript = Effect.fn("readWrapperScript")(function* (commandPath:
   );
   if (size > WRAPPER_SCRIPT_MAX_BYTES) return "";
   return yield* fileSystem.readFileString(commandPath).pipe(Effect.orElseSucceed(() => ""));
+});
+
+function literalShellWord(value: string): string | null {
+  if (!/^(?:[\w./:@%+=,-]+|'[^']*'|"[^"$`\\]*")$/.test(value)) return null;
+  return value.startsWith("'") || value.startsWith('"') ? value.slice(1, -1) : value;
+}
+
+function isAccountWrapperSetup(line: string): boolean {
+  if (/^set -[eu]+$/.test(line)) return true;
+  const assignment = /^(export\s+)?([A-Z_][A-Z_0-9]*)(?:=(.*))?$/.exec(line);
+  if (!assignment) return false;
+  const [, exported, name, value] = assignment;
+  if (
+    !/^(?:CLAUDE_CONFIG_DIR|CODEX_HOME|ANTHROPIC_[A-Z_0-9]+|OPENAI_[A-Z_0-9]+|CLIPROXY_[A-Z_0-9]+)$/.test(
+      name!,
+    )
+  )
+    return false;
+  if (value === undefined) return Boolean(exported);
+  if (literalShellWord(value) !== null) return true;
+  // Recognize credential-file assignments without reading the file or evaluating shell code.
+  const credentialFile = /^\$\(cat (.+)\)$/.exec(value)?.[1];
+  return credentialFile !== undefined && literalShellWord(credentialFile)?.startsWith("/") === true;
+}
+
+const followAccountWrapper = Effect.fn("followAccountWrapper")(function* (
+  provider: ProviderDriverKind,
+  context: ProviderMaintenanceResolutionContext,
+) {
+  if (context.platform === "win32" || (provider !== "claudeAgent" && provider !== "codex")) {
+    return context;
+  }
+  const script = yield* readWrapperScript(context.realCommandPath);
+  const lines = script.split(/\r?\n/).map((line) => line.trim());
+  if (!/^#!\s*\/(?:bin\/(?:ba)?sh|usr\/bin\/env (?:ba)?sh)$/.test(lines.shift() ?? ""))
+    return context;
+  const commands = lines.filter((line) => line && !line.startsWith("#"));
+  const executable = /^exec\s+(.+)\s+"\$@"$/.exec(commands.pop() ?? "")?.[1];
+  if (!executable || !commands.every(isAccountWrapperSetup)) return context;
+  const target = literalShellWord(executable);
+  if (!target?.startsWith("/")) return context;
+  const path = yield* Path.Path;
+  if (path.basename(target) !== (provider === "codex" ? "codex" : "claude")) return context;
+  const resolvedCommandPath = yield* resolveCommandPath(target, { env: context.env });
+  if (!resolvedCommandPath) return context;
+  const fileSystem = yield* FileSystem.FileSystem;
+  const realCommandPath = yield* fileSystem
+    .realPath(resolvedCommandPath)
+    .pipe(Effect.orElseSucceed(() => null));
+  if (!realCommandPath || realCommandPath === context.realCommandPath) return context;
+  // Account configuration stays on agent launches; maintenance uses the installation's own home.
+  return { ...context, binaryPath: target, resolvedCommandPath, realCommandPath };
 });
 
 const isMiseWrapperScript = Effect.fn("isMiseWrapperScript")(function* (

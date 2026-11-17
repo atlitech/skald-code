@@ -234,6 +234,12 @@ Cursor and Antigravity update with T3 Code. Homebrew and Chocolatey installs
 compare against the version their package manager offers, which can trail the
 npm release; update Claude installed with Chocolatey through Chocolatey.
 
+On macOS and Linux, **Update now** also supports simple Claude and Codex shell
+wrappers that set account variables and launch an identifiable CLI by its absolute
+path with `exec`. Keep the wrapper as your **Binary path**: T3 Code updates the
+underlying CLI while preserving your account and proxy configuration. A separate
+proxy server still needs its own updates.
+
 The managed runtimes for Antigravity and for Codex connected through ChatGPT
 first install the release T3 Code tested. When T3 Code finds a newer compatible
 release, their setup in **Settings → Providers** offers an update.
