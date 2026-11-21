@@ -1973,7 +1973,7 @@ it.effect.each([false, true])("rejects thread.create for an existing id (deleted
   }).pipe(Effect.provide(layerTest)),
 );
 
-it.effect("starts and finishes a delegated task without reading the parent's history", () =>
+it.effect("starts, finishes and follows up a task without reading the parent's history", () =>
   Effect.gen(function* () {
     const orchestrator = yield* Orchestrator.OrchestratorV2;
     const projections = yield* ProjectionStore.ProjectionStoreV2;
@@ -2049,10 +2049,11 @@ it.effect("starts and finishes a delegated task without reading the parent's his
       });
     }
 
-    // Keep the statements of the task start and finish operations, not of the recovery around them.
+    // Keep the statements of the task start, finish and follow-up, not of the recovery around them.
     const taskSpans = [
       "orchestrationV2.dispatch.delegatedTaskRequest",
       "Orchestrator.finalizeAppOwnedSubagent",
+      "test.followUp",
     ];
     const statements: Array<readonly [string, ReadonlyArray<unknown>]> = [];
     const recordStatements = Effect.provideService(
@@ -2133,9 +2134,38 @@ it.effect("starts and finishes a delegated task without reading the parent's his
       ["completed", "claimed", "completed", "completed", [task.id]],
     );
 
-    // Start and finish read the task's own records, so their VM steps, which are deterministic,
-    // must stay flat on a copy with a long parent history. Left out: the counts that number the
-    // task and its wake, which walk one index.
+    // A person's follow-up to the finished child binds a new task to the parent's running run.
+    yield* orchestrator
+      .dispatch({
+        type: "message.dispatch",
+        commandId: CommandId.make("follow-up-long-parent"),
+        threadId: childThreadId,
+        messageId: MessageId.make("message:long-parent:follow-up"),
+        text: "One more thing",
+        attachments: [],
+        dispatchMode: { type: "start_immediately" },
+        createdBy: "user",
+        creationSource: "web",
+      })
+      .pipe(Effect.withSpan("test.followUp"), recordStatements);
+    const followedUp = yield* projections.getThreadRecords(parentThreadId, [
+      "subagents",
+      "turnItems",
+    ]);
+    const followUp = followedUp.subagents.find((candidate) => candidate.id !== task.id);
+    assert.deepEqual(
+      [
+        followUp?.runId,
+        followedUp.turnItems.find(
+          (item) => item.type === "subagent" && item.subagentId === followUp?.id,
+        )?.providerTurnId,
+      ],
+      [parentRun.id, providerTurnId],
+    );
+
+    // Start, finish and follow-up read the task's own records and the run it binds to, so their VM
+    // steps, which are deterministic, must stay flat on a copy with a long parent history. Left out:
+    // the counts that number the task and its wake, which walk one index.
     const copyPath = "file:/delegated-task-reads?vfs=memdb";
     using copy = new NodeSqlite.DatabaseSync(copyPath);
     yield* sql`VACUUM INTO ${copyPath}`;
@@ -2176,10 +2206,173 @@ it.effect("starts and finishes a delegated task without reading the parent's his
       "target_thread_id",
     ]);
     addHistory("runs", "run_id");
+    // The history's runs have ended; only the parent's own run is still going.
+    copy.exec(`UPDATE orchestration_v2_projection_runs
+      SET status = 'completed', completed_at = requested_at WHERE run_id LIKE '%:history:%'`);
     addHistory("run_attempts", "attempt_id", ["run_id"]);
     addHistory("messages", "message_id");
     addHistory("provider_turns", "provider_turn_id", ["run_attempt_id"]);
     assert.isAtMost(readSteps(), shortSteps * 1.1);
+  }).pipe(Effect.provide(layerTest)),
+);
+
+it.effect("records a secret and a link card without reading the thread's history", () =>
+  Effect.gen(function* () {
+    const orchestrator = yield* Orchestrator.OrchestratorV2;
+    const projections = yield* ProjectionStore.ProjectionStoreV2;
+    const sql = yield* SqlClient.SqlClient;
+    const threadId = ThreadId.make("thread:long-cards");
+    const now = yield* DateTime.now;
+    yield* orchestrator.dispatch({
+      type: "thread.create",
+      commandId: CommandId.make("create-long-cards"),
+      threadId,
+      projectId: ProjectId.make("project:long-cards"),
+      title: "Cards",
+      modelSelection,
+      runtimeMode: "full-access",
+      interactionMode: "default",
+      branch: null,
+      worktreePath: null,
+      createdBy: "user",
+      creationSource: "web",
+    });
+    yield* orchestrator.dispatch({
+      type: "message.dispatch",
+      commandId: CommandId.make("start-long-cards"),
+      threadId,
+      messageId: MessageId.make("message:long-cards"),
+      text: "Ask for a token and a link",
+      attachments: [],
+      dispatchMode: { type: "start_immediately" },
+      createdBy: "user",
+      creationSource: "web",
+    });
+    const run = (yield* projections.getThreadRecords(threadId, ["runs"])).runs[0]!;
+    const providerTurnId = ProviderTurnId.make("provider-turn:long-cards");
+    yield* projections.apply({
+      id: EventId.make("event:long-cards:provider-turn"),
+      type: "provider-turn.updated",
+      threadId,
+      runId: run.id,
+      occurredAt: now,
+      payload: {
+        id: providerTurnId,
+        providerThreadId: run.providerThreadId!,
+        nodeId: run.rootNodeId!,
+        runAttemptId: run.activeAttemptId,
+        nativeTurnRef: null,
+        ordinal: 1,
+        status: "running",
+        startedAt: now,
+        completedAt: null,
+      },
+    });
+
+    const cardSpans = [
+      "orchestrationV2.dispatch.secretRequestRecord",
+      "orchestrationV2.dispatch.linkRequestRecord",
+    ];
+    const statements: Array<readonly [string, ReadonlyArray<unknown>]> = [];
+    const recordStatements = Effect.provideService(
+      Statement.CurrentTransformer,
+      (statement, _make, _fiber, span) => {
+        for (
+          let parent = Option.some<Tracer.AnySpan>(span);
+          Option.isSome(parent) && parent.value._tag === "Span";
+          parent = parent.value.parent
+        ) {
+          if (cardSpans.includes(parent.value.name)) {
+            statements.push(statement.compile());
+            break;
+          }
+        }
+        return Effect.succeed(statement);
+      },
+    );
+    const card = {
+      threadId,
+      runId: run.id,
+      nodeId: run.rootNodeId!,
+      reason: "Needed for the work",
+    };
+    yield* orchestrator
+      .dispatch({
+        ...card,
+        type: "secret_request.record",
+        commandId: CommandId.make("record-long-cards:secret"),
+        turnItemId: TurnItemId.make("item:long-cards:secret"),
+        label: "Token",
+        secretStatus: "pending",
+      })
+      .pipe(recordStatements);
+    yield* orchestrator
+      .dispatch({
+        ...card,
+        type: "link_request.record",
+        commandId: CommandId.make("record-long-cards:link"),
+        turnItemId: TurnItemId.make("item:long-cards:link"),
+        url: "https://example.test",
+        linkStatus: "pending",
+      })
+      .pipe(recordStatements);
+    const { turnItems } = yield* projections.getThreadRecords(threadId, ["turnItems"], {
+      turnItemTypes: ["secret_request", "link_request"],
+    });
+    assert.deepEqual(
+      turnItems.map((item) => [item.type, item.providerTurnId]),
+      [
+        ["secret_request", providerTurnId],
+        ["link_request", providerTurnId],
+      ],
+    );
+
+    // A card reads its own run, so the rows and VM steps of its reads, which are deterministic,
+    // must stay flat on a copy where the thread has thousands of older runs.
+    const copyPath = "file:/card-reads?vfs=memdb";
+    using copy = new NodeSqlite.DatabaseSync(copyPath);
+    yield* sql`VACUUM INTO ${copyPath}`;
+    const replay = () =>
+      statements
+        .filter(([query]) => /^\s*(SELECT|WITH)\b/.test(query))
+        .reduce(
+          (total, [query, params]) => {
+            const statement = copy.prepare(query);
+            const rows = statement.all(...(params as ReadonlyArray<NodeSqlite.SQLInputValue>));
+            return {
+              rows: total.rows + rows.length,
+              steps: total.steps + statement.stat("vmStep"),
+            };
+          },
+          { rows: 0, steps: 0 },
+        );
+    const short = replay();
+    const history: ReadonlyArray<readonly [string, string, ReadonlyArray<string>]> = [
+      ["runs", "run_id", []],
+      ["run_attempts", "attempt_id", ["run_id"]],
+      ["nodes", "node_id", ["run_id"]],
+      ["provider_turns", "provider_turn_id", ["run_attempt_id"]],
+    ];
+    for (const [table, key, renamed] of history) {
+      const name = `orchestration_v2_projection_${table}`;
+      const columns = copy
+        .prepare(`SELECT name FROM pragma_table_info('${name}')`)
+        .all()
+        .map((column) => String(column.name));
+      const values = columns.map((column) =>
+        column === key || renamed.includes(column)
+          ? `${column} || ':history:' || history.n`
+          : column === "ordinal"
+            ? "ordinal + history.n"
+            : column,
+      );
+      copy.exec(`WITH RECURSIVE history(n) AS (SELECT 1 UNION ALL SELECT n + 1 FROM history WHERE n < 2000)
+        INSERT INTO ${name} (${columns.join(", ")})
+        SELECT ${values.join(", ")} FROM ${name}, history WHERE thread_id = '${threadId}'`);
+    }
+    const long = replay();
+    assert.equal(long.rows, short.rows);
+    assert.isAtMost(long.steps, short.steps * 1.1);
   }).pipe(Effect.provide(layerTest)),
 );
 
@@ -3238,6 +3431,18 @@ it.effect(
         threadId: siblingId,
         groupingParentThreadId: childId,
       });
+      const sideChatId = ThreadId.make("thread:group-grandchild-side-chat");
+      yield* orchestrator.dispatch({
+        type: "thread.fork",
+        commandId: CommandId.make("fork-group-side-chat"),
+        sourceThreadId: siblingId,
+        targetThreadId: sideChatId,
+        sourcePoint: { type: "latest_stable" },
+        sideChat: true,
+        createdBy: "user",
+        creationSource: "web",
+      });
+      assert.isNull((yield* projections.getThreadShell(sideChatId))?.groupingParentThreadId);
       const snoozedUntil = "2099-07-25T09:00:00.000Z";
       for (const action of [
         { type: "thread.settle" },
@@ -3252,9 +3457,10 @@ it.effect(
           threadId: parentId,
         };
         const result = yield* orchestrator.dispatch(command);
+        const follows = action.type === "thread.archive" || action.type === "thread.unarchive";
         assert.deepEqual(
           new Set(result.storedEvents.map(({ event }) => event.threadId)),
-          new Set([parentId, childId, siblingId]),
+          new Set([parentId, childId, siblingId, ...(follows ? [sideChatId] : [])]),
         );
         const parent = yield* projections.getThread(parentId);
         for (const threadId of [childId, siblingId]) {
@@ -3291,9 +3497,11 @@ it.effect(
         yield* orchestrator.dispatch({
           type: leafAction,
           commandId: CommandId.make(`leaf-before-group:${groupAction}`),
-          threadId: siblingId,
+          threadId: leafAction === "thread.unarchive" ? childId : siblingId,
         });
         const leafArchivedAt = (yield* projections.getThread(siblingId)).archivedAt;
+        assert.deepEqual((yield* projections.getThread(sideChatId)).archivedAt, leafArchivedAt);
+        yield* TestClock.adjust("1 second");
         const result = yield* orchestrator.dispatch({
           type: groupAction,
           commandId: CommandId.make(`group-with-leaf-done:${groupAction}`),
@@ -3302,6 +3510,7 @@ it.effect(
         const touched = new Set(result.storedEvents.map(({ event }) => event.threadId));
         assert.isTrue(touched.has(parentId));
         assert.isFalse(touched.has(siblingId));
+        assert.isFalse(touched.has(sideChatId));
         assert.deepEqual((yield* projections.getThread(siblingId)).archivedAt, leafArchivedAt);
         if (groupAction !== "thread.settle") {
           assert.deepEqual(
@@ -3322,9 +3531,9 @@ it.effect(
       });
       assert.deepEqual(
         new Set(deletion.storedEvents.map(({ event }) => event.threadId)),
-        new Set([parentId, childId, siblingId]),
+        new Set([parentId, childId, siblingId, sideChatId]),
       );
-      for (const threadId of [parentId, childId, siblingId]) {
+      for (const threadId of [parentId, childId, siblingId, sideChatId]) {
         assert.isNotNull((yield* projections.getThread(threadId)).deletedAt);
       }
       const unrelated = yield* projections.getThread(otherId);

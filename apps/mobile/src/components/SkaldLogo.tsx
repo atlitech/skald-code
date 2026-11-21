@@ -1,4 +1,5 @@
 import { Image } from "expo-image";
+import { MOBILE_PRODUCT_NAME } from "../lib/mobileBranding";
 import { useAppearancePreferences } from "../features/settings/appearance/AppearancePreferencesProvider";
 
 export function SkaldLogo(props: { readonly height: number }) {
@@ -10,7 +11,7 @@ export function SkaldLogo(props: { readonly height: number }) {
           ? require("../../../../assets/skald/skald-code-logo-horizontal-on-dark.svg")
           : require("../../../../assets/skald/skald-code-logo-horizontal.svg")
       }
-      accessibilityLabel="Skald Code"
+      accessibilityLabel={MOBILE_PRODUCT_NAME}
       accessibilityIgnoresInvertColors
       contentFit="contain"
       style={{ height: props.height, aspectRatio: 1340.45 / 242.27 }}

@@ -1,7 +1,8 @@
 import { RegistryContext } from "@effect/atom-react";
 import { claimThreadOpen } from "@t3tools/client-runtime/state/thread-search";
 import { EnvironmentId, type ScopedThreadRef, ThreadId } from "@t3tools/contracts";
-import { AsyncResult, Atom, AtomRegistry } from "effect/reactivity";
+import * as Effect from "effect/Effect";
+import { Atom, AtomRegistry } from "effect/reactivity";
 import { expect, it, vi } from "vite-plus/test";
 
 import { act, fakeTimers, render } from "../../../test/render";
@@ -40,7 +41,7 @@ const threadB: ScopedThreadRef = { environmentId: ENVIRONMENT, threadId: ThreadI
 
 function setup() {
   mocks.visitRun.mockReset();
-  mocks.visitRun.mockResolvedValue(AsyncResult.success(undefined));
+  mocks.visitRun.mockReturnValue(Effect.void);
   const registry = AtomRegistry.make();
   return { registry, [Symbol.dispose]: () => registry.dispose() };
 }

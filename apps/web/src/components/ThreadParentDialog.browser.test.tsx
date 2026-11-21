@@ -7,6 +7,8 @@ import {
   ThreadId,
   type OrchestrationV2ListThreadGroupingParentsResult,
 } from "@t3tools/contracts";
+import * as Deferred from "effect/Deferred";
+import * as Effect from "effect/Effect";
 import { AsyncResult, Atom, AtomRegistry } from "effect/reactivity";
 import { expect, it, vi } from "vite-plus/test";
 import { page, userEvent } from "vite-plus/test/browser";
@@ -18,15 +20,6 @@ import { environmentSession } from "../state/session";
 import { environmentThreadShells, threadEnvironment } from "../state/threads";
 import { makeThreadFixture } from "../test-fixtures";
 import { openThreadParentDialog, ThreadParentDialogHost } from "./ThreadParentDialog";
-
-function deferredMove() {
-  type Result = Awaited<ReturnType<typeof threadEnvironment.setParent.run>>;
-  let resolve!: (result: Result) => void;
-  const promise = new Promise<Result>((resolveResult) => {
-    resolve = resolveResult;
-  });
-  return { promise, resolve };
-}
 
 it("loads server parents, retries search and keeps a failed move open until retry succeeds", async () => {
   const threadRef = {
@@ -73,12 +66,12 @@ it("loads server parents, retries search and keeps a failed move open until retr
   using query = vi
     .spyOn(orchestrationEnvironment, "listThreadGroupingParents")
     .mockImplementation(() => queryAtom);
-  const firstMove = deferredMove();
-  const retryMove = deferredMove();
+  const firstMove = Deferred.makeUnsafe<never, OrchestrationV2DispatchCommandError>();
+  const retryMove = Deferred.makeUnsafe<{ sequence: number }>();
   using move = vi
     .spyOn(threadEnvironment.setParent, "run")
-    .mockImplementationOnce(() => firstMove.promise)
-    .mockImplementationOnce(() => retryMove.promise);
+    .mockReturnValueOnce(Deferred.await(firstMove))
+    .mockReturnValueOnce(Deferred.await(retryMove));
   await using _screen = await render(
     <RegistryContext.Provider value={registry}>
       <ThreadParentDialogHost />
@@ -116,8 +109,9 @@ it("loads server parents, retries search and keeps a failed move open until retr
   await userEvent.keyboard("{Escape}");
   await expect.element(page.getByRole("dialog")).toBeVisible();
   await act(() =>
-    firstMove.resolve(
-      AsyncResult.fail(
+    Deferred.doneUnsafe(
+      firstMove,
+      Effect.fail(
         new OrchestrationV2DispatchCommandError({
           commandId: CommandId.make("move-parent"),
           commandType: "thread.metadata.update",
@@ -132,7 +126,7 @@ it("loads server parents, retries search and keeps a failed move open until retr
   await expect.element(candidate).toBeEnabled();
   await userEvent.click(candidate);
   await expect.element(candidate).toBeDisabled();
-  await act(() => retryMove.resolve(AsyncResult.success({ sequence: 1 })));
+  await act(() => Deferred.doneUnsafe(retryMove, Effect.succeed({ sequence: 1 })));
   await expect.element(page.getByRole("dialog")).not.toBeInTheDocument();
   expect(move).toHaveBeenCalledTimes(2);
   expect(move.mock.calls[1]?.[1]).toMatchObject({
