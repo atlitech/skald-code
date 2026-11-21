@@ -516,11 +516,12 @@ describe("source file scroll", () => {
     using _style = { [Symbol.dispose]: () => style.remove() };
     await preloadHighlighter({ themes: Object.values(DEFAULT_THEMES), langs: ["typescript"] });
     const wrapped = "wrap ".repeat(60);
-    const lines = Array.from({ length: 800 }, (_, i) => `const line${i} = "${wrapped}";`);
-    lines.push(
+    const lines = [
+      "// start",
+      ...Array.from({ length: 799 }, (_, index) => `const line${index} = "${wrapped}";`),
       "const needle = 1;",
       ...Array.from({ length: 40 }, (_, i) => `const tail${i} = ${i};`),
-    );
+    ];
     const contents = lines.join("\n");
     state.file = {
       relativePath: "wrapped.ts",
@@ -528,19 +529,34 @@ describe("source file scroll", () => {
       byteLength: contents.length,
       truncated: false,
     };
-    const scroller = () => document.querySelector<HTMLElement>(".file-preview-virtualizer");
-
-    await using _screen = await render(
+    await using screen = await render(
       <div style={{ width: 500, height: 400, display: "flex", flexDirection: "column" }}>
         {filePreview("wrapped.ts")}
       </div>,
     );
-    await vi.waitFor(() => expect(scroller()?.scrollHeight).toBeGreaterThan(20_000));
-    const shadowRows = () =>
-      [...document.querySelectorAll("*")].flatMap((host) =>
-        host.shadowRoot ? [...host.shadowRoot.querySelectorAll<HTMLElement>("[data-line]")] : [],
+    const wrapToggle = screen.getByRole("button", { name: /^(Enable|Disable) word wrap$/ });
+    await expect.element(wrapToggle).toBeVisible();
+    if (wrapToggle.element().getAttribute("aria-pressed") === "false") await wrapToggle.click();
+    const row = (line: number) =>
+      screen.container
+        .querySelector("diffs-container")
+        ?.shadowRoot?.querySelector<HTMLElement>(`[data-line="${line}"]`);
+    const matchIsVisible = () => {
+      const match = row(801)?.getBoundingClientRect();
+      const viewport = screen.container
+        .querySelector(".file-preview-virtualizer")!
+        .getBoundingClientRect();
+      return (
+        !!match && match.height > 0 && match.top >= viewport.top && match.bottom <= viewport.bottom
       );
-    await userEvent.click(shadowRows().find((row) => row.getAttribute("data-line") === "1")!);
+    };
+    await vi.waitFor(() => {
+      const shortHeight = row(1)!.getBoundingClientRect().height;
+      expect(shortHeight).toBeGreaterThan(0);
+      expect(row(2)!.getBoundingClientRect().height).toBeGreaterThan(shortHeight);
+    });
+    expect(matchIsVisible()).toBe(false);
+    await userEvent.click(row(1)!);
     await vi.waitFor(() => expect(deepActiveElement()?.matches("[data-content]")).toBe(true));
     await userEvent.keyboard(
       isMacPlatform(navigator.platform) ? "{Meta>}f{/Meta}" : "{Control>}f{/Control}",
@@ -548,16 +564,7 @@ describe("source file scroll", () => {
     await vi.waitFor(() => expect(deepActiveElement()).toBeInstanceOf(HTMLInputElement));
     await userEvent.keyboard("needle{Enter}");
 
-    const visibleLines = () => {
-      const viewport = scroller()!.getBoundingClientRect();
-      return shadowRows()
-        .filter((row) => {
-          const box = row.getBoundingClientRect();
-          return box.height > 0 && box.top >= viewport.top && box.bottom <= viewport.bottom;
-        })
-        .map((row) => Number(row.getAttribute("data-line")));
-    };
-    await vi.waitFor(() => expect(visibleLines()).toContain(801));
+    await vi.waitFor(() => expect(matchIsVisible()).toBe(true));
   });
 });
 
