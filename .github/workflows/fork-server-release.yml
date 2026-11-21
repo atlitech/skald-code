@@ -213,7 +213,7 @@ jobs:
     name: Build Mac arm64 desktop app
     needs: guard
     if: github.repository_id == '1406026313' && github.ref == 'refs/heads/atli'
-    runs-on: macos-15
+    runs-on: macos-26
     environment: personal-macos-signing
     # Apple's first notarization for a new team can take several hours.
     timeout-minutes: 360
