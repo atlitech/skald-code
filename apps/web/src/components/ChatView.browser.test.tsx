@@ -400,11 +400,11 @@ it("an interrupted image-only first send of a new thread says it may not have be
     onboardingCompletedAt: "2026-01-01T00:00:00.000Z",
   });
   const draftId = DraftId.make("draft-image-only-interrupted");
-  useComposerDraftStore
-    .getState()
-    .setProjectDraftThreadId(scopeProjectRef(ENVIRONMENT_ID, PROJECT_ID), draftId, {
-      threadId: ThreadId.make("thread-image-only-interrupted"),
-    });
+  const drafts = useComposerDraftStore.getState();
+  using _draft = { [Symbol.dispose]: () => drafts.clearDraftThread(draftId) };
+  drafts.setProjectDraftThreadId(scopeProjectRef(ENVIRONMENT_ID, PROJECT_ID), draftId, {
+    threadId: ThreadId.make("thread-image-only-interrupted"),
+  });
   // A dropped connection interrupts a new thread's launch, which is not resent.
   using launch = holdRpc(ORCHESTRATION_V2_WS_METHODS.launchThread, Effect.interrupt);
   const router = getRouter(createMemoryHistory({ initialEntries: [`/draft/${draftId}`] }));
@@ -535,6 +535,7 @@ it("a stashed prompt ending in a file chip restores with the chip", async () => 
   });
   const draftId = DraftId.make("draft-28338");
   const drafts = useComposerDraftStore.getState();
+  using _draft = { [Symbol.dispose]: () => drafts.clearDraftThread(draftId) };
   drafts.setProjectDraftThreadId(scopeProjectRef(ENVIRONMENT_ID, PROJECT_ID), draftId, {
     threadId: ThreadId.make("thread-28338"),
   });

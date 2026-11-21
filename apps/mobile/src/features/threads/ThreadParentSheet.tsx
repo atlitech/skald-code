@@ -1,6 +1,7 @@
 import type { EnvironmentThreadShell } from "@t3tools/client-runtime/state/shell";
 import { CommandId, type ThreadId } from "@t3tools/contracts";
 import { useAtomValue } from "@effect/atom-react";
+import { T, useGT } from "gt-react-native";
 import { useState } from "react";
 import { LegendList } from "@legendapp/list/react-native";
 import { NativeScrollView } from "../../native/NativeScrollViewMarker";
@@ -20,6 +21,7 @@ export function ThreadParentSheet(props: {
   readonly thread: EnvironmentThreadShell;
   readonly onClose: () => void;
 }) {
+  const gt = useGT();
   const [search, setSearch] = useState("");
   const searchQuery = search.trim();
   const debouncedQuery = useDebouncedValue(searchQuery, 180);
@@ -34,7 +36,7 @@ export function ThreadParentSheet(props: {
     parents.isPending ||
     (!parents.isSuccess && parents.error === null);
   const [pending, setPending] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [moveFailed, setMoveFailed] = useState(false);
   const allowed = useAtomValue(
     threadEnvironment.setParent.permissionAtom(props.thread.environmentId),
   );
@@ -43,7 +45,7 @@ export function ThreadParentSheet(props: {
   const move = async (parent: ThreadId | null) => {
     if (pending || !allowed) return;
     setPending(true);
-    setError(null);
+    setMoveFailed(false);
     const result = await setParent({
       environmentId: props.thread.environmentId,
       input: {
@@ -55,10 +57,10 @@ export function ThreadParentSheet(props: {
     });
     setPending(false);
     if (result._tag === "Success") props.onClose();
-    else setError("Could not move this thread. Try again.");
+    else setMoveFailed(true);
   };
   return (
-    <Sheet title="Move under thread" onClose={props.onClose} dismissDisabled={pending}>
+    <Sheet title={gt("Move under thread")} onClose={props.onClose} dismissDisabled={pending}>
       <LegendList
         renderScrollComponent={NativeScrollView}
         extraData={{ pending, allowed, move }}
@@ -70,8 +72,8 @@ export function ThreadParentSheet(props: {
         ListHeaderComponent={
           <View className="gap-3 pb-3">
             <TextInput
-              accessibilityLabel="Search parent threads"
-              placeholder="Search threads"
+              accessibilityLabel={gt("Search parent threads")}
+              placeholder={gt("Search threads")}
               maxLength={200}
               editable={!pending}
               value={search}
@@ -85,28 +87,36 @@ export function ThreadParentSheet(props: {
                 className="min-h-12 justify-center px-4"
                 onPress={() => void move(null)}
               >
-                <AppText>Move to top level</AppText>
+                <AppText>{gt("Move to top level")}</AppText>
               </Pressable>
             ) : null}
-            {error ? <AppText className="text-danger-foreground">{error}</AppText> : null}
+            {moveFailed ? (
+              <AppText className="text-danger-foreground">
+                <T>Could not move this thread. Try again.</T>
+              </AppText>
+            ) : null}
           </View>
         }
         ListEmptyComponent={
           loading ? (
-            <AppText className="px-4 py-3 text-foreground-muted">Loading threads…</AppText>
+            <AppText className="px-4 py-3 text-foreground-muted">{gt("Loading threads…")}</AppText>
           ) : parents.error !== null ? (
             <View className="gap-3 px-4 py-3">
-              <AppText className="text-danger-foreground">Could not load parent threads.</AppText>
-              <Button label="Try again" onPress={parents.refresh} />
+              <AppText className="text-danger-foreground">
+                <T>Could not load parent threads.</T>
+              </AppText>
+              <Button label={gt("Try again")} onPress={parents.refresh} />
             </View>
           ) : (
-            <AppText className="px-4 py-3 text-foreground-muted">No matching threads</AppText>
+            <AppText className="px-4 py-3 text-foreground-muted">
+              {gt("No matching threads")}
+            </AppText>
           )
         }
         ListFooterComponent={
           !loading && parents.error === null && parents.data?.hasMore ? (
             <AppText className="px-4 py-3 text-foreground-muted">
-              More threads are available. Refine your search to find them.
+              <T>More threads are available. Refine your search to find them.</T>
             </AppText>
           ) : undefined
         }
