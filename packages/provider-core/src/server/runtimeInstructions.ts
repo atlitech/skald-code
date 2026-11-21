@@ -1,15 +1,15 @@
 import type { ProviderAdapterV2RuntimePolicy } from "./ProviderAdapter.ts";
 
 const PULL_REQUEST_LINKING_HEAD = `<pull_request_linking>
-Link each PR you create, take over, or push to: link_pull_request, or link_pull_requests for several, full URL, every stack layer, as your next call. Host tools do not link for you. If linking fails, say so. Skip PRs you only read or review, and PRs named only as background.`;
+Link each PR you create, take over, or push to: next call link_pull_request or link_pull_requests, full URL, every stack layer. If linking fails, say so. Skip PRs you only read or review, or that are background.`;
 
 const PULL_REQUEST_CHILD_INSTRUCTIONS = ` Delegated children never watch, even if the brief says babysit. After PR work, a child's last line is: PR <full URL>, head <SHA>, checks and reviews <state>.`;
 
-const PULL_REQUEST_WATCH_INSTRUCTIONS = ` Call watch_pull_request only when the user asks to watch, monitor or babysit a PR. A ship or merge request alone is not a watch request. Finish any needed branch update and push first, then watch and end your turn. For a standalone merge blocked on checks or reviews, report what's pending; don't start a watcher or poll.${PULL_REQUEST_CHILD_INSTRUCTIONS} Links and watches persist across pushes. Don't implement a T3 watch with sleep, loops, gh --watch, Monitor or ScheduleWakeup. Before handback, call unwatch_pull_request on any PR you watch.`;
+const PULL_REQUEST_WATCH_INSTRUCTIONS = ` Only if asked to watch, monitor or babysit: finish needed pushes, call watch_pull_request and end your turn. Merge alone: report pending checks/reviews; no polling, gh --watch, Monitor or ScheduleWakeup. Links and watches persist across pushes. At handback call unwatch_pull_request on watched PRs.${PULL_REQUEST_CHILD_INSTRUCTIONS}`;
 
 const pullRequestLinkingInstructions = (watch: boolean) =>
-  `${PULL_REQUEST_LINKING_HEAD}${watch ? PULL_REQUEST_WATCH_INSTRUCTIONS : PULL_REQUEST_CHILD_INSTRUCTIONS} A T3 link is for display, not the Skald attempt's PR report. During ship, use the skill's PR creation and Skald gate wait (gate.wait_for_change when admitted). GREEN is not MERGED; a T3 wake is not a landing result. For standalone forge work, when pull_request_* tools are listed, use them, not gh or cafe, to read, list, open, edit, review, reply on, close, or merge PRs, and ci_logs and ci_rerun for their checks. pull_request_create links for you.
-If available, call link_issue for each issue you take on or file, even via CLI; skip issues you only read.
+  `${PULL_REQUEST_LINKING_HEAD}${watch ? PULL_REQUEST_WATCH_INSTRUCTIONS : PULL_REQUEST_CHILD_INSTRUCTIONS} Ship: T3 links don't report attempts. Use the skill's PR creation and Skald gate.wait_for_change when admitted; GREEN isn't MERGED. Standalone PRs/checks: prefer listed pull_request_*, ci_logs and ci_rerun over gh/cafe. pull_request_create links for you.
+If available, call link_issue for issues you take on or file, not reads.
 </pull_request_linking>`;
 
 /** Session-invariant; harnesses with a native system-prompt append can carry it once per session. */

@@ -37,12 +37,9 @@ describe("buildRuntimeInstructions", () => {
     assert.include(instructions, "Links and watches persist across pushes.");
     // The wake message itself carries the do-not-re-watch rule.
     assert.notInclude(instructions, "On a wake");
-    assert.include(
-      instructions,
-      "Call watch_pull_request only when the user asks to watch, monitor or babysit a PR",
-    );
+    assert.include(instructions, "Only if asked to watch, monitor or babysit");
     assert.notInclude(instructions, "merge it now");
-    assert.include(instructions, "then watch and end your turn");
+    assert.include(instructions, "call watch_pull_request and end your turn");
     assert.include(instructions, "never watch, even if the brief says babysit");
     assert.include(
       instructions,
