@@ -31,28 +31,19 @@ describe("buildRuntimeInstructions", () => {
     assert.notInclude(instructions, "list_thread_pull_requests");
   });
 
-  it("waits on a PR only with the watch, never with a poll loop", () => {
+  it("reserves the T3 watch for requested PR monitoring", () => {
     const instructions = buildRuntimeInstructions({ harness: "Codex" });
 
-    assert.notInclude(instructions, "Creation, pending checks, or a merge ask alone is not enough");
     assert.include(instructions, "Links and watches persist across pushes.");
     // The wake message itself carries the do-not-re-watch rule.
     assert.notInclude(instructions, "On a wake");
-    assert.include(
-      instructions,
-      "Call watch_pull_request when asked to monitor or babysit, or when work you were asked to do, such as a merge, still waits on checks or reviews, even after an earlier unwatch",
-    );
+    assert.include(instructions, "Only if asked to watch, monitor or babysit");
     assert.notInclude(instructions, "merge it now");
-    assert.include(instructions, "Otherwise act now or hand back.");
-    assert.include(instructions, "then watch and end your turn");
+    assert.include(instructions, "call watch_pull_request and end your turn");
     assert.include(instructions, "never watch, even if the brief says babysit");
     assert.include(
       instructions,
       "After PR work, a child's last line is: PR <full URL>, head <SHA>, checks and reviews <state>.",
-    );
-    assert.include(
-      instructions,
-      "For PR waits, no sleep, loops, gh --watch, Monitor or ScheduleWakeup.",
     );
     assert.include(instructions, "call unwatch_pull_request");
   });
