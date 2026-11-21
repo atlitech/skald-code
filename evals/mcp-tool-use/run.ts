@@ -345,6 +345,15 @@ export const McpToolUseCase = Schema.Struct({
     /** delegate_task `role` for a delegated child. T3 builds the child's first message from it. */
     delegateRole: Schema.optional(OrchestratorMcpTaskRole),
     context: Schema.optional(Schema.String),
+    externalTools: Schema.optional(
+      Schema.Array(
+        Schema.Struct({
+          name: Schema.String,
+          description: Schema.String,
+          input_schema: Schema.Record(Schema.String, Schema.Unknown),
+        }),
+      ),
+    ),
     priorTurns: Schema.optional(
       Schema.Array(
         Schema.Struct({
@@ -466,8 +475,9 @@ const CODEX_NAMES: Readonly<Record<string, string>> = {
   write_stdin: "write_stdin",
   web__run: "WebFetch",
 };
-export const normalizeToolName = (name: string) => {
+export const normalizeToolName = (name: string, externalTools?: ReadonlyArray<ApiTool>) => {
   const bare = name.slice(name.lastIndexOf(".") + 1);
+  if (externalTools?.some((tool) => tool.name === bare)) return bare;
   return isT3Name(bare)
     ? bare.slice(T3_PREFIX.length)
     : (CODEX_NAMES[bare] ?? bare.slice(bare.lastIndexOf("_") + 1));
@@ -1024,7 +1034,7 @@ export const makeSample = (testCase: McpToolUseCase, base: Base): Sample => {
   return {
     testCase,
     base,
-    tools: [...base.nativeTools],
+    tools: [...base.nativeTools, ...(testCase.setup.externalTools ?? [])],
     repo: testCase.setup.world?.repo ?? "acme/app",
     shell,
     shellUsage: emptyUsage(),
@@ -2186,7 +2196,7 @@ export const answerToolCall = Effect.fn("evaluateMcpToolUse.answerToolCall")(fun
   call: typeof ToolUse.Type,
 ) {
   const { testCase, base, tools } = sample;
-  let name = normalizeToolName(call.name);
+  let name = normalizeToolName(call.name, testCase.setup.externalTools);
   let input = isRecord(call.input) ? call.input : {};
   if (call.name === "web__run") {
     const open = Array.isArray(input.open) ? input.open[0] : undefined;
@@ -2655,8 +2665,8 @@ export const executeCodex = async (
   return valueText(context.__output.join("\n"));
 };
 
-const codexCatalog = (base: Base) => [
-  ...base.t3.map((tool) => ({
+const codexCatalog = ({ base, testCase }: Sample) => [
+  ...[...base.t3, ...(testCase.setup.externalTools ?? [])].map((tool) => ({
     name: tool.name.replace("mcp__t3-code__", "mcp__t3_code__"),
     description: `${valueText(tool.description)}\nInput JSON schema: ${JSON.stringify(tool.input_schema)}`,
   })),
@@ -2770,8 +2780,8 @@ const callModel = (apiKey: string, body: unknown, proxy?: Config["proxy"]) =>
   );
 
 /** A tool call as graded. Claude Code runs an `Agent` in the background unless told otherwise. */
-const recordedCall = (step: number, use: typeof ToolUse.Type): Call => {
-  const tool = normalizeToolName(use.name);
+const recordedCall = (sample: Sample, step: number, use: typeof ToolUse.Type): Call => {
+  const tool = normalizeToolName(use.name, sample.testCase.setup.externalTools);
   const input = normalizeToolInput(use.name, use.input);
   const claudeAgent = tool === "Agent" && !use.name.endsWith("spawn_agent") && isRecord(input);
   return {
@@ -2792,14 +2802,10 @@ const settle = (call: Call | undefined, result: Block) => {
 };
 
 /** Calls that ran. Claude Code rejects a deferred tool that was not loaded, so it never runs. */
-export const ranCalls = (
-  { base, tools }: Sample,
-  step: number,
-  uses: ReadonlyArray<typeof ToolUse.Type>,
-) =>
+export const ranCalls = (sample: Sample, step: number, uses: ReadonlyArray<typeof ToolUse.Type>) =>
   uses
-    .filter((use) => base.codex !== undefined || hasTool(tools, use.name))
-    .map((use) => recordedCall(step, use));
+    .filter((use) => sample.base.codex !== undefined || hasTool(sample.tools, use.name))
+    .map((use) => recordedCall(sample, step, use));
 
 /**
  * Runs one sample until the model ends its turn, uses up its steps, or fails a check that no
@@ -2865,7 +2871,7 @@ const runSample = Effect.fn("evaluateMcpToolUse.runSample")(function* (
           return settle(own, yield* answerToolCall(sample, config, use));
         }
         const answer = (name: string, args: unknown, record = true) => {
-          const tool = normalizeToolName(name);
+          const tool = normalizeToolName(name, testCase.setup.externalTools);
           const normalized = normalizeToolInput(name, args);
           // A code cell's calls are recorded here; a direct function call already was.
           let recorded = own;
@@ -2902,7 +2908,7 @@ const runSample = Effect.fn("evaluateMcpToolUse.runSample")(function* (
               use.name === "exec"
                 ? await executeCodex(
                     valueText(use.input),
-                    codexCatalog(base),
+                    codexCatalog(sample),
                     answer,
                     sample.codeStore,
                   )
