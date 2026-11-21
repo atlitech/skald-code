@@ -2,6 +2,7 @@ import type { EnvironmentThreadShell } from "@t3tools/client-runtime/state/model
 import { isThreadWorking } from "@t3tools/client-runtime/state/thread-inbox";
 import { scopedThreadKey, scopeThreadRef } from "@t3tools/client-runtime/environment";
 import * as Schema from "effect/Schema";
+import { useGT } from "gt-react";
 import { useState, type ReactNode } from "react";
 
 import { useLocalStorage } from "../../hooks/useLocalStorage";
@@ -12,6 +13,7 @@ export interface SidebarChildGroupControl {
   readonly expanded: boolean;
   readonly onToggle: () => void;
   readonly summary: string;
+  readonly threadCountLabel: string;
   readonly attention: boolean;
   readonly containsSelection: boolean;
 }
@@ -122,6 +124,7 @@ export function SidebarThreadGroup(props: SidebarThreadGroupProps) {
 }
 
 function ExpandedThreadGroup(props: SidebarThreadGroupProps) {
+  const gt = useGT();
   const key = scopedThreadKey(scopeThreadRef(props.thread.environmentId, props.thread.id));
   const group = props.groupState.groups.get(key)!;
   const { expansion, visibleChildren } = group;
@@ -160,11 +163,17 @@ function ExpandedThreadGroup(props: SidebarThreadGroupProps) {
       ) ?? []),
     );
   }
+  const threadCountLabel = gt("{count, plural, one {# thread} other {# threads}}", {
+    count: descendants.length,
+  });
   const summary = [
-    `${descendants.length} ${descendants.length === 1 ? "thread" : "threads"}`,
-    ...(working > 0 ? [`${working} working`] : []),
-    ...(attention > 0 ? [`${attention} needs you`] : []),
-  ].join(" · ");
+    threadCountLabel,
+    working > 0 && gt("{count} working", { count: working }),
+    attention > 0 &&
+      gt("{count, plural, one {# needs you} other {# need you}}", { count: attention }),
+  ]
+    .filter(Boolean)
+    .join(" · ");
   const renderChild = (thread: EnvironmentThreadShell, navigationParent: string) => {
     const childKey = scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id));
     return (
@@ -188,6 +197,7 @@ function ExpandedThreadGroup(props: SidebarThreadGroupProps) {
           expanded,
           onToggle: () => props.groupState.toggle(key, "expanded"),
           summary,
+          threadCountLabel,
           attention: attention > 0,
           containsSelection: group.containsSelection,
         },
@@ -222,10 +232,10 @@ function ExpandedThreadGroup(props: SidebarThreadGroupProps) {
                     }
                   >
                     {section === "working"
-                      ? "Working"
+                      ? gt("Working", { $context: "sidebar section" })
                       : section === "snoozed"
-                        ? "Snoozed"
-                        : "Settled"}
+                        ? gt("Snoozed", { $context: "sidebar section" })
+                        : gt("Settled", { $context: "sidebar section" })}
                   </CollapsibleSectionHeader>
                   <ul className="flex flex-col gap-px">
                     {visible.map((thread) => renderChild(thread, shelfKey))}

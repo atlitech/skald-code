@@ -1,6 +1,7 @@
 import type { ColorValue } from "react-native";
 import Svg, { Circle, Path } from "react-native-svg";
 import { withUniwind } from "uniwind";
+import { MOBILE_PRODUCT_NAME } from "../lib/mobileBranding";
 
 const ThemedPath = withUniwind(Path);
 const ThemedCircle = withUniwind(Circle);
@@ -12,7 +13,7 @@ export function SkaldMark(props: {
 }) {
   return (
     <Svg
-      accessibilityLabel="Skald Code"
+      accessibilityLabel={MOBILE_PRODUCT_NAME}
       height={props.height}
       width={props.height}
       viewBox="0 0 378 378"

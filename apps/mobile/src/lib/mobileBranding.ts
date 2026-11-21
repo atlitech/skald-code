@@ -1,3 +1,5 @@
+export const MOBILE_PRODUCT_NAME = "Skald Code";
+
 export type MobileStageLabel = "Beta" | "Dev" | "Nightly";
 
 export function resolveMobileStageLabel(appVariant: unknown): MobileStageLabel {

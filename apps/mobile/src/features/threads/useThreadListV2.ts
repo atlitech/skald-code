@@ -7,6 +7,7 @@ import {
 } from "@t3tools/client-runtime/state/thread-grouping";
 import { nestThreadListItems } from "./nestedThreadList";
 
+import { keepMarked } from "../../i18n/messages";
 import { scopedProjectKey } from "../../lib/scopedEntities";
 import { useOlderSettledShelf, useOlderSettledShelfGrowth } from "../../state/olderSettledShelf";
 import type { PendingNewTask } from "../../state/use-pending-new-tasks";
@@ -303,6 +304,7 @@ export function useThreadListV2(input: {
         queuedThreadKeys: input.queuedThreadKeys,
         moveAvailability,
         shelfPreferencesLoading: !input.shelfPreferencesLoaded,
+        resolve: keepMarked,
       }),
     [
       layout,
@@ -344,6 +346,7 @@ export function useThreadListV2(input: {
               snoozeLabelNow: `${input.now.slice(0, 16)}:00.000Z`,
               snoozeEnvironmentIds: input.snoozeEnvironmentIds,
               queuedThreadKeys: input.queuedThreadKeys,
+              resolve: keepMarked,
             },
             expandedGroups,
             expandedShelves,

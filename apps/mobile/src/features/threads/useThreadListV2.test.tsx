@@ -334,6 +334,13 @@ it("reuses a large thread list across tab renders and updates when its inputs ch
       [middle.id, 1],
       [leaf.id, 2],
     ]);
+    if (shelf === "snoozed") {
+      const labels = seen
+        .at(-1)!
+        .items.flatMap((item) => (item.type === "v2-thread" ? [item.snoozeWakeLabelText] : []));
+      expect(labels[0]).toBeTruthy();
+      expect(labels).toEqual([labels[0], labels[0], labels[0]]);
+    }
     await act(async () => seen.at(-1)!.toggleGroup(`${environmentId}:${ancestor.id}`));
     expect(seen.at(-1)!.items.filter((item) => item.type === "v2-thread")).toHaveLength(1);
     await act(async () =>

@@ -22,6 +22,12 @@ module.exports = {
       contents: majorVersion,
       reasons: ["appMajorVersion"],
     },
+    // Expo skips symlinks when hashing local modules.
+    {
+      type: "file",
+      filePath: "../../native/apple-speech/AppleSpeechEngine.swift",
+      reasons: ["appleSpeech"],
+    },
   ],
   fileHookTransform(source, chunk) {
     if (source.type !== "contents" || source.id !== "expoConfig" || chunk == null) return chunk;

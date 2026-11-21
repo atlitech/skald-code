@@ -1,4 +1,5 @@
 import { useAtomValue } from "@effect/atom-react";
+import { errorDisplayMessage } from "@t3tools/client-runtime/errors";
 import { CommandId, type ScopedThreadRef, type ThreadId } from "@t3tools/contracts";
 import {
   isAtomCommandInterrupted,
@@ -6,6 +7,7 @@ import {
 } from "@t3tools/client-runtime/state/runtime";
 import { scopedThreadKey } from "@t3tools/client-runtime/environment";
 import { useDebouncedValue } from "@tanstack/react-pacer";
+import { T, useGT, useMessages } from "gt-react";
 import { useState } from "react";
 import { create } from "zustand";
 
@@ -34,7 +36,8 @@ export function openThreadParentDialog(threadRef: ScopedThreadRef) {
 }
 
 export function useMoveThreadToTopLevel() {
-  const move = useOrchestrationCommand(threadEnvironment.setParent, "Failed to move thread");
+  const gt = useGT();
+  const move = useOrchestrationCommand(threadEnvironment.setParent, gt("Failed to move thread"));
   return (threadRef: ScopedThreadRef) =>
     move({
       environmentId: threadRef.environmentId,
@@ -55,6 +58,8 @@ export function ThreadParentDialogHost() {
 }
 
 function ThreadParentDialog({ threadRef }: { threadRef: ScopedThreadRef }) {
+  const gt = useGT();
+  const m = useMessages();
   const thread = useThreadShell(threadRef);
   const canMove = useAtomValue(threadEnvironment.setParent.permissionAtom(threadRef.environmentId));
   const move = useOrchestrationCommand(threadEnvironment.setParent, { reportFailure: false });
@@ -67,6 +72,7 @@ function ThreadParentDialog({ threadRef }: { threadRef: ScopedThreadRef }) {
       environmentId: threadRef.environmentId,
       input: { threadId: threadRef.threadId, ...(debouncedQuery ? { query: debouncedQuery } : {}) },
     }),
+    m,
   );
   const searching = query.trim() !== debouncedQuery || parents.isPending;
   const candidates = parents.data?.threads ?? [];
@@ -89,7 +95,7 @@ function ThreadParentDialog({ threadRef }: { threadRef: ScopedThreadRef }) {
       close();
     } else if (!isAtomCommandInterrupted(result)) {
       const error = squashAtomCommandFailure(result);
-      setMoveError(error instanceof Error ? error.message : "Failed to move thread. Try again.");
+      setMoveError(errorDisplayMessage(error, m) ?? gt("Failed to move thread. Try again."));
     }
   };
   return (
@@ -101,17 +107,21 @@ function ThreadParentDialog({ threadRef }: { threadRef: ScopedThreadRef }) {
     >
       <DialogPopup>
         <DialogHeader>
-          <DialogTitle>Move under thread</DialogTitle>
+          <DialogTitle>
+            <T>Move under thread</T>
+          </DialogTitle>
           <DialogDescription>
-            Choose a parent for “{thread?.title ?? "this thread"}” in this project.
+            {thread
+              ? gt("Choose a parent for “{title}” in this project.", { title: thread.title })
+              : gt("Choose a parent for this thread in this project.")}
           </DialogDescription>
         </DialogHeader>
         <DialogPanel>
           <div className="flex flex-col gap-3">
             <Input
               autoFocus
-              placeholder="Find a thread…"
-              aria-label="Find a parent thread"
+              placeholder={gt("Find a thread…")}
+              aria-label={gt("Find a parent thread")}
               disabled={moving}
               maxLength={200}
               value={query}
@@ -125,7 +135,7 @@ function ThreadParentDialog({ threadRef }: { threadRef: ScopedThreadRef }) {
             <div className="max-h-72 overflow-y-auto">
               {searching ? (
                 <p role="status" className="py-4 text-sm text-muted-foreground">
-                  Finding threads…
+                  <T>Finding threads…</T>
                 </p>
               ) : parents.error ? (
                 <div className="flex flex-col items-start gap-3 py-4">
@@ -133,11 +143,13 @@ function ThreadParentDialog({ threadRef }: { threadRef: ScopedThreadRef }) {
                     {parents.error}
                   </p>
                   <Button variant="outline" size="sm" onClick={parents.refresh}>
-                    Retry
+                    <T>Retry</T>
                   </Button>
                 </div>
               ) : candidates.length === 0 ? (
-                <p className="py-4 text-sm text-muted-foreground">No matching threads.</p>
+                <p className="py-4 text-sm text-muted-foreground">
+                  <T>No matching threads.</T>
+                </p>
               ) : (
                 <ul className="flex flex-col gap-1">
                   {candidates.map((candidate) => (
@@ -157,14 +169,14 @@ function ThreadParentDialog({ threadRef }: { threadRef: ScopedThreadRef }) {
             </div>
             {!searching && parents.error === null && parents.data?.hasMore ? (
               <p className="text-xs text-muted-foreground">
-                More threads are available. Refine your search.
+                <T>More threads are available. Refine your search.</T>
               </p>
             ) : null}
           </div>
         </DialogPanel>
         <DialogFooter>
           <Button variant="outline" disabled={moving} onClick={close}>
-            Cancel
+            <T>Cancel</T>
           </Button>
         </DialogFooter>
       </DialogPopup>

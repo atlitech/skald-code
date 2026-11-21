@@ -47,6 +47,7 @@ const shared = {
     McpInvocationContext.McpInvocationContext,
     ThreadManagementService.ThreadManagementService,
     ProjectService.ProjectService,
+    ServerSettings.ServerSettingsService,
     SecureRandom.SecureRandom,
   ],
 };
@@ -144,6 +145,7 @@ const ThreadLaunchTool = Tool.make("t3_thread_launch", {
       description:
         "Set to this thread ID to nest the new independent thread beneath it. Omit for top level. Same project and environment only; does not delegate work.",
     }),
+    generateTitle: Schema.optional(Schema.Boolean),
     modelSelection: Schema.optional(ModelSelection),
     runtimeMode: Schema.optional(RuntimeMode),
     interactionMode: Schema.optional(ProviderInteractionMode),
@@ -159,6 +161,11 @@ const ThreadLaunchTool = Tool.make("t3_thread_launch", {
       }),
     ),
     attachments: Schema.optional(Schema.Array(McpAttachmentInput).check(Schema.isMaxLength(8))),
+    outputSchema: Schema.optional(
+      Schema.Record(Schema.String, Schema.Json).annotate({
+        description: "As in `t3_thread_send`. Needs `message`.",
+      }),
+    ),
     clientRequestId: Schema.optional(OrchestratorMcpClientRequestId),
     /** Set by a linked environment launching its agent's delegated task here; ignored otherwise. */
     delegatedFrom: Schema.optional(OrchestrationV2DelegatedFrom),

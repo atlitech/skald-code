@@ -3,6 +3,7 @@ import { useAtomValue } from "@effect/atom-react";
 import { CommandId, isListedThreadLineage } from "@t3tools/contracts";
 import { threadChipCopyTarget } from "@t3tools/client-runtime/thread-reference";
 import type { SnoozePresetSetting } from "@t3tools/contracts/settings";
+import { useGT, useMessages } from "gt-react-native";
 import { useCallback, useState } from "react";
 import { Platform } from "react-native";
 
@@ -70,6 +71,8 @@ export function useThreadActionMenu(input: {
   };
 }) {
   const { thread, actions, state } = input;
+  const gt = useGT();
+  const m = useMessages();
   const [customSnoozeOpen, setCustomSnoozeOpen] = useState(false);
   const [parentPickerOpen, setParentPickerOpen] = useState(false);
   const configs = useAtomValue(environmentServerConfigsAtom);
@@ -94,8 +97,8 @@ export function useThreadActionMenu(input: {
       },
     });
     if (result._tag !== "Success")
-      Dialog.alert("Could not move thread", "Try moving this thread again.");
-  }, [thread, groupingSupported, canGroup, setParent]);
+      Dialog.alert(gt("Could not move thread"), gt("Try moving this thread again."));
+  }, [thread, groupingSupported, canGroup, setParent, gt]);
   const identity = thread ? `${thread.environmentId}:${thread.id}` : null;
   const [boundIdentity, setBoundIdentity] = useState(identity);
   // List recycling and chat navigation can change the thread without remounting.
@@ -104,26 +107,32 @@ export function useThreadActionMenu(input: {
     setCustomSnoozeOpen(false);
     setParentPickerOpen(false);
   }
-  const presets = resolveThreadListV2SnoozePresets({
-    secondary: state.snoozeSupported && state.snoozable ? "snooze" : null,
-    now: input.now,
-    presets: input.snoozePresets,
-  });
+  const presets = resolveThreadListV2SnoozePresets(
+    {
+      secondary: state.snoozeSupported && state.snoozable ? "snooze" : null,
+      now: input.now,
+      presets: input.snoozePresets,
+    },
+    m,
+  );
   const menuActions = thread
-    ? buildThreadActionMenu({
-        ...state,
-        nested: Platform.OS === "ios",
-        branch: thread.branch,
-        pinned: thread.pinnedAt != null,
-        autoSettleEnabled: thread.autoSettleDisabledAt == null,
-        isRegeneratingTitle: thread.titleRegeneration != null,
-        canArchive: threadCanArchive(thread.runtime),
-        canTurnIntoProject: canTurnThreadIntoProject(thread),
-        snoozePresets: presets,
-        ...(groupingSupported
-          ? { grouping: { canMove: canGroup, hasParent: thread.groupingParentThreadId != null } }
-          : {}),
-      })
+    ? buildThreadActionMenu(
+        {
+          ...state,
+          nested: Platform.OS === "ios",
+          branch: thread.branch,
+          pinned: thread.pinnedAt != null,
+          autoSettleEnabled: thread.autoSettleDisabledAt == null,
+          isRegeneratingTitle: thread.titleRegeneration != null,
+          canArchive: threadCanArchive(thread.runtime),
+          canTurnIntoProject: canTurnThreadIntoProject(thread),
+          snoozePresets: presets,
+          ...(groupingSupported
+            ? { grouping: { canMove: canGroup, hasParent: thread.groupingParentThreadId != null } }
+            : {}),
+        },
+        m,
+      )
     : [];
 
   const handleAction = useCallback(
@@ -175,9 +184,11 @@ export function useThreadActionMenu(input: {
           const target = threadChipCopyTarget(
             { environmentId: thread.environmentId, threadId: thread.id },
             thread.title,
+            undefined,
+            m,
           );
           void copyThreadReference(target).then((didCopy) => {
-            if (!didCopy) Dialog.alert(target.failureTitle, "Try copying this thread again.");
+            if (!didCopy) Dialog.alert(target.failureTitle, gt("Try copying this thread again."));
           });
           return;
         }
@@ -200,8 +211,8 @@ export function useThreadActionMenu(input: {
         actions.snoozeThread(thread, selection.preset.snoozedUntil);
       else if (selection._tag === "expired")
         Dialog.alert(
-          "Could not snooze thread",
-          "That snooze time has passed. Choose another time.",
+          gt("Could not snooze thread"),
+          gt("That snooze time has passed. Choose another time."),
         );
     },
     [
@@ -214,11 +225,13 @@ export function useThreadActionMenu(input: {
       groupingSupported,
       canGroup,
       detachFromParent,
+      gt,
+      m,
     ],
   );
   return {
     menuActions,
-    snoozePresetActions: buildThreadSnoozeMenuActions(presets),
+    snoozePresetActions: buildThreadSnoozeMenuActions(presets, m),
     handleAction,
     handleMenuAction: ({ nativeEvent }: { readonly nativeEvent: { readonly event: string } }) =>
       handleAction(nativeEvent.event),

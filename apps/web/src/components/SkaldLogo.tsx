@@ -1,13 +1,14 @@
 import lightLogoUrl from "../../../../assets/skald/skald-code-logo-horizontal.svg";
 import darkLogoUrl from "../../../../assets/skald/skald-code-logo-horizontal-on-dark.svg";
 
+import { APP_BASE_NAME } from "~/branding";
 import { cn } from "~/lib/utils";
 
 export function SkaldLogo(props: { readonly className?: string; readonly onBackdrop?: boolean }) {
   return (
     <span
       role="img"
-      aria-label="Skald Code"
+      aria-label={APP_BASE_NAME}
       className={cn("inline-flex shrink-0", props.className)}
     >
       {props.onBackdrop ? (

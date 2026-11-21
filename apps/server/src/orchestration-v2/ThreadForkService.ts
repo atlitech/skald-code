@@ -103,6 +103,7 @@ export const layer: Layer.Layer<ThreadForkServiceV2> = Layer.succeed(
       const { delegatedFrom: _delegatedFrom, ...inherited } = input.sourceProjection.thread;
       const targetThread: OrchestrationV2AppThread = {
         ...inherited,
+        ...(input.sideChat ? { groupingParentThreadId: null } : {}),
         // PR context follows the conversation; watching remains the source thread's responsibility.
         pullRequests: input.sourceProjection.thread.pullRequests?.map(
           ({ watch: _watch, ...link }) => link,
@@ -111,8 +112,9 @@ export const layer: Layer.Layer<ThreadForkServiceV2> = Layer.succeed(
         creationSource: input.creationSource,
         id: input.targetThreadId,
         title: input.title ?? `${input.sourceProjection.thread.title} fork`,
-        // The source's title job completes only on the source thread.
+        // The source's title job and rename stay with the source thread.
         titleRegeneration: null,
+        titleRenamed: false,
         activeProviderThreadId: null,
         lineage: {
           parentThreadId: input.sourceProjection.thread.id,

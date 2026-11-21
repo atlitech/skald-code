@@ -4,6 +4,7 @@ import { resolveAutoFeatureBranchName } from "@t3tools/shared/git";
 import * as Arr from "effect/Array";
 import * as Result from "effect/Result";
 import { useNavigation, type StaticScreenProps } from "@react-navigation/native";
+import { useGT, useMessages } from "gt-react-native";
 import { useCallback, useMemo } from "react";
 import { View } from "react-native";
 
@@ -14,26 +15,50 @@ import { SheetIntro } from "../../../components/ui/SheetIntro";
 import { useSelectedThreadGitActions } from "../../../state/use-selected-thread-git-actions";
 import { useSelectedThreadGitState } from "../../../state/use-selected-thread-git-state";
 import { useThreadSelection } from "../../../state/use-thread-selection";
+import { useEnvironmentQuery } from "../../../state/query";
+import {
+  gitRepositoryTargetFromRoute,
+  type GitRepositoryRouteParams,
+} from "../../../state/thread-git-target";
+import { vcsEnvironment } from "../../../state/vcs";
+import { useReturnToThread } from "../thread-inspector-navigation";
 import { SheetActionButton } from "./gitSheetComponents";
 
-type GitConfirmSheetProps = StaticScreenProps<{
-  readonly environmentId: string;
-  readonly threadId: string;
-  readonly confirmAction?: string;
-  readonly branchName?: string;
-  readonly includesCommit?: string;
-  readonly commitMessage?: string;
-  readonly filePaths?: string;
-}>;
+type GitConfirmSheetProps = StaticScreenProps<
+  {
+    readonly environmentId: string;
+    readonly threadId: string;
+    readonly confirmAction?: string;
+    readonly branchName?: string;
+    readonly includesCommit?: string;
+    readonly commitMessage?: string;
+    readonly filePaths?: string;
+  } & GitRepositoryRouteParams
+>;
 
 export function GitConfirmSheet(props: GitConfirmSheetProps) {
+  const gt = useGT();
+  const messages = useMessages();
   const navigation = useNavigation();
-  const gitState = useSelectedThreadGitState();
-  const gitActions = useSelectedThreadGitActions();
-  const { canWriteSourceControl, canChangeThreadBranch } = gitActions;
-  const { selectedThreadProject } = useThreadSelection();
+  const returnToThread = useReturnToThread();
+  const repository = gitRepositoryTargetFromRoute(props.route.params);
+  const gitState = useSelectedThreadGitState(repository);
+  const gitActions = useSelectedThreadGitActions(repository);
+  const { canWriteSourceControl, canCreateFeatureBranch } = gitActions;
+  const { selectedThread, selectedThreadProject } = useThreadSelection();
+  // The overview that opened this sheet already holds the repository's status subscription.
+  const repositoryStatus = useEnvironmentQuery(
+    repository !== undefined && selectedThread !== null
+      ? vcsEnvironment.status({
+          environmentId: selectedThread.environmentId,
+          input: { cwd: repository.cwd },
+        })
+      : null,
+  );
   const terminology = sourceControlClients.get(
-    selectedThreadProject?.repositoryIdentity?.provider,
+    repository === undefined
+      ? selectedThreadProject?.repositoryIdentity?.provider
+      : repositoryStatus.data?.sourceControlProvider?.kind,
   ).changeRequest;
 
   const params = props.route.params;
@@ -52,21 +77,31 @@ export function GitConfirmSheet(props: GitConfirmSheetProps) {
   const copy = useMemo(
     () =>
       confirmAction
-        ? resolveDefaultBranchActionDialogCopy({
-            action: confirmAction,
-            branchName,
-            includesCommit,
-            terminology,
-          })
+        ? resolveDefaultBranchActionDialogCopy(
+            {
+              action: confirmAction,
+              branchName,
+              includesCommit,
+              terminology,
+            },
+            messages,
+          )
         : null,
-    [branchName, confirmAction, includesCommit, terminology],
+    [branchName, confirmAction, includesCommit, messages, terminology],
   );
+
+  const showTargetThread = useCallback(() => {
+    const target = { environmentId, threadId };
+    if (navigation.getState()?.routes.some((route) => route.name === "Thread")) {
+      returnToThread(target);
+    } else {
+      navigation.dispatch(selectWorkspaceDetail({ name: "Thread", params: target }));
+    }
+  }, [environmentId, navigation, returnToThread, threadId]);
 
   const continuePendingAction = async () => {
     if (!canWriteSourceControl || !confirmAction) return;
-    navigation.dispatch(
-      selectWorkspaceDetail({ name: "Thread", params: { environmentId, threadId } }),
-    );
+    showTargetThread();
     await gitActions.onRunSelectedThreadGitAction({
       action: confirmAction,
       ...(params.commitMessage ? { commitMessage: params.commitMessage } : {}),
@@ -75,10 +110,8 @@ export function GitConfirmSheet(props: GitConfirmSheetProps) {
   };
 
   const movePendingActionToFeatureBranch = useCallback(async () => {
-    if (!canChangeThreadBranch || !confirmAction) return;
-    navigation.dispatch(
-      selectWorkspaceDetail({ name: "Thread", params: { environmentId, threadId } }),
-    );
+    if (!canCreateFeatureBranch || !confirmAction) return;
+    showTargetThread();
 
     if (includesCommit) {
       await gitActions.onRunSelectedThreadGitAction({
@@ -104,39 +137,37 @@ export function GitConfirmSheet(props: GitConfirmSheetProps) {
     if (created === null) return;
     await gitActions.onRunSelectedThreadGitAction({ action: confirmAction });
   }, [
-    canChangeThreadBranch,
+    canCreateFeatureBranch,
     confirmAction,
     gitActions,
     gitState.selectedThreadBranches,
     includesCommit,
     params,
-    navigation,
-    environmentId,
-    threadId,
+    showTargetThread,
   ]);
 
   return (
     <FitSheet
-      header={<SheetHeader title="Confirm action" onClose={() => navigation.goBack()} />}
+      header={<SheetHeader title={gt("Confirm action")} onClose={() => navigation.goBack()} />}
       showsVerticalScrollIndicator={false}
     >
       <SheetIntro
-        eyebrow="Confirm"
-        title={copy?.title ?? "Run action on default branch?"}
-        description={copy?.description ?? "Choose how to continue."}
+        eyebrow={gt("Confirm", { $context: "eyebrow label above a confirmation title" })}
+        title={copy?.title ?? gt("Run action on default branch?")}
+        description={copy?.description ?? gt("Choose how to continue.")}
       />
 
       <View className="gap-3">
         <SheetActionButton
           icon="arrow.right.circle"
-          label={copy?.continueLabel ?? "Continue"}
+          label={copy?.continueLabel ?? gt("Continue")}
           disabled={!canWriteSourceControl}
           onPress={() => void continuePendingAction()}
         />
         <SheetActionButton
           icon="arrow.branch"
-          label="Feature branch & continue"
-          disabled={!canChangeThreadBranch}
+          label={gt("Feature branch & continue")}
+          disabled={!canCreateFeatureBranch}
           tone="primary"
           onPress={() => void movePendingActionToFeatureBranch()}
         />

@@ -5,6 +5,7 @@ import { visibilityParentKey } from "@t3tools/client-runtime/state/threads";
 import type { ScopedThreadRef } from "@t3tools/contracts";
 import * as Option from "effect/Option";
 import { Navigate, useNavigate } from "@tanstack/react-router";
+import { T } from "gt-react";
 import { useEffect, useState } from "react";
 
 import ChatView from "./ChatView";
@@ -33,7 +34,7 @@ import {
  * Keeps the family of an open thread the shell leaves out (an older settled thread) in the shell
  * rows until the route leaves it, so every reader of its shell row finds it.
  */
-function useOpenThreadFamily(threadRef: ScopedThreadRef | null, missing: boolean) {
+export function useOpenThreadFamily(threadRef: ScopedThreadRef | null, missing: boolean) {
   const key = threadRef === null ? null : scopedThreadKey(threadRef);
   // Sticks to the route thread, so the row the family brings in does not release it.
   const [mountedKey, setMountedKey] = useState<string | null>(null);
@@ -219,11 +220,13 @@ export function ThreadRouteView({
     view = (
       <Empty role="alert">
         <EmptyHeader>
-          <EmptyTitle>Could not load this thread</EmptyTitle>
+          <EmptyTitle>
+            <T>Could not load this thread</T>
+          </EmptyTitle>
           <EmptyDescription>{Option.getOrNull(unlistedThreadDetail.error)}</EmptyDescription>
         </EmptyHeader>
         <Button variant="outline" onClick={() => void navigate({ to: "/" })}>
-          Back to threads
+          <T>Back to threads</T>
         </Button>
       </Empty>
     );

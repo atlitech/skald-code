@@ -68,6 +68,7 @@ it.effect(
                     reclaimableBytes: pruneEventsNow ? 0 : 1000,
                     incrementalVacuumEnabled: pruneEventsNow,
                     legacyDatabaseBytes: 4000,
+                    legacyOnlyRecords: { projects: 0, threads: 0 },
                   }),
                 compact: (_path, options) =>
                   startServer.pipe(
@@ -154,6 +155,7 @@ it.effect("warns how long reclaiming can take and reports each step with its ela
                 reclaimableBytes: 0,
                 incrementalVacuumEnabled: false,
                 legacyDatabaseBytes: null,
+                legacyOnlyRecords: null,
               }),
             compact: (_databasePath, _options, onStep) =>
               Effect.gen(function* () {
@@ -220,6 +222,7 @@ it.effect(
               reclaimableBytes: 1000,
               incrementalVacuumEnabled: false,
               legacyDatabaseBytes: null,
+              legacyOnlyRecords: null,
             }),
           inspectDeletedThreads: () =>
             Effect.sync(() => {

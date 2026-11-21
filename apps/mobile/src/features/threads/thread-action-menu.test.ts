@@ -1,6 +1,8 @@
 import type { MenuAction } from "@react-native-menu/menu";
+import { msg } from "gt-react-native";
 import { describe, expect, it } from "vite-plus/test";
 
+import { keepMarked } from "../../i18n/messages";
 import { buildThreadActionMenu, type ThreadActionMenuState } from "./thread-action-menu";
 
 const active: ThreadActionMenuState = {
@@ -39,17 +41,23 @@ describe("buildThreadActionMenu", () => {
   it("shares actions between chat and list, adding only list arrangement controls", () => {
     for (const nested of [false, true]) {
       const grouping = { canMove: true, hasParent: true };
-      const chat = leaves(buildThreadActionMenu({ ...active, nested, grouping }));
+      const chat = leaves(buildThreadActionMenu({ ...active, nested, grouping }, keepMarked));
       const list = leaves(
-        buildThreadActionMenu({
-          ...active,
-          nested,
-          grouping,
-          reorder: { canMoveUp: false, canMoveDown: true },
-        }),
+        buildThreadActionMenu(
+          {
+            ...active,
+            nested,
+            grouping,
+            reorder: { canMoveUp: false, canMoveDown: true },
+          },
+          keepMarked,
+        ),
       );
       const arrangement = new Set(["arrange", "move-up", "move-down"]);
       expect(list.filter((item) => !arrangement.has(item.id ?? ""))).toEqual(chat);
+      expect(chat.find((item) => item.id === "snooze:custom")?.title).toBe(
+        msg("Custom…", { $context: "custom snooze time" }),
+      );
       expect(chat.some((item) => arrangement.has(item.id ?? ""))).toBe(false);
       expect(list.find((item) => item.id === "move-up")?.attributes?.disabled).toBe(true);
       expect(list.find((item) => item.id === "move-down")?.attributes?.disabled).toBe(false);

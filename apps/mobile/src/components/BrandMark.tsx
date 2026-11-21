@@ -1,18 +1,25 @@
 import Constants from "expo-constants";
 import { Image } from "expo-image";
+import { msg, T, useMessages } from "gt-react-native";
 import { View } from "react-native";
 
 import { AppText as Text } from "./ui/AppText";
 import { T3_CODE_BRAND_MARK_SOURCE } from "./brandAssets";
+import { MOBILE_PRODUCT_NAME } from "../lib/mobileBranding";
 
 const appVariant = Constants.expoConfig?.extra?.appVariant;
 const DEFAULT_STAGE_LABEL =
-  appVariant === "development" ? "Dev" : appVariant === "preview" ? "Preview" : "Beta";
+  appVariant === "development"
+    ? msg("Dev", { $context: "app release stage badge" })
+    : appVariant === "preview"
+      ? msg("Preview", { $context: "app release stage badge" })
+      : msg("Beta", { $context: "app release stage badge" });
 
 export function BrandMark(props: { readonly compact?: boolean; readonly stageLabel?: string }) {
+  const m = useMessages();
   const compact = props.compact ?? false;
   const iconSize = compact ? 32 : 44;
-  const stageLabel = props.stageLabel ?? DEFAULT_STAGE_LABEL;
+  const stageLabel = props.stageLabel ?? m(DEFAULT_STAGE_LABEL);
 
   return (
     <View className="flex-row items-center gap-3">
@@ -27,7 +34,9 @@ export function BrandMark(props: { readonly compact?: boolean; readonly stageLab
       />
       <View className="gap-1">
         <View className="flex-row items-center gap-2">
-          <Text className="text-lg font-t3-bold tracking-[-0.4px] text-foreground">Skald Code</Text>
+          <Text className="text-lg font-t3-bold tracking-[-0.4px] text-foreground">
+            {MOBILE_PRODUCT_NAME}
+          </Text>
           <View className="rounded-full bg-subtle px-2 py-1">
             <Text className="text-3xs font-t3-bold tracking-[1.1px] uppercase text-foreground-muted">
               {stageLabel}
@@ -36,7 +45,7 @@ export function BrandMark(props: { readonly compact?: boolean; readonly stageLab
         </View>
         {!compact ? (
           <Text className="text-xs font-medium text-foreground-muted">
-            Mobile control surface for your live coding environments
+            <T>Mobile control surface for your live coding environments</T>
           </Text>
         ) : null}
       </View>
