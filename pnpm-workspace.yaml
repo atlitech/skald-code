@@ -102,6 +102,7 @@ catalog:
 overrides:
   # Pin every patched package, including transitive dependencies, so lockfile-free
   # release installs cannot drift past the patch. Update these with patchedDependencies.
+  "@generaltranslation/icu": 0.1.2
   react-native-image-viewing: 0.2.2
   mdast-util-math: 3.0.0
   micromark-extension-llm-math: 3.1.0
@@ -245,6 +246,7 @@ patchedDependencies:
   # Android: an RNHostView without a scrolling descendant (an app bar's buttons) is no longer the
   # scroll target a Material bottom sheet picks, so sheet content can sit below its header.
   "@expo/ui@58.0.27": patches/@expo__ui@58.0.27.patch
+  "@generaltranslation/icu@0.1.2": patches/@generaltranslation__icu@0.1.2.patch
   "@ff-labs/fff-node@0.11.0": patches/@ff-labs__fff-node@0.11.0.patch
   # Exports the dependency-light subpaths mobile and the web diff parser import, re-measures
   # editor carets when the code font changes, stops the find bar reclaiming focus from the file,

@@ -1,0 +1,52 @@
+diff --git a/dist/index.cjs b/dist/index.cjs
+index 1d257228877aeab6a04ee143c0aad5a209d3e6a5..ebbadb74a8342018d556930800fb743efd077c2f 100644
+--- a/dist/index.cjs
++++ b/dist/index.cjs
+@@ -879,11 +879,18 @@ function ownOption(options, key) {
+ function invalidSelection(name, value, options) {
+ 	return /* @__PURE__ */ new RangeError(`The ICU variable "${name}" value ${JSON.stringify(String(value))} did not match any of: ${Object.keys(options).join(", ")}.`);
+ }
++// Hermes delegates locale matching to Android ICU on every call. Labels share a locale list.
++let lastLocales;
++let lastLocale;
+ function resolveLocale(locales) {
+ 	if (typeof Intl.Locale === "undefined") return void 0;
+-	const supported = Intl.NumberFormat.supportedLocalesOf(locales)[0];
+-	const requested = typeof locales === "string" ? locales : locales[0];
+-	return new Intl.Locale(supported ?? requested);
++	const requested = typeof locales === "string" ? [locales] : locales;
++	if (lastLocales && lastLocales.length === requested.length && lastLocales.every((value, index) => value === requested[index])) return lastLocale;
++	const supported = Intl.NumberFormat.supportedLocalesOf(requested)[0];
++	const locale = new Intl.Locale(supported ?? requested[0]);
++	lastLocales = requested.slice();
++	lastLocale = locale;
++	return locale;
+ }
+ //#endregion
+ //#region src/printer.ts
+diff --git a/dist/index.mjs b/dist/index.mjs
+index a54f2235227290efe761215b30da542562b2e77f..93ac87d6b9b49b736b7fa1acbbdd1bef47bd4928 100644
+--- a/dist/index.mjs
++++ b/dist/index.mjs
+@@ -878,11 +878,18 @@ function ownOption(options, key) {
+ function invalidSelection(name, value, options) {
+ 	return /* @__PURE__ */ new RangeError(`The ICU variable "${name}" value ${JSON.stringify(String(value))} did not match any of: ${Object.keys(options).join(", ")}.`);
+ }
++// Hermes delegates locale matching to Android ICU on every call. Labels share a locale list.
++let lastLocales;
++let lastLocale;
+ function resolveLocale(locales) {
+ 	if (typeof Intl.Locale === "undefined") return void 0;
+-	const supported = Intl.NumberFormat.supportedLocalesOf(locales)[0];
+-	const requested = typeof locales === "string" ? locales : locales[0];
+-	return new Intl.Locale(supported ?? requested);
++	const requested = typeof locales === "string" ? [locales] : locales;
++	if (lastLocales && lastLocales.length === requested.length && lastLocales.every((value, index) => value === requested[index])) return lastLocale;
++	const supported = Intl.NumberFormat.supportedLocalesOf(requested)[0];
++	const locale = new Intl.Locale(supported ?? requested[0]);
++	lastLocales = requested.slice();
++	lastLocale = locale;
++	return locale;
+ }
+ //#endregion
+ //#region src/printer.ts
