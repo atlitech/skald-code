@@ -2,6 +2,7 @@ import {
   CommandId,
   ThreadId,
   type OrchestrationV2ThreadShell,
+  type PullRequestChecksState,
   type PullRequestUnavailableError,
   type PullRequestWatchUntil,
 } from "@t3tools/contracts";
@@ -10,12 +11,10 @@ import * as Context from "effect/Context";
 import * as SecureRandom from "effect/crypto/SecureRandom";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
-import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 
 import * as ServerSettings from "../serverSettings.ts";
 import * as Orchestrator from "../orchestration-v2/Orchestrator.ts";
-import * as ProjectService from "../project/ProjectService.ts";
 import * as PullRequestService from "./PullRequestService.ts";
 import {
   resolveTarget,
@@ -78,6 +77,8 @@ export class PullRequestWatchService extends Context.Service<
         readonly wasWatching: boolean;
         /** Set when the PR already ended, so no watch was registered. */
         readonly state?: "merged" | "closed";
+        /** CI as the start read saw it. Checks that already passed never wake the watch. */
+        readonly checksState?: PullRequestChecksState;
       },
       | PullRequestWatchDisabledError
       | PullRequestWatchFailedError
@@ -92,7 +93,6 @@ export class PullRequestWatchService extends Context.Service<
 const make = Effect.gen(function* () {
   const settings = yield* ServerSettings.ServerSettingsService;
   const engine = yield* Orchestrator.OrchestratorV2;
-  const projects = yield* ProjectService.ProjectService;
   const pullRequests = yield* PullRequestService.PullRequestService;
   const random = yield* SecureRandom.SecureRandom;
 
@@ -123,10 +123,9 @@ const make = Effect.gen(function* () {
       );
       if (!enablePullRequestWatch) return yield* new PullRequestWatchDisabledError();
     }
-    const project = yield* projects.getShell(thread.projectId).pipe(
-      Effect.map(Option.getOrUndefined),
-      Effect.mapError((cause) => new PullRequestWatchFailedError({ cause })),
-    );
+    const project = yield* pullRequests
+      .addressedProject(thread.projectId)
+      .pipe(Effect.mapError((cause) => new PullRequestWatchFailedError({ cause })));
     const target = yield* resolveTarget(input.target, project);
     const watchedLink = (shell: OrchestrationV2ThreadShell) =>
       threadPullRequestsOf(shell).find(
@@ -148,6 +147,7 @@ const make = Effect.gen(function* () {
     if (watching && before?.snapshot?.state === "merged") return alreadyEnded("merged");
     // A pending rollup has no failure yet, so any failure the first read finds is news.
     let checksPendingAtStart: boolean | undefined;
+    let checksStateAtStart: PullRequestChecksState | undefined;
     if (watching && !wasWatching) {
       const read = yield* pullRequests
         .summary(
@@ -169,6 +169,7 @@ const make = Effect.gen(function* () {
         );
       if (read?.state === "merged" || read?.state === "closed") return alreadyEnded(read.state);
       checksPendingAtStart = read === undefined ? undefined : read.checksState === "pending";
+      checksStateAtStart = read?.checksState ?? undefined;
     }
     const uuid = yield* random.uuidV4().pipe(Effect.orDie);
     yield* engine
@@ -198,6 +199,7 @@ const make = Effect.gen(function* () {
       ...target,
       watching: watchedLink(after)?.watch !== undefined,
       wasWatching,
+      ...(checksStateAtStart !== undefined && { checksState: checksStateAtStart }),
     };
   });
 
