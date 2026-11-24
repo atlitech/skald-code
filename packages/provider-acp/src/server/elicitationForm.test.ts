@@ -111,6 +111,35 @@ describe("parseElicitationForm", () => {
       q0__other: "SQLite",
     });
   });
+
+  it("requires a multi-select only for a required minimum and accepts none otherwise", () => {
+    const items = { type: "string", enum: ["web", "mobile"] };
+    const form = parseElicitationForm(
+      {
+        type: "object",
+        properties: {
+          targets: { type: "array", minItems: 1, items },
+          extras: { type: "array", items },
+          platforms: { type: "array", minItems: 1, items },
+        },
+        required: ["targets"],
+      },
+      "Choose",
+    );
+    assert(form !== undefined);
+    assert.deepStrictEqual(
+      form.questions.map((question) => [question.id, question.required]),
+      [
+        ["targets", true],
+        ["extras", false],
+        ["platforms", false],
+      ],
+    );
+    assert.deepStrictEqual(form.content({ targets: ["web"], extras: [], platforms: [] }), {
+      targets: ["web"],
+      extras: [],
+    });
+  });
 });
 
 it("preserves optional fields, defaults, constraints, and empty required lists", () => {

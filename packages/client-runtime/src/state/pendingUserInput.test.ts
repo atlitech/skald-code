@@ -230,6 +230,40 @@ describe("buildPendingUserInputAnswers", () => {
       }),
     ).toBeNull();
   });
+
+  it("answers a multi-select question with no options checked as an empty list", () => {
+    const extrasQuestion = {
+      id: "extras",
+      header: "Extras",
+      question: "Which extras do you want?",
+      options: [{ label: "Lint" }, { label: "Tests" }, { label: "CI" }],
+      multiSelect: true,
+    } as const;
+    const uncheckedAgain = togglePendingUserInputOptionSelection(
+      extrasQuestion,
+      togglePendingUserInputOptionSelection(extrasQuestion, undefined, "Lint"),
+      "Lint",
+    );
+    const scope = { selectedOptionValues: ["Node.js"] };
+
+    expect(buildPendingUserInputAnswers([singleSelectQuestion, extrasQuestion], { scope })).toEqual(
+      { scope: "Node.js", extras: [] },
+    );
+    expect(
+      buildPendingUserInputAnswers([singleSelectQuestion, extrasQuestion], {
+        scope,
+        extras: uncheckedAgain,
+      }),
+    ).toEqual({ scope: "Node.js", extras: [] });
+    expect(
+      buildPendingUserInputAnswers([singleSelectQuestion, extrasQuestion], { extras: {} }),
+    ).toBeNull();
+    expect(
+      buildPendingUserInputAnswers([singleSelectQuestion, { ...extrasQuestion, required: true }], {
+        scope,
+      }),
+    ).toBeNull();
+  });
 });
 
 it.each([

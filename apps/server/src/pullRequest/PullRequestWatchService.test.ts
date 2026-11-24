@@ -14,7 +14,6 @@ import { describe, expect, it } from "@effect/vitest";
 import * as SecureRandom from "effect/crypto/SecureRandom";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
-import * as Option from "effect/Option";
 import * as Ref from "effect/Ref";
 
 import * as ServerSettings from "../serverSettings.ts";
@@ -23,7 +22,6 @@ import {
   type PullRequestTestThread,
   v2PullRequestThread,
 } from "../orchestration-v2/testkit/pullRequestFixtures.ts";
-import * as ProjectService from "../project/ProjectService.ts";
 import * as PullRequestService from "./PullRequestService.ts";
 import * as PullRequestWatchService from "./PullRequestWatchService.ts";
 import type { PullRequestTarget } from "./pullRequestTarget.ts";
@@ -127,9 +125,6 @@ const makeHarness = Effect.fn("makePullRequestWatchHarness")(function* (
   const project = options.project === undefined ? makeProject() : options.project;
   const dependencies = Layer.mergeAll(
     ServerSettings.layerTest({ enablePullRequestWatch: options.enablePullRequestWatch ?? true }),
-    Layer.mock(ProjectService.ProjectService)({
-      getShell: () => Effect.succeed(Option.fromNullishOr(project)),
-    }),
     Layer.mock(Orchestrator.OrchestratorV2)({
       getThreadShell: (id) =>
         Effect.succeed(id === thread?.id ? v2PullRequestThread(thread) : null),
@@ -139,6 +134,7 @@ const makeHarness = Effect.fn("makePullRequestWatchHarness")(function* (
         ),
     }),
     Layer.mock(PullRequestService.PullRequestService)({
+      addressedProject: () => Effect.succeed(project ?? undefined),
       summary: (input) =>
         options.readFailure !== undefined
           ? Effect.fail(options.readFailure)
@@ -205,6 +201,16 @@ describe("PullRequestWatchService", () => {
           checksPending,
         );
       }
+    }),
+  );
+
+  it.effect("tells the caller when the checks already passed, since no wake will report it", () =>
+    Effect.gen(function* () {
+      const harness = yield* makeHarness({ readChecksState: "passing" });
+      const result = yield* harness.setWatching(true, {
+        url: "https://github.com/t3tools/t3code/pull/9",
+      });
+      expect(result).toMatchObject({ wasWatching: false, checksState: "passing" });
     }),
   );
 

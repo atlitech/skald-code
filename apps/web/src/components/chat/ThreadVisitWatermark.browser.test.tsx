@@ -63,6 +63,7 @@ function visitedThreadIds() {
 }
 
 it("records the visit of the next thread at once after switching threads", async () => {
+  using _focus = vi.spyOn(document, "hasFocus").mockReturnValue(true);
   using _timers = fakeTimers();
   vi.setSystemTime(NOW);
   using fixture = setup();
@@ -91,6 +92,7 @@ it("records the visit of the next thread at once after switching threads", async
 });
 
 it("does not visit a covered thread and cancels its queued watermark", async () => {
+  using _focus = vi.spyOn(document, "hasFocus").mockReturnValue(true);
   using _timers = fakeTimers();
   vi.setSystemTime(NOW);
   using fixture = setup();
@@ -118,4 +120,51 @@ it("does not visit a covered thread and cancels its queued watermark", async () 
     environmentId: ref.environmentId,
     input: { threadId: ref.threadId, visitedAt: "2026-01-03T00:00:00.000Z" },
   });
+});
+
+it("does not mark a run that finishes in a background window as seen", async () => {
+  using fixture = setup();
+  const { registry } = fixture;
+  const threadC: ScopedThreadRef = { environmentId: ENVIRONMENT, threadId: ThreadId.make("c") };
+  setShell(registry, threadC, "2026-01-02T00:00:00.000Z");
+  let focused = true;
+  let visibility: DocumentVisibilityState = "visible";
+  using _focus = vi.spyOn(document, "hasFocus").mockImplementation(() => focused);
+  using _visibility = vi
+    .spyOn(document, "visibilityState", "get")
+    .mockImplementation(() => visibility);
+  using _timers = fakeTimers();
+  vi.setSystemTime(NOW);
+
+  await using _screen = await render(
+    <RegistryContext.Provider value={registry}>
+      <ThreadVisitWatermark threadRef={threadC} />
+    </RegistryContext.Provider>,
+  );
+  expect(visitedThreadIds()).toEqual(["c"]);
+
+  // The user switches to another app while the run is still working.
+  focused = false;
+  visibility = "hidden";
+  window.dispatchEvent(new Event("blur"));
+  document.dispatchEvent(new Event("visibilitychange"));
+
+  const completedAt = "2026-01-03T00:00:00.000Z";
+  registry.set(shellAtom(shellKey(threadC)), {
+    environmentId: threadC.environmentId,
+    id: threadC.threadId,
+    updatedAt: completedAt,
+    lastVisitedAt: "2026-01-02T00:00:00.000Z",
+    latestRun: { completedAt },
+  });
+  vi.advanceTimersByTime(60_000);
+
+  expect(visitedThreadIds()).toEqual(["c"]);
+
+  focused = true;
+  visibility = "visible";
+  document.dispatchEvent(new Event("visibilitychange"));
+  window.dispatchEvent(new Event("focus"));
+
+  expect(visitedThreadIds()).toEqual(["c", "c"]);
 });

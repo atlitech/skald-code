@@ -658,12 +658,11 @@ function ThreadRouteContent(
     environmentId: selectedThread?.environmentId ?? null,
     cwd: selectedThreadCwd,
   };
-  const gitActionProgress = useGitActionProgress(
-    gitActionProgressTarget,
+  const gitActionThreadRef =
     selectedThread === null
       ? null
-      : { environmentId: selectedThread.environmentId, threadId: selectedThread.id },
-  );
+      : { environmentId: selectedThread.environmentId, threadId: selectedThread.id };
+  const gitActionProgress = useGitActionProgress(gitActionProgressTarget, gitActionThreadRef);
 
   const handleOpenGitInspector = () => {
     navigation.setParams({ inspector: undefined });
@@ -1105,7 +1104,7 @@ function ThreadRouteContent(
       />
       <GitActionProgressOverlay
         progress={gitActionProgress}
-        onDismiss={dismissGitActionResult}
+        onDismiss={() => dismissGitActionResult(gitActionThreadRef)}
         onOpenPullRequest={openPullRequest}
       />
 

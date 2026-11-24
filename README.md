@@ -34,7 +34,7 @@ vp run dev
 ```
 
 See [AGENTS.md](AGENTS.md) for isolated development state and verification, and
-[the architecture overview](docs/internals/overview.md) for the codebase.
+[the architecture overview](docs/internals/01_architecture.md) for the codebase.
 
 Skald Code's SVG artwork comes from the [Atli brand system](https://github.com/atlitech/atli/tree/main/brand).
 Run `vp run icons:export:skald` to regenerate its platform icons, or
