@@ -4,6 +4,9 @@ inputs:
   platform:
     description: android or ios
     required: true
+  source-ref:
+    description: Commit whose personal EAS profile selects the iOS compiler
+    default: HEAD
 runs:
   using: composite
   steps:
@@ -19,15 +22,26 @@ runs:
     - if: inputs.platform == 'android'
       shell: bash
       run: sdkmanager 'platforms;android-36' 'build-tools;36.0.0' 'ndk;27.1.12297006' 'cmake;3.22.1'
+    - id: xcode
+      if: inputs.platform == 'ios'
+      shell: bash
+      env:
+        SOURCE_REF: ${{ inputs.source-ref }}
+      run: |
+        set -euo pipefail
+        version=$(git show "$SOURCE_REF:apps/mobile/eas.json" | jq -er '.build.personal.ios.image | capture("-xcode-(?<version>[0-9]+(?:[.][0-9]+)+)$").version')
+        echo "version=$version" >> "$GITHUB_OUTPUT"
     - if: inputs.platform == 'ios'
       uses: maxim-lobanov/setup-xcode@v1
       with:
-        xcode-version: "27.0"
+        xcode-version: ${{ steps.xcode.outputs.version }}
     - if: inputs.platform == 'ios'
       shell: bash
+      env:
+        XCODE_VERSION: ${{ steps.xcode.outputs.version }}
       run: |
         set -euo pipefail
-        xcodebuild -version | head -1 | grep -x 'Xcode 27.0'
+        xcodebuild -version | grep -Fx "Xcode $XCODE_VERSION"
         xcrun --find altool
         pod --version
         fastlane --version

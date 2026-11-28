@@ -61,11 +61,21 @@ jobs:
       GH_TOKEN: ${{ github.token }}
       TAG: ${{ inputs.tag }}
     steps:
-      - name: Checkout complete source
+      - name: Checkout release workflow tooling
         uses: actions/checkout@v6
         with:
-          ref: ${{ needs.resolve.outputs.sha }}
+          ref: ${{ github.sha }}
           fetch-depth: 0
+
+      - uses: ./.github/actions/setup-mobile-worker
+        with:
+          platform: ${{ matrix.platform }}
+          source-ref: ${{ needs.resolve.outputs.sha }}
+
+      - name: Checkout published release source
+        env:
+          RELEASE_SHA: ${{ needs.resolve.outputs.sha }}
+        run: git checkout --detach "$RELEASE_SHA"
 
       - name: Setup Vite+
         uses: voidzero-dev/setup-vp@250f29ce396baf5e8f24498e17c0dfdebabc26eb # v1
@@ -81,10 +91,6 @@ jobs:
         run: |
           pnpm_version="$(node --print "require('./package.json').packageManager.split('@').pop()")"
           echo "$HOME/.vite-plus/package_manager/pnpm/$pnpm_version/pnpm/bin" >> "$GITHUB_PATH"
-
-      - uses: ./.github/actions/setup-mobile-worker
-        with:
-          platform: ${{ matrix.platform }}
 
       - name: Setup EAS
         uses: expo/expo-github-action@v8
