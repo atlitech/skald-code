@@ -181,8 +181,8 @@ describe("parseElicitationForm", () => {
       [
         ["limit", false],
         ["ratio", false],
-        ["retries", undefined],
-        ["threshold", undefined],
+        ["retries", true],
+        ["threshold", true],
       ],
     );
     assert.deepStrictEqual(form.content({ limit: "", ratio: "", retries: "3", threshold: "0.5" }), {
@@ -212,8 +212,8 @@ describe("parseElicitationForm", () => {
       [
         ["extras", false],
         ["mode", false],
-        ["confirm", undefined],
-        ["tier", undefined],
+        ["confirm", true],
+        ["tier", true],
       ],
     );
     assert.deepStrictEqual(form.content({ confirm: "true", tier: "pro" }), {

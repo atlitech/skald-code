@@ -275,7 +275,6 @@ export function parseElicitationForm(
       id,
       header: text(property.title) ?? `Question ${questions.length + 1}`,
       question: text(property.description) ?? message,
-      required: required.has(id),
       ...metadata,
       ...(companions.has(id)
         ? {
@@ -289,10 +288,7 @@ export function parseElicitationForm(
         : { allowCustomAnswer: allowOther && kind === "choice" }),
       ...(kind === "multiChoice" ? { multiSelect: true } : {}),
       // An empty selection answers "none" unless the schema demands a choice.
-      ...(field?.kind === "multiChoice" && field.minItems > 0 && required.has(id)
-        ? { required: true }
-        : {}),
-      ...(kind !== "multiChoice" && !required.has(id) ? { required: false } : {}),
+      required: required.has(id) && (field?.kind !== "multiChoice" || field.minItems > 0),
     });
   }
   return {
