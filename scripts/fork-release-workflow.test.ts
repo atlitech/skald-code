@@ -489,7 +489,13 @@ describe("fork mobile delivery and retry", () => {
       const body = job(name, mobileDelivery);
       const text = body.join("\n");
       expect(needsOf(body)).toContain("resolve");
-      expect(text).toContain("ref: ${{ needs.resolve.outputs.sha }}");
+      const steps = stepsOf(body);
+      const setup = stepIndex(steps, /uses: .\/\.github\/actions\/setup-mobile-worker/);
+      const checkout = stepIndex(steps, /git checkout --detach "\$RELEASE_SHA"/);
+      expect(steps[setup]).toContain("source-ref: ${{ needs.resolve.outputs.sha }}");
+      expect(steps[checkout]).toContain("RELEASE_SHA: ${{ needs.resolve.outputs.sha }}");
+      expect(checkout).toBeGreaterThan(setup);
+      expect(checkout).toBeLessThan(stepIndex(steps, /name: Install dependencies/));
       expect(text).toContain("fetch-depth: 0");
       expect(text).not.toMatch(/sparse-checkout|filter: blob:none/);
       expect(text).not.toMatch(/--latest|xcodebuild/);
