@@ -225,8 +225,6 @@ const makeHarness = Effect.fn("test.make_boot_service_harness")(function* (
     lingerStartsManager: boolean;
     enabled: boolean;
     active: boolean;
-    /** Whether `launchctl print` still finds the launch agent in its domain. */
-    loaded: boolean;
     /** systemd refuses starts until `reset-failed`, as after `StartLimitBurst` trips. */
     startLimitHit: boolean;
     /** A Windows launcher: it holds its lock until its task ends. */
@@ -241,7 +239,6 @@ const makeHarness = Effect.fn("test.make_boot_service_harness")(function* (
     lingerStartsManager: true,
     enabled: true,
     active: true,
-    loaded: true,
     startLimitHit: false,
   };
   const runner = ProcessRunner.ProcessRunner.of({
@@ -314,7 +311,7 @@ const makeHarness = Effect.fn("test.make_boot_service_harness")(function* (
       // A timed-out stop may still stop the service.
       if (
         command === "systemctl --user stop t3code.service" ||
-        command.startsWith("launchctl bootout --wait ")
+        (!failed && command.startsWith("launchctl bootout --wait "))
       ) {
         control.active = false;
       }
@@ -368,7 +365,7 @@ const makeHarness = Effect.fn("test.make_boot_service_harness")(function* (
                   control.linger === undefined) ||
                 (input.args[1] === "is-active" && !control.active) ||
                 (input.args[1] === "is-enabled" && !control.enabled) ||
-                (input.command === "launchctl" && input.args[0] === "print" && !control.loaded)
+                (input.command === "launchctl" && input.args[0] === "print" && !control.active)
               ? 1
               : 0,
         ),
@@ -1375,7 +1372,7 @@ process.disconnect();
       yield* service.install();
       commands.length = 0;
       control.failCommand = "launchctl bootout --wait gui/501/com.t3tools.t3code.service";
-      control.loaded = false;
+      control.active = false;
 
       expect(yield* service.stop).toBe(true);
       expect(commands).toEqual([
@@ -1926,7 +1923,7 @@ process.disconnect();
     Effect.gen(function* () {
       const { service, control } = yield* makeHarness("darwin");
       yield* service.install();
-      control.loaded = false;
+      control.active = false;
       control.failCommand = "launchctl bootout --wait gui/501/com.t3tools.t3code.service";
 
       yield* service.install();
