@@ -220,9 +220,11 @@ const makeHarness = Effect.fn("makePullRequestsToolkitHarness")(function* (
     }),
     Layer.mock(GitManager.GitManager)(options.git ?? {}),
     Layer.succeed(SecureRandom.SecureRandom, testCrypto),
-    ServerSettings.layerTest({}, options.managedPolicy),
+    ServerSettings.layerTest(
+      { enablePullRequestWatch: options.enablePullRequestWatch ?? true },
+      options.managedPolicy,
+    ),
     McpToolAccessTestkit.liveThreadsLayer,
-    ServerSettings.layerTest({ enablePullRequestWatch: options.enablePullRequestWatch ?? true }),
   );
   const toolkit = yield* PullRequestsToolkit.pipe(
     Effect.provide(
