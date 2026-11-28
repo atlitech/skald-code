@@ -13,7 +13,7 @@ import { AsyncResult, Atom, AtomRegistry } from "effect/reactivity";
 import { expect, it, vi } from "vite-plus/test";
 import { page, userEvent } from "vite-plus/test/browser";
 
-import { act, fakeTimers, render } from "../../test/render";
+import { act, render } from "../../test/render";
 import { appAtomRegistry } from "../rpc/atomRegistry";
 import { orchestrationEnvironment } from "../state/orchestration";
 import { environmentSession } from "../state/session";
@@ -63,9 +63,11 @@ it("loads server parents, retries search and keeps a failed move open until retr
   let answer: AsyncResult.AsyncResult<OrchestrationV2ListThreadGroupingParentsResult, Error> =
     AsyncResult.initial(true);
   const queryAtom = Atom.make(() => answer);
+  const searchReply = Promise.withResolvers<OrchestrationV2ListThreadGroupingParentsResult>();
+  const searchResult = Atom.make(Effect.promise(() => searchReply.promise));
   using query = vi
     .spyOn(orchestrationEnvironment, "listThreadGroupingParents")
-    .mockImplementation(() => queryAtom);
+    .mockImplementation(({ input }) => (input.query ? searchResult : queryAtom));
   const firstMove = Deferred.makeUnsafe<never, OrchestrationV2DispatchCommandError>();
   const retryMove = Deferred.makeUnsafe<{ sequence: number }>();
   using move = vi
@@ -90,18 +92,18 @@ it("loads server parents, retries search and keeps a failed move open until retr
   await expect
     .element(page.getByText("More threads are available. Refine your search."))
     .toBeVisible();
-  using _timers = fakeTimers();
   await userEvent.fill(
     page.getByRole("textbox", { name: "Find a parent thread" }),
     "Older release",
   );
   await expect.element(page.getByText("Finding threads…")).toBeVisible();
-  await act(() => vi.advanceTimersByTime(180));
+  searchReply.resolve({ threads: [target], hasMore: false });
+  const candidate = page.getByRole("button", { name: target.title });
+  await expect.element(candidate).toBeVisible();
   expect(query).toHaveBeenLastCalledWith({
     environmentId: threadRef.environmentId,
     input: { threadId: threadRef.threadId, query: "Older release" },
   });
-  const candidate = page.getByRole("button", { name: target.title });
   await userEvent.click(candidate);
   await expect.element(candidate).toBeDisabled();
   await expect.element(page.getByRole("button", { name: "Cancel", exact: true })).toBeDisabled();
