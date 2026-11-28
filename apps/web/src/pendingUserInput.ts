@@ -140,22 +140,12 @@ function countAnsweredPendingUserInputQuestions(
 
 type PendingUserInputQuestion = UserInputQuestion & { readonly required?: boolean | undefined };
 
-function isPendingUserInputQuestionUnresolved(
-  question: PendingUserInputQuestion,
-  draft: PendingUserInputDraftAnswer | undefined,
-): boolean {
-  return (
-    resolvePendingUserInputAnswer(question, draft) === null &&
-    (question.required !== false || draft?.attachmentsBlocked === true)
-  );
-}
-
 export function findFirstUnansweredPendingUserInputQuestionIndex(
   questions: ReadonlyArray<PendingUserInputQuestion>,
   draftAnswers: Record<string, PendingUserInputDraftAnswer>,
 ): number {
-  const index = questions.findIndex((question) =>
-    isPendingUserInputQuestionUnresolved(question, draftAnswers[question.id]),
+  const index = questions.findIndex(
+    (question) => buildPendingUserInputAnswers([question], draftAnswers) === null,
   );
   return index === -1 ? Math.max(questions.length - 1, 0) : index;
 }
@@ -197,6 +187,7 @@ export function derivePendingUserInputProgress<Q extends UserInputQuestion>(
     isLastQuestion,
     isComplete: buildPendingUserInputAnswers(questions, draftAnswers) !== null,
     canAdvance:
-      activeQuestion !== null && !isPendingUserInputQuestionUnresolved(activeQuestion, activeDraft),
+      activeQuestion !== null &&
+      buildPendingUserInputAnswers([activeQuestion], draftAnswers) !== null,
   };
 }
